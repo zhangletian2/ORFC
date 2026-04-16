@@ -1,0 +1,67 @@
+
+######################################################################
+# Feature Codec Experiment (OrthogonalTransform + PQ)
+# layer=blk20 (idx=20), K=256, emb=8, bt=1024
+# transform: all trainable
+# epochs=100, lr=0.0003, λ=0.5, τ=0.5→0.005
+# max_train=5000, batch=32
+# 2026-02-24 10:05:57
+######################################################################
+
+Data: train=5000, test=500
+  并行加载特征 (workers=16)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:  28%|██▊       | 1393/5000 [00:00<00:00, 13794.19it/s]Loading:  55%|█████▌    | 2773/5000 [00:00<00:00, 4096.49it/s] Loading:  70%|███████   | 3502/5000 [00:00<00:00, 3528.07it/s]Loading:  80%|████████  | 4021/5000 [00:01<00:00, 3275.75it/s]Loading:  89%|████████▉ | 4441/5000 [00:01<00:00, 3119.96it/s]Loading:  96%|█████████▌| 4805/5000 [00:01<00:00, 3006.18it/s]Loading: 100%|██████████| 5000/5000 [00:01<00:00, 3486.16it/s]
+  并行加载特征 (workers=16)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  54%|█████▍    | 270/500 [00:00<00:00, 2637.52it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 1911.06it/s]
+  D=1024, D'=1024, T=257, G=128, d=8
+  bits/token=1024
+
+Loading CLIP ViT-L/14 (classnames=/data4/workspace/zlt/CPAO_cls/dataset/imagenet/classnames.txt)...
+  Tail: 3 blocks (blk21..blk23) + norm
+
+============================================================
+  [Standard OPQ] baseline
+============================================================
+    OPQ done: MSE=0.06406915 (101.7s)
+    OPQ empirical ppl=225.7 (for prior init)
+  * Standard OPQ Acc = 0.7800
+  * Standard OPQ ΔL_ref = 48932.6
+
+============================================================
+  [Codec] K=256, λ=0.5, bt=1024, epochs=100, τ=0.5→0.005
+============================================================
+  Warm-start from OPQ (transform + codebooks)
+  log_prior init from OPQ empirical frequency
+  Trainable params: 818,688
+  Orthogonal transform: ||R'R-I||=5.53e-04
+  Soft PQ: τ 0.50 → 0.0050 (exponential)
+  Pre-computing teacher outputs (5000 images)...
+  Teacher cache: 5.3 GB CPU (45.0s)
+  ep   0/100  D=110780.9  ppl=9.8  R=832.79b/t  λD=55390.5  dead=3119  τ=0.5000  val=102926.2  (23.4s)
+  ep  10/100  D=70543.8  ppl=31.6  R=783.17b/t  λD=35271.9  dead=25656  τ=0.3140  val=69430.0  (24.6s)
+  ep  20/100  D=67097.8  ppl=33.2  R=727.51b/t  λD=33548.9  dead=27409  τ=0.1972  val=66223.8  (23.9s)
+  ep  30/100  D=65836.1  ppl=33.4  R=698.34b/t  λD=32918.0  dead=27802  τ=0.1239  val=65088.8  (23.5s)
+  ep  40/100  D=64900.1  ppl=33.4  R=682.53b/t  λD=32450.0  dead=27945  τ=0.0778  val=64150.0  (23.5s)
+  ep  50/100  D=64101.4  ppl=33.3  R=673.61b/t  λD=32050.7  dead=28027  τ=0.0489  val=63469.1  (23.2s)
+  ep  60/100  D=63455.6  ppl=33.3  R=668.54b/t  λD=31727.8  dead=28061  τ=0.0307  val=62902.5  (23.3s)
+  ep  70/100  D=62943.7  ppl=33.2  R=665.70b/t  λD=31471.8  dead=28075  τ=0.0193  val=62453.3  (23.2s)
+  ep  80/100  D=62525.8  ppl=33.2  R=664.26b/t  λD=31262.9  dead=28084  τ=0.0121  val=62102.4  (23.5s)
+  ep  90/100  D=62223.4  ppl=33.2  R=663.70b/t  λD=31111.7  dead=28085  τ=0.0076  val=61854.4  (23.4s)
+  ep  99/100  D=62084.5  ppl=33.2  R=663.55b/t  λD=31042.3  dead=28086  τ=0.0050  val=61748.6  (23.0s)
+  Codec training: 2460.4s
+  * Codec Acc = 0.7560 (d=-0.0240)
+  * Codec ΔL_ref = 64089.0 (d=+15156.4)
+  Computing train histogram PMF...
+  * Rate: xent=663.66  xent_train=638.78  H_emp=638.28  max=1024  rANS=663.71  rANS_train=640.13  bits/token
+
+============================================================
+  Summary: blk20 K=256 emb=8  bt=1024
+  bits/token: OPQ=1024 (G=128)  codec=1024 (G=128)
+  Standard OPQ  Acc=0.7800  ΔL_ref=48932.6
+  Codec         Acc=0.7560  ΔL_ref=64089.0
+  Δ(Acc)=-0.0240  Δ(ΔL_ref)=+15156.4
+  Rate: xent=663.66  xent_train=638.78  H_emp=638.28  max=1024  rANS=663.71 bits/token
+  Train time: std=101.7s  codec=2460.4s
+============================================================
+
+Results saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/results/soft_pq/blk20_K256_emb8_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.json

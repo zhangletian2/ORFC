@@ -1,0 +1,18 @@
+==============================================
+ DOPQ Ablation: 14 experiments on GPUs 0-3
+ 2026-02-27 01:07:14
+==============================================
+[01:07:14] Round 1/4: freeze-R ×3 + freeze-C ×1
+[01:39:21] Round 1 done.
+[01:39:21] Round 2/4: freeze-C ×3 + hard-PQ ×1
+[02:11:49] Round 2 done.
+[02:11:49] Round 3/4: hard-PQ ×3 + MSE ×1
+[02:41:08] Round 3 done.
+[02:41:08] Round 4/4: MSE ×2
+[02:56:21] Round 4 done.
+==============================================
+ All 14 ablation experiments complete!
+ Results: coding/vq/v3.4/results/soft_pq/dinov2_vitl14/
+ Logs:    /data4/workspace/zlt/featcodec/coding/vq/v3.4/logs/logs_ablation/
+ 2026-02-27 02:56:21
+==============================================

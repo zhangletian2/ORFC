@@ -1,0 +1,33 @@
+
+######################################################################
+# Figure 3: Pairwise interaction analysis
+# layer=blk05, K=16, emb=32
+# n_images=200, sample_pairs=500
+# 2026-02-26 01:36:07
+######################################################################
+  Data: train=5000, test=500
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:   7%|▋         | 345/5000 [00:00<00:01, 3403.62it/s]Loading:  14%|█▎        | 686/5000 [00:00<00:01, 3229.92it/s]Loading:  20%|██        | 1010/5000 [00:00<00:01, 3166.45it/s]Loading:  27%|██▋       | 1327/5000 [00:00<00:01, 3153.45it/s]Loading:  33%|███▎      | 1643/5000 [00:00<00:01, 3079.82it/s]Loading:  39%|███▉      | 1952/5000 [00:00<00:00, 3074.37it/s]Loading:  45%|████▌     | 2260/5000 [00:00<00:00, 3062.06it/s]Loading:  51%|█████▏    | 2567/5000 [00:00<00:00, 3007.50it/s]Loading:  57%|█████▋    | 2868/5000 [00:00<00:00, 2953.53it/s]Loading:  63%|██████▎   | 3164/5000 [00:01<00:00, 2929.18it/s]Loading:  69%|██████▉   | 3458/5000 [00:01<00:00, 2819.85it/s]Loading:  75%|███████▍  | 3741/5000 [00:01<00:00, 2805.86it/s]Loading:  81%|████████  | 4036/5000 [00:01<00:00, 2844.66it/s]Loading:  86%|████████▋ | 4322/5000 [00:01<00:00, 2845.30it/s]Loading:  93%|█████████▎| 4626/5000 [00:01<00:00, 2892.90it/s]Loading:  98%|█████████▊| 4916/5000 [00:01<00:00, 2880.26it/s]Loading: 100%|██████████| 5000/5000 [00:01<00:00, 2964.11it/s]
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  57%|█████▋    | 287/500 [00:00<00:00, 2838.83it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 2885.89it/s]
+  Loading DINOv2 ViT-L/14...
+
+  Computing OPQ...
+  σ_ref=0.5550
+
+  === Interaction: identity ===
+    Interaction ratio: mean=0.948  median=0.942  std=0.030
+    Percentiles: p10=0.921  p25=0.930  p75=0.955  p90=0.985
+    Time: 380.7s
+
+  === Interaction: opq ===
+    Interaction ratio: mean=0.956  median=0.952  std=0.025
+    Percentiles: p10=0.928  p25=0.940  p75=0.969  p90=0.986
+    Time: 377.9s
+
+  === Interaction: learned ===
+    Interaction ratio: mean=0.954  median=0.949  std=0.029
+    Percentiles: p10=0.927  p25=0.937  p75=0.963  p90=0.978
+    Time: 377.1s
+
+  Saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/results/analysis_intro/interaction_blk05_K16_emb32_n200_p500.json

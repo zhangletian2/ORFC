@@ -1,0 +1,94 @@
+# /home/user/anaconda3/envs/featcodec2/bin/python /data4/workspace/zlt/featcodec/coding/vq/v3.4/run_soft_pq.py --layer blk20 --K 256 --embedding_dim 16 --lmbda 0.5 --seed 44 --backbone dinov2_vitl14 --bottleneck_dim 1024 --batch_size 32 --max_train_images 5000 --lr 0.0003 --epochs 100 --warm_start_opq --eval_seg --tau_start 0.5 --tau_end 0.005 --tau_schedule exponential
+# started: 2026-03-06 12:03:56.166844
+
+
+######################################################################
+# Feature Codec Experiment (OrthogonalTransform + PQ)
+# layer=blk20 (idx=20), K=256, emb=16, bt=1024
+# transform: all trainable
+# epochs=100, lr=0.0003, λ=0.5, τ=0.5→0.005
+# max_train=5000, batch=32
+# 2026-03-06 12:04:00
+######################################################################
+
+Data: train=5000, test=500
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:   7%|▋         | 362/5000 [00:00<00:01, 3605.99it/s]Loading:  14%|█▍        | 723/5000 [00:00<00:01, 3445.78it/s]Loading:  21%|██▏       | 1069/5000 [00:00<00:01, 3420.26it/s]Loading:  28%|██▊       | 1412/5000 [00:00<00:01, 3386.51it/s]Loading:  35%|███▌      | 1751/5000 [00:00<00:01, 3232.43it/s]Loading:  42%|████▏     | 2078/5000 [00:00<00:00, 3231.32it/s]Loading:  48%|████▊     | 2402/5000 [00:00<00:00, 3206.75it/s]Loading:  54%|█████▍    | 2724/5000 [00:00<00:00, 3120.94it/s]Loading:  61%|██████    | 3059/5000 [00:00<00:00, 3157.37it/s]Loading:  68%|██████▊   | 3376/5000 [00:01<00:00, 3104.58it/s]Loading:  74%|███████▎  | 3687/5000 [00:01<00:00, 3084.53it/s]Loading:  80%|████████  | 4005/5000 [00:01<00:00, 3108.64it/s]Loading:  87%|████████▋ | 4331/5000 [00:01<00:00, 3149.97it/s]Loading:  93%|█████████▎| 4674/5000 [00:01<00:00, 3226.84it/s]Loading: 100%|█████████▉| 4997/5000 [00:01<00:00, 3217.19it/s]Loading: 100%|██████████| 5000/5000 [00:01<00:00, 3215.12it/s]
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  63%|██████▎   | 313/500 [00:00<00:00, 3121.00it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 3088.15it/s]
+  D=1024, D'=1024, T=257, G=64, d=16
+  bits/token=512
+
+Loading DINOv2 (dinov2_vitl14)...
+  Tail: 3 blocks (blk21..blk23) + norm
+
+============================================================
+  [Standard OPQ] baseline
+============================================================
+    OPQ done: MSE=0.13232270 (42.6s)
+    OPQ empirical ppl=245.6 (for prior init)
+  * Standard OPQ Acc = 0.9280
+  * Standard OPQ ΔL_ref = 158739.1
+
+============================================================
+  [Codec] K=256, λ=0.5, bt=1024, epochs=100, τ=0.5→0.005
+============================================================
+  Warm-start from OPQ (transform + codebooks)
+  log_prior init from OPQ empirical frequency
+  Trainable params: 802,304
+  Orthogonal transform: ||R'R-I||=7.78e-04
+  Soft PQ: τ 0.50 → 0.0050 (exponential)
+  Pre-computing teacher outputs (5000 images)...
+  Teacher cache: 5.3 GB CPU (50.9s)
+  ep   0/100  D=156683.7  ppl=85.2  R=480.58b/t  λD=78341.8  dead=25  τ=0.5000  val=137142.6  (16.0s)
+  ep  10/100  D=96321.9  ppl=195.6  R=500.96b/t  λD=48160.9  dead=192  τ=0.3140  val=95729.6  (16.4s)
+  ep  20/100  D=89257.2  ppl=209.8  R=501.85b/t  λD=44628.6  dead=609  τ=0.1972  val=88969.3  (15.6s)
+  ep  30/100  D=85637.5  ppl=211.8  R=501.27b/t  λD=42818.8  dead=938  τ=0.1239  val=85521.7  (16.8s)
+  ep  40/100  D=83125.1  ppl=212.0  R=500.71b/t  λD=41562.5  dead=1113  τ=0.0778  val=83004.5  (16.7s)
+  ep  50/100  D=81275.2  ppl=211.9  R=500.30b/t  λD=40637.6  dead=1193  τ=0.0489  val=81394.8  (16.6s)
+  ep  60/100  D=79708.9  ppl=211.8  R=500.04b/t  λD=39854.5  dead=1246  τ=0.0307  val=79912.0  (15.8s)
+  ep  70/100  D=78323.6  ppl=211.7  R=499.89b/t  λD=39161.8  dead=1257  τ=0.0193  val=78715.5  (15.9s)
+  ep  80/100  D=77099.3  ppl=211.7  R=499.81b/t  λD=38549.6  dead=1256  τ=0.0121  val=77596.2  (16.3s)
+  ep  90/100  D=76099.8  ppl=211.7  R=499.78b/t  λD=38049.9  dead=1256  τ=0.0076  val=76743.9  (16.3s)
+  ep  99/100  D=75632.0  ppl=211.7  R=499.77b/t  λD=37816.0  dead=1257  τ=0.0050  val=76385.7  (16.1s)
+  Codec training: 1714.1s
+  Codec saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/checkpoints/dinov2_vitl14/blk20_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s44.pt
+  * Codec Acc = 0.9580 (d=+0.0300)
+  * Codec ΔL_ref = 94382.3 (d=-64356.8)
+  Computing train histogram PMF...
+  * Rate: xent=499.79  xent_train=494.17  H_emp=493.38  max=512  rANS=499.93  rANS_train=494.30  bits/token
+
+============================================================
+  [Segmentation] VOC2012 mIoU evaluation
+  seg features: /data4/workspace/zlt/featcodec/features/voc2012_100/dinov2_vitl14/blk20
+============================================================
+  加载 backbone + 分割头 (dinov2_vitl14)...
+  图片数: 100, 特征目录: /data4/workspace/zlt/featcodec/features/voc2012_100/dinov2_vitl14/blk20
+  开始 slide inference...
+Seg eval:   0%|          | 0/100 [00:00<?, ?it/s]Seg eval:   1%|          | 1/100 [00:00<00:25,  3.86it/s]Seg eval:   4%|▍         | 4/100 [00:00<00:08, 11.41it/s]Seg eval:   7%|▋         | 7/100 [00:00<00:06, 15.21it/s]Seg eval:  10%|█         | 10/100 [00:00<00:05, 17.32it/s]Seg eval:  13%|█▎        | 13/100 [00:00<00:04, 18.92it/s]Seg eval:  16%|█▌        | 16/100 [00:00<00:04, 20.02it/s]Seg eval:  19%|█▉        | 19/100 [00:01<00:03, 20.99it/s]Seg eval:  22%|██▏       | 22/100 [00:01<00:03, 21.06it/s]Seg eval:  25%|██▌       | 25/100 [00:01<00:03, 21.59it/s]Seg eval:  28%|██▊       | 28/100 [00:01<00:03, 21.84it/s]Seg eval:  31%|███       | 31/100 [00:01<00:03, 21.89it/s]Seg eval:  34%|███▍      | 34/100 [00:01<00:03, 21.79it/s]Seg eval:  37%|███▋      | 37/100 [00:01<00:02, 21.70it/s]Seg eval:  40%|████      | 40/100 [00:02<00:02, 21.16it/s]Seg eval:  43%|████▎     | 43/100 [00:02<00:02, 20.76it/s]Seg eval:  46%|████▌     | 46/100 [00:02<00:02, 20.73it/s]Seg eval:  49%|████▉     | 49/100 [00:02<00:02, 21.15it/s]Seg eval:  52%|█████▏    | 52/100 [00:02<00:02, 21.46it/s]Seg eval:  55%|█████▌    | 55/100 [00:02<00:02, 21.65it/s]Seg eval:  58%|█████▊    | 58/100 [00:02<00:01, 21.70it/s]Seg eval:  61%|██████    | 61/100 [00:03<00:01, 22.19it/s]Seg eval:  64%|██████▍   | 64/100 [00:03<00:01, 22.27it/s]Seg eval:  67%|██████▋   | 67/100 [00:03<00:01, 22.14it/s]Seg eval:  70%|███████   | 70/100 [00:03<00:01, 22.19it/s]Seg eval:  73%|███████▎  | 73/100 [00:03<00:01, 21.80it/s]Seg eval:  76%|███████▌  | 76/100 [00:03<00:01, 21.66it/s]Seg eval:  79%|███████▉  | 79/100 [00:03<00:00, 21.87it/s]Seg eval:  82%|████████▏ | 82/100 [00:03<00:00, 22.12it/s]Seg eval:  85%|████████▌ | 85/100 [00:04<00:00, 21.65it/s]Seg eval:  88%|████████▊ | 88/100 [00:04<00:00, 21.57it/s]Seg eval:  91%|█████████ | 91/100 [00:04<00:00, 21.58it/s]Seg eval:  94%|█████████▍| 94/100 [00:04<00:00, 21.57it/s]Seg eval:  97%|█████████▋| 97/100 [00:04<00:00, 21.61it/s]Seg eval: 100%|██████████| 100/100 [00:04<00:00, 21.76it/s]Seg eval: 100%|██████████| 100/100 [00:04<00:00, 20.77it/s]
+  * Standard OPQ mIoU = 0.6661
+  加载 backbone + 分割头 (dinov2_vitl14)...
+  图片数: 100, 特征目录: /data4/workspace/zlt/featcodec/features/voc2012_100/dinov2_vitl14/blk20
+  开始 slide inference...
+Seg eval:   0%|          | 0/100 [00:00<?, ?it/s]Seg eval:   2%|▏         | 2/100 [00:00<00:04, 19.73it/s]Seg eval:   5%|▌         | 5/100 [00:00<00:04, 21.62it/s]Seg eval:   8%|▊         | 8/100 [00:00<00:04, 21.89it/s]Seg eval:  11%|█         | 11/100 [00:00<00:03, 22.31it/s]Seg eval:  14%|█▍        | 14/100 [00:00<00:03, 22.92it/s]Seg eval:  17%|█▋        | 17/100 [00:00<00:03, 23.01it/s]Seg eval:  20%|██        | 20/100 [00:00<00:03, 22.36it/s]Seg eval:  23%|██▎       | 23/100 [00:01<00:03, 22.00it/s]Seg eval:  26%|██▌       | 26/100 [00:01<00:03, 22.11it/s]Seg eval:  29%|██▉       | 29/100 [00:01<00:03, 21.88it/s]Seg eval:  32%|███▏      | 32/100 [00:01<00:03, 21.68it/s]Seg eval:  35%|███▌      | 35/100 [00:01<00:03, 21.62it/s]Seg eval:  38%|███▊      | 38/100 [00:01<00:02, 21.73it/s]Seg eval:  41%|████      | 41/100 [00:01<00:02, 21.38it/s]Seg eval:  44%|████▍     | 44/100 [00:02<00:02, 21.46it/s]Seg eval:  47%|████▋     | 47/100 [00:02<00:02, 21.43it/s]Seg eval:  50%|█████     | 50/100 [00:02<00:02, 21.52it/s]Seg eval:  53%|█████▎    | 53/100 [00:02<00:02, 21.61it/s]Seg eval:  56%|█████▌    | 56/100 [00:02<00:02, 21.58it/s]Seg eval:  59%|█████▉    | 59/100 [00:02<00:01, 21.45it/s]Seg eval:  62%|██████▏   | 62/100 [00:02<00:01, 22.05it/s]Seg eval:  65%|██████▌   | 65/100 [00:02<00:01, 22.04it/s]Seg eval:  68%|██████▊   | 68/100 [00:03<00:01, 22.15it/s]Seg eval:  71%|███████   | 71/100 [00:03<00:01, 22.20it/s]Seg eval:  74%|███████▍  | 74/100 [00:03<00:01, 22.07it/s]Seg eval:  77%|███████▋  | 77/100 [00:03<00:01, 21.93it/s]Seg eval:  80%|████████  | 80/100 [00:03<00:00, 21.48it/s]Seg eval:  83%|████████▎ | 83/100 [00:03<00:00, 21.44it/s]Seg eval:  86%|████████▌ | 86/100 [00:03<00:00, 21.24it/s]Seg eval:  89%|████████▉ | 89/100 [00:04<00:00, 21.33it/s]Seg eval:  92%|█████████▏| 92/100 [00:04<00:00, 21.14it/s]Seg eval:  95%|█████████▌| 95/100 [00:04<00:00, 20.72it/s]Seg eval:  98%|█████████▊| 98/100 [00:04<00:00, 19.72it/s]Seg eval: 100%|██████████| 100/100 [00:04<00:00, 21.52it/s]
+  * Codec       mIoU = 0.7579
+  * Δ(mIoU) = +0.0918
+  Computing VOC seg rate...
+  * VOC Rate: rANS=501.54  rANS_train=499.68  BPFP=0.4898  bits/token
+
+============================================================
+  Summary: blk20 K=256 emb=16  bt=1024
+  bits/token: OPQ=512 (G=64)  codec=512 (G=64)
+  Standard OPQ  Acc=0.9280  ΔL_ref=158739.1
+  Codec         Acc=0.9580  ΔL_ref=94382.3
+  Δ(Acc)=+0.0300  Δ(ΔL_ref)=-64356.8
+  Standard OPQ mIoU=0.6661
+  Codec       mIoU=0.7579
+  Δ(mIoU)=+0.0918
+  Rate: xent=499.79  xent_train=494.17  H_emp=493.38  max=512  rANS=499.93 bits/token
+  Train time: std=42.6s  codec=1714.1s
+============================================================
+
+Results saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/results/soft_pq/dinov2_vitl14/blk20_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s44.json
+
+# OK  elapsed=31.3min

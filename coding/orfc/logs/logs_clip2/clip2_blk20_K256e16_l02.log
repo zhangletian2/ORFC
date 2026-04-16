@@ -1,0 +1,67 @@
+
+######################################################################
+# Feature Codec Experiment (OrthogonalTransform + PQ)
+# layer=blk20 (idx=20), K=256, emb=16, bt=1024
+# transform: all trainable
+# epochs=100, lr=0.0003, λ=0.2, τ=0.5→0.005
+# max_train=5000, batch=32
+# 2026-02-24 16:38:11
+######################################################################
+
+Data: train=5000, test=500
+  并行加载特征 (workers=16)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:  33%|███▎      | 1668/5000 [00:00<00:00, 16574.90it/s]Loading:  67%|██████▋   | 3326/5000 [00:00<00:00, 3787.17it/s] Loading:  83%|████████▎ | 4153/5000 [00:01<00:00, 3178.75it/s]Loading:  94%|█████████▍| 4708/5000 [00:01<00:00, 2226.62it/s]Loading: 100%|██████████| 5000/5000 [00:01<00:00, 2531.85it/s]
+  并行加载特征 (workers=16)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  36%|███▌      | 178/500 [00:00<00:00, 1751.63it/s]Loading:  75%|███████▌  | 376/500 [00:00<00:00, 1883.42it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 1939.62it/s]
+  D=1024, D'=1024, T=257, G=64, d=16
+  bits/token=512
+
+Loading CLIP ViT-L/14 (classnames=/data4/workspace/zlt/CPAO_cls/dataset/imagenet/classnames.txt)...
+  Tail: 3 blocks (blk21..blk23) + norm
+
+============================================================
+  [Standard OPQ] baseline
+============================================================
+    OPQ done: MSE=0.12283672 (46.3s)
+    OPQ empirical ppl=224.1 (for prior init)
+  * Standard OPQ Acc = 0.7540
+  * Standard OPQ ΔL_ref = 85298.6
+
+============================================================
+  [Codec] K=256, λ=0.2, bt=1024, epochs=100, τ=0.5→0.005
+============================================================
+  Warm-start from OPQ (transform + codebooks)
+  log_prior init from OPQ empirical frequency
+  Trainable params: 802,304
+  Orthogonal transform: ||R'R-I||=5.81e-04
+  Soft PQ: τ 0.50 → 0.0050 (exponential)
+  Pre-computing teacher outputs (5000 images)...
+  Teacher cache: 5.3 GB CPU (375.6s)
+  ep   0/100  D=140538.9  ppl=4.9  R=386.68b/t  λD=28107.8  dead=11847  τ=0.5000  val=131350.0  (18.4s)
+  ep  10/100  D=109150.4  ppl=10.4  R=328.40b/t  λD=21830.1  dead=15207  τ=0.3140  val=108140.0  (17.8s)
+  ep  20/100  D=105705.7  ppl=10.5  R=278.56b/t  λD=21141.1  dead=15427  τ=0.1972  val=104777.2  (18.7s)
+  ep  30/100  D=104049.2  ppl=10.5  R=248.33b/t  λD=20809.8  dead=15476  τ=0.1239  val=103133.0  (18.4s)
+  ep  40/100  D=102989.0  ppl=10.5  R=231.24b/t  λD=20597.8  dead=15497  τ=0.0778  val=102156.9  (18.5s)
+  ep  50/100  D=102265.0  ppl=10.5  R=221.63b/t  λD=20453.0  dead=15506  τ=0.0489  val=101535.0  (18.1s)
+  ep  60/100  D=101717.4  ppl=10.5  R=216.46b/t  λD=20343.5  dead=15510  τ=0.0307  val=101016.8  (17.9s)
+  ep  70/100  D=101290.1  ppl=10.4  R=213.68b/t  λD=20258.0  dead=15511  τ=0.0193  val=100648.6  (17.9s)
+  ep  80/100  D=100919.5  ppl=10.4  R=212.28b/t  λD=20183.9  dead=15512  τ=0.0121  val=100337.9  (18.1s)
+  ep  90/100  D=100628.0  ppl=10.4  R=211.77b/t  λD=20125.6  dead=15512  τ=0.0076  val=100081.6  (18.1s)
+  ep  99/100  D=100494.1  ppl=10.4  R=211.63b/t  λD=20098.8  dead=15512  τ=0.0050  val=99979.3  (18.5s)
+  Codec training: 2227.7s
+  * Codec Acc = 0.6200 (d=-0.1340)
+  * Codec ΔL_ref = 100158.2 (d=+14859.7)
+  Computing train histogram PMF...
+  * Rate: xent=211.85  xent_train=192.96  H_emp=192.71  max=512  rANS=211.86  rANS_train=193.80  bits/token
+
+============================================================
+  Summary: blk20 K=256 emb=16  bt=1024
+  bits/token: OPQ=512 (G=64)  codec=512 (G=64)
+  Standard OPQ  Acc=0.7540  ΔL_ref=85298.6
+  Codec         Acc=0.6200  ΔL_ref=100158.2
+  Δ(Acc)=-0.1340  Δ(ΔL_ref)=+14859.7
+  Rate: xent=211.85  xent_train=192.96  H_emp=192.71  max=512  rANS=211.86 bits/token
+  Train time: std=46.3s  codec=2227.7s
+============================================================
+
+Results saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/results/soft_pq/clip_vitl14/blk20_K256_emb16_bt1024_ws_lmbda0.2_tau0.5_lr0.0003_ep100_n5000_s42.json

@@ -1,0 +1,65 @@
+
+######################################################################
+# Feature Codec Experiment (OrthogonalTransform + PQ)
+# layer=blk05 (idx=5), K=4, emb=32, bt=1024
+# transform: all trainable
+# epochs=100, lr=0.0003, λ=0.0, τ=0.5→0.005
+# max_train=5000, batch=32
+# 2026-02-25 12:43:34
+######################################################################
+
+Data: train=5000, test=500
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:   3%|▎         | 147/5000 [00:00<00:05, 851.22it/s]Loading:  15%|█▍        | 740/5000 [00:00<00:01, 3146.61it/s]Loading:  22%|██▏       | 1123/5000 [00:00<00:01, 3009.31it/s]Loading:  29%|██▉       | 1462/5000 [00:00<00:01, 3053.48it/s]Loading:  36%|███▌      | 1791/5000 [00:00<00:01, 2379.34it/s]Loading:  46%|████▋     | 2321/5000 [00:00<00:01, 2611.54it/s]Loading:  52%|█████▏    | 2610/5000 [00:01<00:01, 1962.14it/s]Loading:  71%|███████   | 3527/5000 [00:01<00:00, 2328.01it/s]Loading:  90%|████████▉ | 4491/5000 [00:01<00:00, 3186.83it/s]Loading:  97%|█████████▋| 4843/5000 [00:01<00:00, 3228.80it/s]Loading: 100%|██████████| 5000/5000 [00:01<00:00, 2829.70it/s]
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  68%|██████▊   | 338/500 [00:00<00:00, 3377.91it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 3368.35it/s]
+  D=1024, D'=1024, T=257, G=32, d=32
+  bits/token=64
+
+Loading CLIP ViT-L/14 (classnames=/data4/workspace/zlt/CPAO_cls/dataset/imagenet/classnames.txt)...
+  Tail: 18 blocks (blk6..blk23) + norm
+
+============================================================
+  [Standard OPQ] baseline
+============================================================
+    OPQ done: MSE=0.45025510 (22.8s)
+  * Standard OPQ Acc = 0.1580
+  * Standard OPQ ΔL_ref = 244023.4
+
+============================================================
+  [Codec] K=4, λ=0.0, bt=1024, epochs=100, τ=0.5→0.005
+============================================================
+  Warm-start from OPQ (transform + codebooks)
+  Trainable params: 527,872
+  Orthogonal transform: ||R'R-I||=2.50e-03
+  Soft PQ: τ 0.50 → 0.0050 (exponential)
+  Pre-computing teacher outputs (5000 images)...
+  Teacher cache: 5.3 GB CPU (28.9s)
+  ep   0/100  D=189846.0  ppl=3.8  τ=0.5000  val=172122.3  (55.6s)
+  ep  10/100  D=156139.1  ppl=3.8  τ=0.3140  val=152778.4  (53.4s)
+  ep  20/100  D=153161.2  ppl=3.7  τ=0.1972  val=148891.4  (53.4s)
+  ep  30/100  D=152249.7  ppl=3.7  τ=0.1239  val=149455.7  (53.2s)
+  ep  40/100  D=151559.0  ppl=3.7  τ=0.0778  val=148478.4  (53.4s)
+  ep  50/100  D=150106.6  ppl=3.7  τ=0.0489  val=146783.0  (53.2s)
+  ep  60/100  D=149535.9  ppl=3.7  τ=0.0307  val=146441.8  (53.3s)
+  ep  70/100  D=148278.0  ppl=3.7  τ=0.0193  val=145628.3  (53.3s)
+  ep  80/100  D=146499.6  ppl=3.7  τ=0.0121  val=143861.6  (53.2s)
+  ep  90/100  D=145302.6  ppl=3.7  τ=0.0076  val=142945.6  (53.4s)
+  ep  99/100  D=144303.9  ppl=3.7  τ=0.0050  val=141947.0  (53.4s)
+  Codec training: 5418.1s
+  * Codec Acc = 0.7220 (d=+0.5640)
+  * Codec ΔL_ref = 146801.8 (d=-97221.6)
+  Computing train histogram PMF...
+  * Rate: xent=60.55  xent_train=60.55  H_emp=60.50  max=64  rANS=60.55  rANS_train=60.55  bits/token
+
+============================================================
+  Summary: blk05 K=4 emb=32  bt=1024
+  bits/token: OPQ=64 (G=32)  codec=64 (G=32)
+  Standard OPQ  Acc=0.1580  ΔL_ref=244023.4
+  Codec         Acc=0.7220  ΔL_ref=146801.8
+  Δ(Acc)=+0.5640  Δ(ΔL_ref)=-97221.6
+  Rate: xent=60.55  xent_train=60.55  H_emp=60.50  max=64  rANS=60.55 bits/token
+  Train time: std=22.8s  codec=5418.1s
+============================================================
+
+Results saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/results/soft_pq/clip_vitl14/blk05_K4_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42.json

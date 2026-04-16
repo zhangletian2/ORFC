@@ -1,0 +1,65 @@
+
+######################################################################
+# Feature Codec Experiment (OrthogonalTransform + PQ)
+# layer=blk10 (idx=10), K=8, emb=32, bt=1024
+# transform: all trainable
+# epochs=100, lr=0.0003, λ=0.0, τ=0.5→0.005
+# max_train=5000, batch=32
+# 2026-02-25 13:30:51
+######################################################################
+
+Data: train=5000, test=500
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:   7%|▋         | 342/5000 [00:00<00:01, 3389.42it/s]Loading:  14%|█▎        | 681/5000 [00:00<00:01, 3260.95it/s]Loading:  20%|██        | 1018/5000 [00:00<00:01, 3308.03it/s]Loading:  27%|██▋       | 1350/5000 [00:00<00:01, 3231.56it/s]Loading:  33%|███▎      | 1674/5000 [00:00<00:01, 3180.89it/s]Loading:  40%|███▉      | 1993/5000 [00:00<00:00, 3153.47it/s]Loading:  47%|████▋     | 2329/5000 [00:00<00:00, 3214.88it/s]Loading:  53%|█████▎    | 2657/5000 [00:00<00:00, 3235.13it/s]Loading:  60%|█████▉    | 2987/5000 [00:00<00:00, 3252.86it/s]Loading:  66%|██████▋   | 3313/5000 [00:01<00:00, 3240.94it/s]Loading:  73%|███████▎  | 3638/5000 [00:01<00:00, 3172.08it/s]Loading:  79%|███████▉  | 3957/5000 [00:01<00:00, 3172.04it/s]Loading:  86%|████████▌ | 4299/5000 [00:01<00:00, 3245.82it/s]Loading:  93%|█████████▎| 4653/5000 [00:01<00:00, 3327.79it/s]Loading: 100%|█████████▉| 4987/5000 [00:01<00:00, 3313.99it/s]Loading: 100%|██████████| 5000/5000 [00:01<00:00, 3252.54it/s]
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  64%|██████▎   | 318/500 [00:00<00:00, 3126.07it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 3280.77it/s]
+  D=1024, D'=1024, T=257, G=32, d=32
+  bits/token=96
+
+Loading CLIP ViT-L/14 (classnames=/data4/workspace/zlt/CPAO_cls/dataset/imagenet/classnames.txt)...
+  Tail: 13 blocks (blk11..blk23) + norm
+
+============================================================
+  [Standard OPQ] baseline
+============================================================
+    OPQ done: MSE=0.50235856 (58.3s)
+  * Standard OPQ Acc = 0.4380
+  * Standard OPQ ΔL_ref = 224679.4
+
+============================================================
+  [Codec] K=8, λ=0.0, bt=1024, epochs=100, τ=0.5→0.005
+============================================================
+  Warm-start from OPQ (transform + codebooks)
+  Trainable params: 531,968
+  Orthogonal transform: ||R'R-I||=1.05e-03
+  Soft PQ: τ 0.50 → 0.0050 (exponential)
+  Pre-computing teacher outputs (5000 images)...
+  Teacher cache: 5.3 GB CPU (70.0s)
+  ep   0/100  D=122398.3  ppl=7.6  τ=0.5000  val=105574.0  (39.3s)
+  ep  10/100  D=92936.7  ppl=7.6  τ=0.3140  val=89864.5  (39.0s)
+  ep  20/100  D=89655.4  ppl=7.6  τ=0.1972  val=86941.9  (39.1s)
+  ep  30/100  D=88391.2  ppl=7.6  τ=0.1239  val=86137.8  (40.4s)
+  ep  40/100  D=87495.3  ppl=7.6  τ=0.0778  val=85245.5  (39.0s)
+  ep  50/100  D=86841.9  ppl=7.6  τ=0.0489  val=85119.9  (39.2s)
+  ep  60/100  D=85807.4  ppl=7.6  τ=0.0307  val=84257.4  (39.3s)
+  ep  70/100  D=84557.8  ppl=7.6  τ=0.0193  val=82984.4  (39.4s)
+  ep  80/100  D=83222.1  ppl=7.6  τ=0.0121  val=81881.3  (39.3s)
+  ep  90/100  D=81858.7  ppl=7.6  τ=0.0076  val=80653.2  (39.3s)
+  ep  99/100  D=80953.6  ppl=7.6  τ=0.0050  val=79876.4  (39.2s)
+  Codec training: 4042.5s
+  * Codec Acc = 0.7700 (d=+0.3320)
+  * Codec ΔL_ref = 91145.8 (d=-133533.6)
+  Computing train histogram PMF...
+  * Rate: xent=93.42  xent_train=93.42  H_emp=93.34  max=96  rANS=93.42  rANS_train=93.42  bits/token
+
+============================================================
+  Summary: blk10 K=8 emb=32  bt=1024
+  bits/token: OPQ=96 (G=32)  codec=96 (G=32)
+  Standard OPQ  Acc=0.4380  ΔL_ref=224679.4
+  Codec         Acc=0.7700  ΔL_ref=91145.8
+  Δ(Acc)=+0.3320  Δ(ΔL_ref)=-133533.6
+  Rate: xent=93.42  xent_train=93.42  H_emp=93.34  max=96  rANS=93.42 bits/token
+  Train time: std=58.3s  codec=4042.5s
+============================================================
+
+Results saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/results/soft_pq/clip_vitl14/blk10_K8_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42.json

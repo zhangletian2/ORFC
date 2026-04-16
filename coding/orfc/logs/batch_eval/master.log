@@ -1,0 +1,235 @@
+nohup: ignoring input
+
+  dinov2_vitl14: 103 checkpoints in /data4/workspace/zlt/featcodec/coding/vq/v3.4/checkpoints/dinov2_vitl14
+
+======================================================================
+  Batch Eval Scheduler
+  Jobs to run: 67   Skipped (JSON exists): 36
+  GPUs: [0, 1, 2, 3, 4, 5]
+======================================================================
+
+  GPU 0  (11 jobs, ~84 min):
+     12 min  vitl14_blk05_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+     12 min  vitl14_blk05_K64_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0005_ep100_n5000_s42
+     10 min  vitl14_blk10_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+      8 min  vitl14_blk15_K64_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0005_ep100_n5000_s42
+      6 min  vitl14_blk20_K16_emb32_bt1024_ws_lmbda0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K16_emb32_bt1024_ws_lmbda1.0_tau1.0_lr0.0001_ep100_n5000_s42
+      6 min  vitl14_blk20_K256_emb16_bt1024_ws_lmbda0.3_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K256_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K64_emb16_bt1024_ws_mse_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K8_emb32_bt1024_ws_lmbda0.5_lr0.0003_ep100_n5000_s42
+
+  GPU 1  (11 jobs, ~84 min):
+     12 min  vitl14_blk05_K256_emb16_bt1024_ws_lmbda0.2_tau0.5_lr0.0003_ep100_n5000_s42
+     12 min  vitl14_blk05_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+      8 min  vitl14_blk15_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+      8 min  vitl14_blk15_K256_emb16_bt1024_ws_lmbda0.2_tau0.5_lr0.0003_ep100_n5000_s42
+      8 min  vitl14_blk15_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K16_emb32_bt1024_ws_lmbda2.0_tau2.0_lr0.0001_ep100_n5000_s42
+      6 min  vitl14_blk20_K256_emb16_bt1024_ws_lmbda0.5_fzR_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K256_emb32_bt1024_ws_tau0.5_lr0.0005_ep100_n5000_s42
+      6 min  vitl14_blk20_K4_emb32_bt1024_ws_tau0.5_lr0.0005_ep300_n5000_s42
+      6 min  vitl14_blk20_K64_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+
+  GPU 2  (12 jobs, ~88 min):
+     12 min  vitl14_blk05_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+     10 min  vitl14_blk10_K16_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+     10 min  vitl14_blk10_K256_emb32_bt1024_ws_tau0.5_lr0.0005_ep100_n5000_s42
+      8 min  vitl14_blk15_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K1024_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0001_ep100_n5000_s42
+      6 min  vitl14_blk20_K16_emb32_bt1024_ws_mse_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K256_emb16_bt1024_ws_lmbda0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K2_emb16_bt1024_ws_tau0.5_lr0.0005_ep300_n5000_s42
+      6 min  vitl14_blk20_K4_emb32_bt1024_ws_tau0.5_lr0.001_ep300_n5000_s42
+      6 min  vitl14_blk20_K64_emb8_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K8_emb32_bt1024_ws_mse_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+
+  GPU 3  (11 jobs, ~82 min):
+     12 min  vitl14_blk05_K256_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+     10 min  vitl14_blk10_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+     10 min  vitl14_blk10_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+      8 min  vitl14_blk15_K256_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K16_emb32_bt1024_ws_lmbda0.1_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K16_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K32_emb32_bt1024_ws_lmbda0.1_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K64_emb16_bt1024_ws_lmbda0.5_fzR_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K8_emb32_bt1024_ws_lmbda0.1_tau0.5_lr0.0003_ep100_n5000_s42
+
+  GPU 4  (11 jobs, ~82 min):
+     12 min  vitl14_blk05_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+     10 min  vitl14_blk10_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+     10 min  vitl14_blk10_K64_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+      8 min  vitl14_blk15_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K16_emb32_bt1024_ws_lmbda0.2_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0005_ep100_n5000_s42
+      6 min  vitl14_blk20_K256_emb16_bt1024_ws_lmbda0.1_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K256_emb16_bt1024_ws_mse_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K32_emb32_bt1024_ws_lmbda0.2_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K64_emb16_bt1024_ws_lmbda0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K8_emb32_bt1024_ws_lmbda0.2_tau0.5_lr0.0003_ep100_n5000_s42
+
+  GPU 5  (11 jobs, ~82 min):
+     12 min  vitl14_blk05_K64_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+     10 min  vitl14_blk10_K256_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+     10 min  vitl14_blk10_K64_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42
+      8 min  vitl14_blk15_K64_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K16_emb32_bt1024_ws_lmbda0.5_fzR_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K16_emb32_bt1024_ws_lmbda1.0_tau0.5_lr0.0001_ep100_n5000_s42
+      6 min  vitl14_blk20_K256_emb16_bt1024_ws_lmbda0.2_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K256_emb16_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K32_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K64_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42
+      6 min  vitl14_blk20_K8_emb32_bt1024_ws_lmbda0.5_fzR_tau0.5_lr0.0003_ep100_n5000_s42
+
+  Total GPU-minutes: 502
+  Estimated wall-clock: ~88 min (1.5 h)
+
+  Launching at 2026-03-06 13:52:19.002772 ...
+  [GPU 0] START  dinov2_vitl14_blk05_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~12 min)
+  [GPU 1] START  dinov2_vitl14_blk05_K256_emb16_bt1024_ws_lmbda0.2_tau0.5_lr0.0003_ep100_n5000_s42  (~12 min)
+  [GPU 2] START  dinov2_vitl14_blk05_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~12 min)
+  [GPU 3] START  dinov2_vitl14_blk05_K256_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~12 min)
+  [GPU 4] START  dinov2_vitl14_blk05_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~12 min)
+  [GPU 5] START  dinov2_vitl14_blk05_K64_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~12 min)
+  [GPU 0] OK dinov2_vitl14_blk05_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (3.8 min)
+  [GPU 0] START  dinov2_vitl14_blk05_K64_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0005_ep100_n5000_s42  (~12 min)
+  [GPU 4] OK dinov2_vitl14_blk05_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (3.8 min)
+  [GPU 4] START  dinov2_vitl14_blk10_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~10 min)
+  [GPU 5] OK dinov2_vitl14_blk05_K64_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (4.3 min)
+  [GPU 5] START  dinov2_vitl14_blk10_K256_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~10 min)
+  [GPU 3] OK dinov2_vitl14_blk05_K256_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (4.4 min)
+  [GPU 3] START  dinov2_vitl14_blk10_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~10 min)
+  [GPU 2] OK dinov2_vitl14_blk05_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (4.7 min)
+  [GPU 2] START  dinov2_vitl14_blk10_K16_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~10 min)
+  [GPU 1] OK dinov2_vitl14_blk05_K256_emb16_bt1024_ws_lmbda0.2_tau0.5_lr0.0003_ep100_n5000_s42  (4.8 min)
+  [GPU 1] START  dinov2_vitl14_blk05_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~12 min)
+  [GPU 0] OK dinov2_vitl14_blk05_K64_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0005_ep100_n5000_s42  (2.2 min)
+  [GPU 0] START  dinov2_vitl14_blk10_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~10 min)
+  [GPU 3] OK dinov2_vitl14_blk10_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (2.2 min)
+  [GPU 3] START  dinov2_vitl14_blk10_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~10 min)
+  [GPU 1] OK dinov2_vitl14_blk05_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (2.1 min)
+  [GPU 1] START  dinov2_vitl14_blk15_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~8 min)
+  [GPU 5] OK dinov2_vitl14_blk10_K256_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (2.7 min)
+  [GPU 5] START  dinov2_vitl14_blk10_K64_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42  (~10 min)
+  [GPU 2] OK dinov2_vitl14_blk10_K16_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (2.4 min)
+  [GPU 2] START  dinov2_vitl14_blk10_K256_emb32_bt1024_ws_tau0.5_lr0.0005_ep100_n5000_s42  (~10 min)
+  [GPU 4] OK dinov2_vitl14_blk10_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (3.7 min)
+  [GPU 4] START  dinov2_vitl14_blk10_K64_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~10 min)
+  [GPU 0] OK dinov2_vitl14_blk10_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (2.0 min)
+  [GPU 0] START  dinov2_vitl14_blk15_K64_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0005_ep100_n5000_s42  (~8 min)
+  [GPU 3] OK dinov2_vitl14_blk10_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (2.1 min)
+  [GPU 3] START  dinov2_vitl14_blk15_K256_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~8 min)
+  [GPU 5] OK dinov2_vitl14_blk10_K64_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42  (1.8 min)
+  [GPU 5] START  dinov2_vitl14_blk15_K64_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~8 min)
+  [GPU 2] OK dinov2_vitl14_blk10_K256_emb32_bt1024_ws_tau0.5_lr0.0005_ep100_n5000_s42  (2.1 min)
+  [GPU 2] START  dinov2_vitl14_blk15_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~8 min)
+  [GPU 1] OK dinov2_vitl14_blk15_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (2.9 min)
+  [GPU 1] START  dinov2_vitl14_blk15_K256_emb16_bt1024_ws_lmbda0.2_tau0.5_lr0.0003_ep100_n5000_s42  (~8 min)
+  [GPU 0] OK dinov2_vitl14_blk15_K64_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0005_ep100_n5000_s42  (2.0 min)
+  [GPU 0] START  dinov2_vitl14_blk20_K16_emb32_bt1024_ws_lmbda0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 4] OK dinov2_vitl14_blk10_K64_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (2.6 min)
+  [GPU 4] START  dinov2_vitl14_blk15_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~8 min)
+  [GPU 3] OK dinov2_vitl14_blk15_K256_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (2.4 min)
+  [GPU 3] START  dinov2_vitl14_blk20_K16_emb32_bt1024_ws_lmbda0.1_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 5] OK dinov2_vitl14_blk15_K64_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (2.4 min)
+  [GPU 5] START  dinov2_vitl14_blk20_K16_emb32_bt1024_ws_lmbda0.5_fzR_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 2] OK dinov2_vitl14_blk15_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (2.7 min)
+  [GPU 2] START  dinov2_vitl14_blk20_K1024_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 0] OK dinov2_vitl14_blk20_K16_emb32_bt1024_ws_lmbda0.5_lr0.0003_ep100_n5000_s42  (1.8 min)
+  [GPU 0] START  dinov2_vitl14_blk20_K16_emb32_bt1024_ws_lmbda1.0_tau1.0_lr0.0001_ep100_n5000_s42  (~6 min)
+  [GPU 4] OK dinov2_vitl14_blk15_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (1.9 min)
+  [GPU 4] START  dinov2_vitl14_blk20_K16_emb32_bt1024_ws_lmbda0.2_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 1] OK dinov2_vitl14_blk15_K256_emb16_bt1024_ws_lmbda0.2_tau0.5_lr0.0003_ep100_n5000_s42  (2.8 min)
+  [GPU 1] START  dinov2_vitl14_blk15_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~8 min)
+  [GPU 3] OK dinov2_vitl14_blk20_K16_emb32_bt1024_ws_lmbda0.1_tau0.5_lr0.0003_ep100_n5000_s42  (1.8 min)
+  [GPU 3] START  dinov2_vitl14_blk20_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 5] OK dinov2_vitl14_blk20_K16_emb32_bt1024_ws_lmbda0.5_fzR_tau0.5_lr0.0003_ep100_n5000_s42  (1.9 min)
+  [GPU 5] START  dinov2_vitl14_blk20_K16_emb32_bt1024_ws_lmbda1.0_tau0.5_lr0.0001_ep100_n5000_s42  (~6 min)
+  [GPU 0] OK dinov2_vitl14_blk20_K16_emb32_bt1024_ws_lmbda1.0_tau1.0_lr0.0001_ep100_n5000_s42  (1.9 min)
+  [GPU 0] START  dinov2_vitl14_blk20_K256_emb16_bt1024_ws_lmbda0.3_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 4] OK dinov2_vitl14_blk20_K16_emb32_bt1024_ws_lmbda0.2_tau0.5_lr0.0003_ep100_n5000_s42  (1.9 min)
+  [GPU 4] START  dinov2_vitl14_blk20_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0005_ep100_n5000_s42  (~6 min)
+  [GPU 1] OK dinov2_vitl14_blk15_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (2.0 min)
+  [GPU 1] START  dinov2_vitl14_blk20_K16_emb32_bt1024_ws_lmbda2.0_tau2.0_lr0.0001_ep100_n5000_s42  (~6 min)
+  [GPU 3] OK dinov2_vitl14_blk20_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (1.9 min)
+  [GPU 3] START  dinov2_vitl14_blk20_K16_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 5] OK dinov2_vitl14_blk20_K16_emb32_bt1024_ws_lmbda1.0_tau0.5_lr0.0001_ep100_n5000_s42  (1.8 min)
+  [GPU 5] START  dinov2_vitl14_blk20_K256_emb16_bt1024_ws_lmbda0.2_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 2] OK dinov2_vitl14_blk20_K1024_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (3.5 min)
+  [GPU 2] START  dinov2_vitl14_blk20_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0001_ep100_n5000_s42  (~6 min)
+  [GPU 4] OK dinov2_vitl14_blk20_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0005_ep100_n5000_s42  (1.9 min)
+  [GPU 4] START  dinov2_vitl14_blk20_K256_emb16_bt1024_ws_lmbda0.1_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 3] OK dinov2_vitl14_blk20_K16_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42  (1.6 min)
+  [GPU 3] START  dinov2_vitl14_blk20_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 0] OK dinov2_vitl14_blk20_K256_emb16_bt1024_ws_lmbda0.3_tau0.5_lr0.0003_ep100_n5000_s42  (2.7 min)
+  [GPU 0] START  dinov2_vitl14_blk20_K256_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 1] OK dinov2_vitl14_blk20_K16_emb32_bt1024_ws_lmbda2.0_tau2.0_lr0.0001_ep100_n5000_s42  (1.9 min)
+  [GPU 1] START  dinov2_vitl14_blk20_K256_emb16_bt1024_ws_lmbda0.5_fzR_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 2] OK dinov2_vitl14_blk20_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0001_ep100_n5000_s42  (1.9 min)
+  [GPU 2] START  dinov2_vitl14_blk20_K16_emb32_bt1024_ws_mse_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 5] OK dinov2_vitl14_blk20_K256_emb16_bt1024_ws_lmbda0.2_tau0.5_lr0.0003_ep100_n5000_s42  (2.7 min)
+  [GPU 5] START  dinov2_vitl14_blk20_K256_emb16_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 4] OK dinov2_vitl14_blk20_K256_emb16_bt1024_ws_lmbda0.1_tau0.5_lr0.0003_ep100_n5000_s42  (2.5 min)
+  [GPU 4] START  dinov2_vitl14_blk20_K256_emb16_bt1024_ws_mse_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 0] OK dinov2_vitl14_blk20_K256_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (2.2 min)
+  [GPU 0] START  dinov2_vitl14_blk20_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 3] OK dinov2_vitl14_blk20_K256_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (2.6 min)
+  [GPU 3] START  dinov2_vitl14_blk20_K32_emb32_bt1024_ws_lmbda0.1_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 2] OK dinov2_vitl14_blk20_K16_emb32_bt1024_ws_mse_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (1.8 min)
+  [GPU 2] START  dinov2_vitl14_blk20_K256_emb16_bt1024_ws_lmbda0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 1] OK dinov2_vitl14_blk20_K256_emb16_bt1024_ws_lmbda0.5_fzR_tau0.5_lr0.0003_ep100_n5000_s42  (2.7 min)
+  [GPU 1] START  dinov2_vitl14_blk20_K256_emb32_bt1024_ws_tau0.5_lr0.0005_ep100_n5000_s42  (~6 min)
+  [GPU 5] OK dinov2_vitl14_blk20_K256_emb16_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42  (2.1 min)
+  [GPU 5] START  dinov2_vitl14_blk20_K32_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 0] OK dinov2_vitl14_blk20_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (1.8 min)
+  [GPU 0] START  dinov2_vitl14_blk20_K64_emb16_bt1024_ws_mse_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 3] OK dinov2_vitl14_blk20_K32_emb32_bt1024_ws_lmbda0.1_tau0.5_lr0.0003_ep100_n5000_s42  (1.8 min)
+  [GPU 3] START  dinov2_vitl14_blk20_K64_emb16_bt1024_ws_lmbda0.5_fzR_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 4] OK dinov2_vitl14_blk20_K256_emb16_bt1024_ws_mse_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (2.6 min)
+  [GPU 4] START  dinov2_vitl14_blk20_K32_emb32_bt1024_ws_lmbda0.2_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 1] OK dinov2_vitl14_blk20_K256_emb32_bt1024_ws_tau0.5_lr0.0005_ep100_n5000_s42  (2.0 min)
+  [GPU 1] START  dinov2_vitl14_blk20_K4_emb32_bt1024_ws_tau0.5_lr0.0005_ep300_n5000_s42  (~6 min)
+  [GPU 5] OK dinov2_vitl14_blk20_K32_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (1.8 min)
+  [GPU 5] START  dinov2_vitl14_blk20_K64_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 2] OK dinov2_vitl14_blk20_K256_emb16_bt1024_ws_lmbda0.5_lr0.0003_ep100_n5000_s42  (2.7 min)
+  [GPU 2] START  dinov2_vitl14_blk20_K2_emb16_bt1024_ws_tau0.5_lr0.0005_ep300_n5000_s42  (~6 min)
+  [GPU 1] OK dinov2_vitl14_blk20_K4_emb32_bt1024_ws_tau0.5_lr0.0005_ep300_n5000_s42  (1.5 min)
+  [GPU 1] START  dinov2_vitl14_blk20_K64_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 4] OK dinov2_vitl14_blk20_K32_emb32_bt1024_ws_lmbda0.2_tau0.5_lr0.0003_ep100_n5000_s42  (1.9 min)
+  [GPU 4] START  dinov2_vitl14_blk20_K64_emb16_bt1024_ws_lmbda0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 0] OK dinov2_vitl14_blk20_K64_emb16_bt1024_ws_mse_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (2.4 min)
+  [GPU 0] START  dinov2_vitl14_blk20_K8_emb32_bt1024_ws_lmbda0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 3] OK dinov2_vitl14_blk20_K64_emb16_bt1024_ws_lmbda0.5_fzR_tau0.5_lr0.0003_ep100_n5000_s42  (2.3 min)
+  [GPU 3] START  dinov2_vitl14_blk20_K8_emb32_bt1024_ws_lmbda0.1_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 2] OK dinov2_vitl14_blk20_K2_emb16_bt1024_ws_tau0.5_lr0.0005_ep300_n5000_s42  (1.6 min)
+  [GPU 2] START  dinov2_vitl14_blk20_K4_emb32_bt1024_ws_tau0.5_lr0.001_ep300_n5000_s42  (~6 min)
+  [GPU 5] OK dinov2_vitl14_blk20_K64_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (2.5 min)
+  [GPU 5] START  dinov2_vitl14_blk20_K8_emb32_bt1024_ws_lmbda0.5_fzR_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 1] OK dinov2_vitl14_blk20_K64_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42  (1.5 min)
+  [GPU 1] START  dinov2_vitl14_blk20_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 0] OK dinov2_vitl14_blk20_K8_emb32_bt1024_ws_lmbda0.5_lr0.0003_ep100_n5000_s42  (1.9 min)
+  GPU 0 — all eval jobs done.
+  [GPU 3] OK dinov2_vitl14_blk20_K8_emb32_bt1024_ws_lmbda0.1_tau0.5_lr0.0003_ep100_n5000_s42  (1.9 min)
+  GPU 3 — all eval jobs done.
+  [GPU 2] OK dinov2_vitl14_blk20_K4_emb32_bt1024_ws_tau0.5_lr0.001_ep300_n5000_s42  (1.5 min)
+  [GPU 2] START  dinov2_vitl14_blk20_K64_emb8_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 4] OK dinov2_vitl14_blk20_K64_emb16_bt1024_ws_lmbda0.5_lr0.0003_ep100_n5000_s42  (2.4 min)
+  [GPU 4] START  dinov2_vitl14_blk20_K8_emb32_bt1024_ws_lmbda0.2_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 5] OK dinov2_vitl14_blk20_K8_emb32_bt1024_ws_lmbda0.5_fzR_tau0.5_lr0.0003_ep100_n5000_s42  (1.7 min)
+  GPU 5 — all eval jobs done.
+  [GPU 1] OK dinov2_vitl14_blk20_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (1.8 min)
+  GPU 1 — all eval jobs done.
+  [GPU 4] OK dinov2_vitl14_blk20_K8_emb32_bt1024_ws_lmbda0.2_tau0.5_lr0.0003_ep100_n5000_s42  (1.6 min)
+  GPU 4 — all eval jobs done.
+  [GPU 2] OK dinov2_vitl14_blk20_K64_emb8_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (2.9 min)
+  [GPU 2] START  dinov2_vitl14_blk20_K8_emb32_bt1024_ws_mse_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (~6 min)
+  [GPU 2] OK dinov2_vitl14_blk20_K8_emb32_bt1024_ws_mse_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42  (1.7 min)
+  GPU 2 — all eval jobs done.
+
+  All done at 2026-03-06 14:21:43.293857

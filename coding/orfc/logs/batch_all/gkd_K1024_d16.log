@@ -1,0 +1,73 @@
+# /home/user/anaconda3/envs/featcodec2/bin/python /data4/workspace/zlt/featcodec/coding/vq/v3.4/run_soft_pq.py --K 1024 --embedding_dim 16 --lmbda 0.5 --layer blk20 --backbone dinov2_vitl14 --bottleneck_dim 1024 --batch_size 32 --max_train_images 5000 --lr 0.0003 --epochs 100 --seed 42 --warm_start_opq --eval_seg --tau_start 0.5 --tau_end 0.005 --tau_schedule exponential
+# started: 2026-03-06 10:18:40.449817
+
+
+######################################################################
+# Feature Codec Experiment (OrthogonalTransform + PQ)
+# layer=blk20 (idx=20), K=1024, emb=16, bt=1024
+# transform: all trainable
+# epochs=100, lr=0.0003, λ=0.5, τ=0.5→0.005
+# max_train=5000, batch=32
+# 2026-03-06 10:18:44
+######################################################################
+
+Data: train=5000, test=500
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:   7%|▋         | 333/5000 [00:00<00:01, 3299.90it/s]Loading:  13%|█▎        | 663/5000 [00:00<00:01, 3201.02it/s]Loading:  20%|█▉        | 984/5000 [00:00<00:01, 3173.35it/s]Loading:  26%|██▌       | 1302/5000 [00:00<00:01, 3154.73it/s]Loading:  33%|███▎      | 1637/5000 [00:00<00:01, 3217.86it/s]Loading:  39%|███▉      | 1959/5000 [00:00<00:00, 3185.76it/s]Loading:  46%|████▌     | 2278/5000 [00:00<00:00, 3177.32it/s]Loading:  52%|█████▏    | 2596/5000 [00:00<00:00, 3084.96it/s]Loading:  58%|█████▊    | 2912/5000 [00:00<00:00, 3101.71it/s]Loading:  65%|██████▍   | 3230/5000 [00:01<00:00, 3123.80it/s]Loading:  71%|███████   | 3543/5000 [00:01<00:00, 3118.38it/s]Loading:  77%|███████▋  | 3856/5000 [00:01<00:00, 3081.13it/s]Loading:  84%|████████▎ | 4182/5000 [00:01<00:00, 3123.14it/s]Loading:  90%|█████████ | 4500/5000 [00:01<00:00, 3132.87it/s]Loading:  97%|█████████▋| 4826/5000 [00:01<00:00, 3166.41it/s]Loading: 100%|██████████| 5000/5000 [00:01<00:00, 3149.39it/s]
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  64%|██████▍   | 322/500 [00:00<00:00, 3204.97it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 3213.35it/s]
+  D=1024, D'=1024, T=257, G=64, d=16
+  bits/token=640
+
+Loading DINOv2 (dinov2_vitl14)...
+  Tail: 3 blocks (blk21..blk23) + norm
+
+============================================================
+  [Standard OPQ] baseline
+============================================================
+    OPQ done: MSE=0.10555320 (99.0s)
+    OPQ empirical ppl=928.2 (for prior init)
+  * Standard OPQ Acc = 0.9640
+  * Standard OPQ ΔL_ref = 122190.9
+
+============================================================
+  [Codec] K=1024, λ=0.5, bt=1024, epochs=100, τ=0.5→0.005
+============================================================
+  Warm-start from OPQ (transform + codebooks)
+  log_prior init from OPQ empirical frequency
+  Trainable params: 1,637,888
+  Orthogonal transform: ||R'R-I||=1.10e-03
+  Soft PQ: τ 0.50 → 0.0050 (exponential)
+  Pre-computing teacher outputs (5000 images)...
+  Teacher cache: 5.3 GB CPU (10.5s)
+  ep   0/100  D=156527.8  ppl=123.3  R=578.26b/t  λD=78263.9  dead=4977  τ=0.5000  val=131672.4  (32.1s)
+  ep  10/100  D=89154.2  ppl=420.4  R=600.10b/t  λD=44577.1  dead=16674  τ=0.3140  val=86407.2  (32.7s)
+  ep  20/100  D=81011.1  ppl=481.2  R=597.21b/t  λD=40505.5  dead=22600  τ=0.1972  val=78866.8  (31.6s)
+  ep  30/100  D=77061.3  ppl=490.5  R=593.48b/t  λD=38530.7  dead=24783  τ=0.1239  val=74978.1  (31.2s)
+  ep  40/100  D=74288.4  ppl=491.8  R=590.71b/t  λD=37144.2  dead=25762  τ=0.0778  val=72652.8  (33.4s)
+  ep  50/100  D=72331.8  ppl=491.4  R=588.84b/t  λD=36165.9  dead=26212  τ=0.0489  val=70806.3  (31.9s)
+  ep  60/100  D=70694.1  ppl=491.1  R=587.66b/t  λD=35347.1  dead=26354  τ=0.0307  val=69431.2  (32.7s)
+  ep  70/100  D=69250.7  ppl=490.9  R=586.98b/t  λD=34625.4  dead=26381  τ=0.0193  val=68127.8  (31.5s)
+  ep  80/100  D=68033.9  ppl=490.8  R=586.63b/t  λD=34016.9  dead=26388  τ=0.0121  val=67047.5  (32.6s)
+  ep  90/100  D=67060.2  ppl=490.8  R=586.48b/t  λD=33530.1  dead=26377  τ=0.0076  val=66258.8  (31.3s)
+  ep  99/100  D=66612.5  ppl=490.8  R=586.44b/t  λD=33306.2  dead=26362  τ=0.0050  val=65916.1  (31.7s)
+  Codec training: 3226.2s
+  Codec saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/checkpoints/dinov2_vitl14/blk20_K1024_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.pt
+Traceback (most recent call last):
+  File "/data4/workspace/zlt/featcodec/coding/vq/v3.4/run_soft_pq.py", line 982, in <module>
+    main()
+  File "/data4/workspace/zlt/featcodec/coding/vq/v3.4/run_soft_pq.py", line 978, in main
+    run_experiment(args)
+  File "/data4/workspace/zlt/featcodec/coding/vq/v3.4/run_soft_pq.py", line 693, in run_experiment
+    xhat_spq = soft_pq_encode_decode(
+  File "/data4/workspace/zlt/featcodec/coding/vq/v3.4/soft_pq.py", line 746, in soft_pq_encode_decode
+    Y_hat, _ = codec(Y)
+  File "/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1501, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/data4/workspace/zlt/featcodec/coding/vq/v3.4/soft_pq.py", line 307, in forward
+    Z_hat, usage = self.pq._quantise(Z)
+  File "/data4/workspace/zlt/featcodec/coding/vq/v3.4/soft_pq.py", line 224, in _quantise
+    dists_sq = torch.cdist(sub_g, C).pow(2)             # [G, N, K]
+torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 12.55 GiB (GPU 0; 23.65 GiB total capacity; 13.19 GiB already allocated; 9.34 GiB free; 13.75 GiB reserved in total by PyTorch) If reserved memory is >> allocated memory try setting max_split_size_mb to avoid fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF
+
+# FAIL(rc=1)  elapsed=56.6min

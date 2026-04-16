@@ -1,0 +1,65 @@
+
+######################################################################
+# Feature Codec Experiment (OrthogonalTransform + PQ)
+# layer=blk05 (idx=5), K=8, emb=32, bt=1024
+# transform: all trainable
+# epochs=100, lr=0.0003, λ=0.0, τ=0.5→0.005
+# max_train=5000, batch=32
+# 2026-02-25 13:07:02
+######################################################################
+
+Data: train=5000, test=500
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:   8%|▊         | 383/5000 [00:00<00:01, 3827.44it/s]Loading:  15%|█▌        | 766/5000 [00:00<00:01, 3606.29it/s]Loading:  23%|██▎       | 1128/5000 [00:00<00:01, 3466.58it/s]Loading:  30%|██▉       | 1476/5000 [00:00<00:01, 3313.03it/s]Loading:  36%|███▌      | 1809/5000 [00:00<00:00, 3316.03it/s]Loading:  43%|████▎     | 2142/5000 [00:00<00:00, 3301.20it/s]Loading:  49%|████▉     | 2473/5000 [00:00<00:00, 3301.72it/s]Loading:  56%|█████▌    | 2804/5000 [00:00<00:00, 3249.12it/s]Loading:  63%|██████▎   | 3131/5000 [00:00<00:00, 3254.80it/s]Loading:  69%|██████▉   | 3457/5000 [00:01<00:00, 3205.31it/s]Loading:  76%|███████▌  | 3780/5000 [00:01<00:00, 3206.87it/s]Loading:  83%|████████▎ | 4135/5000 [00:01<00:00, 3301.91it/s]Loading:  89%|████████▉ | 4466/5000 [00:01<00:00, 3218.66it/s]Loading:  96%|█████████▌| 4792/5000 [00:01<00:00, 3228.96it/s]Loading: 100%|██████████| 5000/5000 [00:01<00:00, 3297.13it/s]
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  65%|██████▍   | 324/500 [00:00<00:00, 3170.10it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 3281.24it/s]
+  D=1024, D'=1024, T=257, G=32, d=32
+  bits/token=96
+
+Loading CLIP ViT-L/14 (classnames=/data4/workspace/zlt/CPAO_cls/dataset/imagenet/classnames.txt)...
+  Tail: 18 blocks (blk6..blk23) + norm
+
+============================================================
+  [Standard OPQ] baseline
+============================================================
+    OPQ done: MSE=0.39279568 (94.1s)
+  * Standard OPQ Acc = 0.5340
+  * Standard OPQ ΔL_ref = 213841.2
+
+============================================================
+  [Codec] K=8, λ=0.0, bt=1024, epochs=100, τ=0.5→0.005
+============================================================
+  Warm-start from OPQ (transform + codebooks)
+  Trainable params: 531,968
+  Orthogonal transform: ||R'R-I||=6.87e-04
+  Soft PQ: τ 0.50 → 0.0050 (exponential)
+  Pre-computing teacher outputs (5000 images)...
+  Teacher cache: 5.3 GB CPU (92.1s)
+  ep   0/100  D=151814.4  ppl=7.6  τ=0.5000  val=139577.7  (53.0s)
+  ep  10/100  D=130678.4  ppl=7.4  τ=0.3140  val=127281.4  (53.0s)
+  ep  20/100  D=128378.7  ppl=7.4  τ=0.1972  val=124963.8  (52.9s)
+  ep  30/100  D=127576.6  ppl=7.4  τ=0.1239  val=124589.0  (52.9s)
+  ep  40/100  D=126949.0  ppl=7.3  τ=0.0778  val=123784.7  (53.0s)
+  ep  50/100  D=126238.4  ppl=7.3  τ=0.0489  val=123270.9  (52.8s)
+  ep  60/100  D=125034.9  ppl=7.4  τ=0.0307  val=122430.9  (53.3s)
+  ep  70/100  D=123793.4  ppl=7.4  τ=0.0193  val=121826.2  (53.2s)
+  ep  80/100  D=122219.1  ppl=7.4  τ=0.0121  val=119951.4  (53.5s)
+  ep  90/100  D=120869.8  ppl=7.4  τ=0.0076  val=118695.5  (53.4s)
+  ep  99/100  D=119609.0  ppl=7.4  τ=0.0050  val=117603.0  (53.0s)
+  Codec training: 5437.5s
+  * Codec Acc = 0.7600 (d=+0.2260)
+  * Codec ΔL_ref = 123627.0 (d=-90214.2)
+  Computing train histogram PMF...
+  * Rate: xent=92.35  xent_train=92.35  H_emp=92.29  max=96  rANS=92.36  rANS_train=92.36  bits/token
+
+============================================================
+  Summary: blk05 K=8 emb=32  bt=1024
+  bits/token: OPQ=96 (G=32)  codec=96 (G=32)
+  Standard OPQ  Acc=0.5340  ΔL_ref=213841.2
+  Codec         Acc=0.7600  ΔL_ref=123627.0
+  Δ(Acc)=+0.2260  Δ(ΔL_ref)=-90214.2
+  Rate: xent=92.35  xent_train=92.35  H_emp=92.29  max=96  rANS=92.36 bits/token
+  Train time: std=94.1s  codec=5437.5s
+============================================================
+
+Results saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/results/soft_pq/clip_vitl14/blk05_K8_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42.json

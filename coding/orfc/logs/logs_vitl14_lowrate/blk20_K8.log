@@ -1,0 +1,68 @@
+
+######################################################################
+# Feature Codec Experiment (OrthogonalTransform + PQ)
+# layer=blk20 (idx=20), K=8, emb=32, bt=1024
+# transform: all trainable
+# epochs=100, lr=0.0003, λ=0.1, τ=0.5→0.005
+# max_train=5000, batch=32
+# 2026-03-02 17:13:29
+######################################################################
+
+Data: train=5000, test=500
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:   6%|▌         | 303/5000 [00:00<00:01, 3023.58it/s]Loading:  12%|█▏        | 606/5000 [00:00<00:01, 2937.54it/s]Loading:  18%|█▊        | 900/5000 [00:00<00:01, 2902.22it/s]Loading:  24%|██▍       | 1193/5000 [00:00<00:01, 2905.10it/s]Loading:  30%|███       | 1504/5000 [00:00<00:01, 2976.63it/s]Loading:  36%|███▌      | 1802/5000 [00:00<00:01, 2955.91it/s]Loading:  42%|████▏     | 2106/5000 [00:00<00:00, 2975.21it/s]Loading:  48%|████▊     | 2415/5000 [00:00<00:00, 3006.30it/s]Loading:  54%|█████▍    | 2716/5000 [00:00<00:00, 2962.64it/s]Loading:  61%|██████    | 3031/5000 [00:01<00:00, 3018.38it/s]Loading:  67%|██████▋   | 3334/5000 [00:01<00:00, 3014.62it/s]Loading:  73%|███████▎  | 3636/5000 [00:01<00:00, 2960.56it/s]Loading:  79%|███████▊  | 3933/5000 [00:01<00:00, 2785.20it/s]Loading:  84%|████████▍ | 4214/5000 [00:01<00:00, 2556.50it/s]Loading:  89%|████████▉ | 4474/5000 [00:01<00:00, 2227.82it/s]Loading:  94%|█████████▍| 4706/5000 [00:01<00:00, 2144.08it/s]Loading:  99%|█████████▊| 4927/5000 [00:01<00:00, 2107.15it/s]Loading: 100%|██████████| 5000/5000 [00:01<00:00, 2630.57it/s]
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  51%|█████     | 256/500 [00:00<00:00, 2555.37it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 2769.74it/s]
+  D=1024, D'=1024, T=257, G=32, d=32
+  bits/token=96
+
+Loading DINOv2 (dinov2_vitl14)...
+  Tail: 3 blocks (blk21..blk23) + norm
+
+============================================================
+  [Standard OPQ] baseline
+============================================================
+    OPQ done: MSE=0.25481725 (24.2s)
+    OPQ empirical ppl=7.8 (for prior init)
+  * Standard OPQ Acc = 0.3420
+  * Standard OPQ ΔL_ref = 527485.5
+
+============================================================
+  [Codec] K=8, λ=0.1, bt=1024, epochs=100, τ=0.5→0.005
+============================================================
+  Warm-start from OPQ (transform + codebooks)
+  log_prior init from OPQ empirical frequency
+  Trainable params: 532,224
+  Orthogonal transform: ||R'R-I||=6.47e-04
+  Soft PQ: τ 0.50 → 0.0050 (exponential)
+  Pre-computing teacher outputs (5000 images)...
+  Teacher cache: 5.3 GB CPU (12.4s)
+  ep   0/100  D=360409.5  ppl=6.6  R=91.88b/t  λD=36040.9  dead=0  τ=0.5000  val=307146.7  (18.0s)
+  ep  10/100  D=237946.1  ppl=7.6  R=94.27b/t  λD=23794.6  dead=0  τ=0.3140  val=230246.4  (15.1s)
+  ep  20/100  D=224762.0  ppl=7.6  R=94.42b/t  λD=22476.2  dead=0  τ=0.1972  val=218289.7  (10.9s)
+  ep  30/100  D=218369.7  ppl=7.6  R=94.44b/t  λD=21837.0  dead=0  τ=0.1239  val=212957.2  (10.7s)
+  ep  40/100  D=215064.1  ppl=7.6  R=94.43b/t  λD=21506.4  dead=0  τ=0.0778  val=210072.2  (10.6s)
+  ep  50/100  D=212568.2  ppl=7.6  R=94.42b/t  λD=21256.8  dead=0  τ=0.0489  val=207993.5  (10.7s)
+  ep  60/100  D=210517.5  ppl=7.6  R=94.42b/t  λD=21051.8  dead=0  τ=0.0307  val=206456.8  (10.9s)
+  ep  70/100  D=208354.9  ppl=7.6  R=94.42b/t  λD=20835.5  dead=0  τ=0.0193  val=204865.3  (10.9s)
+  ep  80/100  D=206238.9  ppl=7.6  R=94.41b/t  λD=20623.9  dead=0  τ=0.0121  val=203112.1  (10.8s)
+  ep  90/100  D=204255.4  ppl=7.6  R=94.41b/t  λD=20425.5  dead=0  τ=0.0076  val=201468.3  (11.1s)
+  ep  99/100  D=203276.9  ppl=7.6  R=94.41b/t  λD=20327.7  dead=0  τ=0.0050  val=200681.7  (10.6s)
+  Codec training: 1228.2s
+  Codec saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/checkpoints/dinov2_vitl14/blk20_K8_emb32_bt1024_ws_lmbda0.1_tau0.5_lr0.0003_ep100_n5000_s42.pt
+  * Codec Acc = 0.8920 (d=+0.5500)
+  * Codec ΔL_ref = 227467.5 (d=-300017.9)
+  Computing train histogram PMF...
+  * Rate: xent=94.52  xent_train=93.95  H_emp=93.74  max=96  rANS=94.52  rANS_train=93.96  bits/token
+
+============================================================
+  Summary: blk20 K=8 emb=32  bt=1024
+  bits/token: OPQ=96 (G=32)  codec=96 (G=32)
+  Standard OPQ  Acc=0.3420  ΔL_ref=527485.5
+  Codec         Acc=0.8920  ΔL_ref=227467.5
+  Δ(Acc)=+0.5500  Δ(ΔL_ref)=-300017.9
+  Rate: xent=94.52  xent_train=93.95  H_emp=93.74  max=96  rANS=94.52 bits/token
+  Train time: std=24.2s  codec=1228.2s
+============================================================
+
+Results saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/results/soft_pq/dinov2_vitl14/blk20_K8_emb32_bt1024_ws_lmbda0.1_tau0.5_lr0.0003_ep100_n5000_s42.json

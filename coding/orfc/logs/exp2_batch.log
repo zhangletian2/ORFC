@@ -1,0 +1,549 @@
+nohup: ignoring input
+Total jobs: 7
+  dinov2_vitl14   blk05   ~ 90min
+  dinov2_vitl14   blk10   ~ 70min
+  dinov2_vitl14   blk15   ~ 60min
+  dinov2_vitl14   blk20   ~ 50min
+  dinov2_vitg14   blk09   ~100min
+  dinov2_vitg14   blk19   ~ 80min
+  dinov2_vitg14   blk29   ~ 70min
+
+Schedule (6 GPUs):
+  GPU 0: dinov2_blk09  (100min)
+  GPU 1: dinov2_blk05  (90min)
+  GPU 2: dinov2_blk19  (80min)
+  GPU 3: dinov2_blk10  (70min)
+  GPU 4: dinov2_blk29  (70min)
+  GPU 5: dinov2_blk15, dinov2_blk20  (110min)
+[GPU 0] dinov2_vitg14 blk09 (~100min)
+[GPU 1] dinov2_vitl14 blk05 (~90min)
+[GPU 2] dinov2_vitg14 blk19 (~80min)
+[GPU 3] dinov2_vitl14 blk10 (~70min)
+[GPU 4] dinov2_vitg14 blk29 (~70min)
+[GPU 5] dinov2_vitl14 blk15 (~60min)
+
+######################################################################
+# Figure 1: MSE vs L_ref correlation with downstream Acc
+# layer=blk05
+# 2026-03-07 16:00:58
+######################################################################
+  Train features: 5000 files from /data4/workspace/zlt/featcodec/features/train/dinov2_vitl14/blk05
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:   5%|▌         | 255/5000 [00:00<00:01, 2465.05it/s]Loading:  10%|█         | 502/5000 [00:00<00:01, 2322.91it/s]Loading:  15%|█▍        | 735/5000 [00:00<00:01, 2317.82it/s]
+######################################################################
+# Figure 1: MSE vs L_ref correlation with downstream Acc
+# layer=blk19
+# 2026-03-07 16:00:58
+######################################################################
+  Train features: 5000 files from /data4/workspace/zlt/featcodec/features/train/dinov2_vitg14/blk19
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:  19%|█▉        | 967/5000 [00:00<00:01, 2208.73it/s]Loading:   4%|▍         | 218/5000 [00:00<00:02, 2175.45it/s]
+######################################################################
+# Figure 1: MSE vs L_ref correlation with downstream Acc
+# layer=blk09
+# 2026-03-07 16:00:58
+######################################################################
+  Train features: 5000 files from /data4/workspace/zlt/featcodec/features/train/dinov2_vitg14/blk09
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]
+######################################################################
+# Figure 1: MSE vs L_ref correlation with downstream Acc
+# layer=blk10
+# 2026-03-07 16:00:58
+######################################################################
+  Train features: 5000 files from /data4/workspace/zlt/featcodec/features/train/dinov2_vitl14/blk10
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]
+######################################################################
+# Figure 1: MSE vs L_ref correlation with downstream Acc
+# layer=blk29
+# 2026-03-07 16:00:58
+######################################################################
+  Train features: 5000 files from /data4/workspace/zlt/featcodec/features/train/dinov2_vitg14/blk29
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:  24%|██▍       | 1189/5000 [00:00<00:01, 2055.74it/s]Loading:   9%|▊         | 436/5000 [00:00<00:02, 2147.49it/s]Loading:   6%|▌         | 276/5000 [00:00<00:01, 2744.39it/s]Loading:   6%|▌         | 279/5000 [00:00<00:01, 2784.37it/s]Loading:   5%|▍         | 248/5000 [00:00<00:01, 2465.38it/s]Loading:  28%|██▊       | 1412/5000 [00:00<00:01, 2092.04it/s]Loading:  13%|█▎        | 651/5000 [00:00<00:02, 2034.90it/s]Loading:  11%|█         | 558/5000 [00:00<00:01, 2596.70it/s]
+######################################################################
+# Figure 1: MSE vs L_ref correlation with downstream Acc
+# layer=blk15
+# 2026-03-07 16:00:58
+######################################################################
+  Train features: 5000 files from /data4/workspace/zlt/featcodec/features/train/dinov2_vitl14/blk15
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:  10%|▉         | 495/5000 [00:00<00:01, 2266.54it/s]Loading:  11%|█         | 551/5000 [00:00<00:01, 2442.34it/s]Loading:  33%|███▎      | 1663/5000 [00:00<00:01, 2215.22it/s]Loading:  17%|█▋        | 856/5000 [00:00<00:02, 2025.07it/s]Loading:   6%|▌         | 278/5000 [00:00<00:01, 2759.37it/s]Loading:  16%|█▋        | 819/5000 [00:00<00:01, 2422.52it/s]Loading:  16%|█▌        | 798/5000 [00:00<00:01, 2314.67it/s]Loading:  14%|█▍        | 723/5000 [00:00<00:02, 2118.85it/s]Loading:  38%|███▊      | 1887/5000 [00:00<00:01, 2187.88it/s]Loading:  21%|██        | 1059/5000 [00:00<00:01, 2013.79it/s]Loading:  21%|██▏       | 1063/5000 [00:00<00:01, 2347.17it/s]Loading:  42%|████▏     | 2115/5000 [00:00<00:01, 2211.10it/s]Loading:  11%|█         | 554/5000 [00:00<00:01, 2418.61it/s]Loading:  21%|██        | 1031/5000 [00:00<00:01, 2238.21it/s]Loading:  19%|█▊        | 936/5000 [00:00<00:01, 2056.13it/s]Loading:  25%|██▌       | 1272/5000 [00:00<00:01, 2045.97it/s]Loading:  47%|████▋     | 2344/5000 [00:01<00:01, 2232.91it/s]Loading:  26%|██▌       | 1308/5000 [00:00<00:01, 2378.32it/s]Loading:  25%|██▌       | 1259/5000 [00:00<00:01, 2241.32it/s]Loading:  23%|██▎       | 1147/5000 [00:00<00:01, 2067.27it/s]Loading:  16%|█▌        | 799/5000 [00:00<00:01, 2271.17it/s]Loading:  30%|██▉       | 1492/5000 [00:00<00:01, 2092.68it/s]Loading:  52%|█████▏    | 2579/5000 [00:01<00:01, 2266.22it/s]Loading:  31%|███       | 1557/5000 [00:00<00:01, 2411.34it/s]Loading:  27%|██▋       | 1367/5000 [00:00<00:01, 2109.79it/s]Loading:  30%|██▉       | 1494/5000 [00:00<00:01, 2266.81it/s]Loading:  21%|██        | 1028/5000 [00:00<00:01, 2272.03it/s]Loading:  34%|███▍      | 1710/5000 [00:00<00:01, 2119.55it/s]Loading:  56%|█████▋    | 2814/5000 [00:01<00:00, 2284.53it/s]Loading:  36%|███▌      | 1808/5000 [00:00<00:01, 2436.07it/s]Loading:  35%|███▍      | 1734/5000 [00:00<00:01, 2304.21it/s]Loading:  32%|███▏      | 1579/5000 [00:00<00:01, 2099.76it/s]Loading:  26%|██▌       | 1279/5000 [00:00<00:01, 2348.99it/s]Loading:  38%|███▊      | 1923/5000 [00:00<00:01, 2115.59it/s]Loading:  61%|██████    | 3044/5000 [00:01<00:00, 2285.35it/s]Loading:  41%|████      | 2054/5000 [00:00<00:01, 2432.41it/s]Loading:  39%|███▉      | 1973/5000 [00:00<00:01, 2328.15it/s]Loading:  36%|███▌      | 1799/5000 [00:00<00:01, 2125.20it/s]Loading:  31%|███       | 1526/5000 [00:00<00:01, 2385.45it/s]Loading:  43%|████▎     | 2149/5000 [00:01<00:01, 2157.37it/s]Loading:  46%|████▋     | 2314/5000 [00:00<00:01, 2480.10it/s]Loading:  65%|██████▌   | 3273/5000 [00:01<00:00, 2272.53it/s]Loading:  40%|████      | 2012/5000 [00:00<00:01, 2113.00it/s]Loading:  44%|████▍     | 2207/5000 [00:00<00:01, 2296.22it/s]Loading:  36%|███▌      | 1777/5000 [00:00<00:01, 2416.77it/s]Loading:  48%|████▊     | 2381/5000 [00:01<00:01, 2205.69it/s]Loading:  70%|███████   | 3516/5000 [00:01<00:00, 2315.28it/s]Loading:  51%|█████▏    | 2563/5000 [00:01<00:00, 2457.30it/s]Loading:  45%|████▍     | 2241/5000 [00:01<00:01, 2155.02it/s]Loading:  49%|████▉     | 2441/5000 [00:01<00:01, 2302.41it/s]Loading:  40%|████      | 2020/5000 [00:00<00:01, 2409.16it/s]Loading:  52%|█████▏    | 2606/5000 [00:01<00:01, 2194.99it/s]Loading:  75%|███████▍  | 3748/5000 [00:01<00:00, 2302.14it/s]Loading:  56%|█████▌    | 2809/5000 [00:01<00:00, 2452.16it/s]Loading:  50%|████▉     | 2476/5000 [00:01<00:01, 2212.19it/s]Loading:  53%|█████▎    | 2672/5000 [00:01<00:01, 2301.66it/s]Loading:  45%|████▌     | 2269/5000 [00:00<00:01, 2423.99it/s]Loading:  57%|█████▋    | 2826/5000 [00:01<00:01, 2157.31it/s]Loading:  80%|███████▉  | 3985/5000 [00:01<00:00, 2314.83it/s]Loading:  61%|██████    | 3058/5000 [00:01<00:00, 2461.80it/s]Loading:  54%|█████▍    | 2698/5000 [00:01<00:01, 2169.42it/s]Loading:  58%|█████▊    | 2903/5000 [00:01<00:00, 2235.07it/s]Loading:  50%|█████     | 2512/5000 [00:01<00:01, 2400.86it/s]Loading:  61%|██████    | 3042/5000 [00:01<00:00, 2147.59it/s]Loading:  85%|████████▍ | 4226/5000 [00:01<00:00, 2339.47it/s]Loading:  66%|██████▌   | 3305/5000 [00:01<00:00, 2445.47it/s]Loading:  58%|█████▊    | 2916/5000 [00:01<00:00, 2168.48it/s]Loading:  63%|██████▎   | 3127/5000 [00:01<00:00, 2199.92it/s]Loading:  55%|█████▌    | 2753/5000 [00:01<00:00, 2353.23it/s]Loading:  65%|██████▌   | 3262/5000 [00:01<00:00, 2156.47it/s]Loading:  89%|████████▉ | 4464/5000 [00:01<00:00, 2349.81it/s]Loading:  71%|███████   | 3550/5000 [00:01<00:00, 2427.22it/s]Loading:  63%|██████▎   | 3134/5000 [00:01<00:00, 2144.39it/s]Loading:  67%|██████▋   | 3349/5000 [00:01<00:00, 2203.29it/s]Loading:  60%|█████▉    | 2989/5000 [00:01<00:00, 2346.79it/s]Loading:  70%|██████▉   | 3478/5000 [00:01<00:00, 2140.71it/s]Loading:  94%|█████████▍| 4704/5000 [00:02<00:00, 2358.61it/s]Loading:  76%|███████▌  | 3793/5000 [00:01<00:00, 2408.45it/s]Loading:  67%|██████▋   | 3349/5000 [00:01<00:00, 2143.88it/s]Loading:  72%|███████▏  | 3576/5000 [00:01<00:00, 2222.74it/s]Loading:  64%|██████▍   | 3224/5000 [00:01<00:00, 2311.73it/s]Loading:  74%|███████▍  | 3694/5000 [00:01<00:00, 2144.80it/s]Loading:  99%|█████████▉| 4953/5000 [00:02<00:00, 2392.03it/s]Loading:  81%|████████  | 4034/5000 [00:01<00:00, 2377.16it/s]Loading:  71%|███████▏  | 3565/5000 [00:01<00:00, 2148.08it/s]Loading: 100%|██████████| 5000/5000 [00:02<00:00, 2285.87it/s]
+Loading:  76%|███████▌  | 3803/5000 [00:01<00:00, 2228.93it/s]Loading:  70%|██████▉   | 3477/5000 [00:01<00:00, 2372.77it/s]Loading:  79%|███████▊  | 3930/5000 [00:01<00:00, 2207.42it/s]  Test features: 500 files from /data4/workspace/zlt/featcodec/features/test/dinov2_vitl14/blk05
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  85%|████████▌ | 4272/5000 [00:01<00:00, 2376.37it/s]Loading:  76%|███████▋  | 3815/5000 [00:01<00:00, 2250.90it/s]Loading:  81%|████████  | 4038/5000 [00:01<00:00, 2263.74it/s]Loading:  74%|███████▍  | 3715/5000 [00:01<00:00, 2338.93it/s]Loading:  83%|████████▎ | 4164/5000 [00:01<00:00, 2241.95it/s]Loading:  46%|████▋     | 232/500 [00:00<00:00, 2317.84it/s]Loading:  90%|█████████ | 4522/5000 [00:01<00:00, 2411.58it/s]Loading:  81%|████████  | 4041/5000 [00:01<00:00, 2220.63it/s]Loading:  86%|████████▌ | 4276/5000 [00:01<00:00, 2294.92it/s]Loading:  79%|███████▉  | 3950/5000 [00:01<00:00, 2205.88it/s]Loading:  88%|████████▊ | 4395/5000 [00:02<00:00, 2259.98it/s]Loading:  93%|█████████▎| 464/500 [00:00<00:00, 2313.56it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 2329.80it/s]
+Loading:  95%|█████████▌| 4764/5000 [00:01<00:00, 2407.43it/s]Loading:  90%|█████████ | 4506/5000 [00:01<00:00, 2289.29it/s]Loading:  85%|████████▌ | 4264/5000 [00:01<00:00, 2172.96it/s]Loading:  83%|████████▎ | 4173/5000 [00:01<00:00, 2192.72it/s]Loading:  93%|█████████▎| 4636/5000 [00:02<00:00, 2302.33it/s]Loading: 100%|██████████| 5000/5000 [00:02<00:00, 2438.93it/s]
+Loading:  95%|█████████▌| 4753/5000 [00:02<00:00, 2342.92it/s]Loading:  90%|████████▉ | 4490/5000 [00:02<00:00, 2197.39it/s]  Test features: 500 files from /data4/workspace/zlt/featcodec/features/test/dinov2_vitl14/blk10
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  88%|████████▊ | 4401/5000 [00:01<00:00, 2176.85it/s]Loading:  98%|█████████▊| 4887/5000 [00:02<00:00, 2362.50it/s]Loading: 100%|██████████| 5000/5000 [00:02<00:00, 2301.86it/s]
+Loading: 100%|██████████| 5000/5000 [00:02<00:00, 2182.23it/s]
+Loading:  94%|█████████▍| 4717/5000 [00:02<00:00, 2218.22it/s]Loading:  57%|█████▋    | 287/500 [00:00<00:00, 2863.12it/s]  Test features: 500 files from /data4/workspace/zlt/featcodec/features/test/dinov2_vitg14/blk09
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]  Test features: 500 files from /data4/workspace/zlt/featcodec/features/test/dinov2_vitg14/blk19
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  93%|█████████▎| 4661/5000 [00:02<00:00, 2298.00it/s]Loading:  99%|█████████▉| 4941/5000 [00:02<00:00, 2222.46it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 2823.94it/s]
+Loading: 100%|██████████| 5000/5000 [00:02<00:00, 2175.28it/s]
+Loading:  56%|█████▋    | 282/500 [00:00<00:00, 2794.83it/s]Loading:  51%|█████     | 254/500 [00:00<00:00, 2522.50it/s]Loading:  98%|█████████▊| 4892/5000 [00:02<00:00, 2296.49it/s]  Test features: 500 files from /data4/workspace/zlt/featcodec/features/test/dinov2_vitg14/blk29
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading: 100%|██████████| 5000/5000 [00:02<00:00, 2334.31it/s]
+Loading: 100%|██████████| 500/500 [00:00<00:00, 2765.75it/s]
+Loading: 100%|██████████| 500/500 [00:00<00:00, 2595.96it/s]
+  Test features: 500 files from /data4/workspace/zlt/featcodec/features/test/dinov2_vitl14/blk15
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  50%|█████     | 251/500 [00:00<00:00, 2505.55it/s]Loading:  48%|████▊     | 241/500 [00:00<00:00, 2406.53it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 2426.90it/s]
+Loading:  96%|█████████▋| 482/500 [00:00<00:00, 2211.93it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 2242.39it/s]
+  Loading dinov2_vitl14...
+
+  --- OPQ K=4, emb=32, G=32 ---
+    MSE=6661.7  L_ref=811540.6  Acc=0.0740  mIoU=0.0727  Rate=64 bpt
+
+  --- OPQ K=8, emb=32, G=32 ---
+    MSE=6055.7  L_ref=657261.0  Acc=0.3820  mIoU=0.3592  Rate=96 bpt
+
+  --- OPQ K=16, emb=32, G=32 ---
+    MSE=5576.4  L_ref=427613.1  Acc=0.7340  mIoU=0.6263  Rate=128 bpt
+
+  --- OPQ K=32, emb=32, G=32 ---
+    MSE=5169.7  L_ref=283443.1  Acc=0.8660  mIoU=0.7061  Rate=160 bpt
+
+  --- OPQ K=64, emb=32, G=32 ---
+    MSE=4822.9  L_ref=206705.3  Acc=0.9140  mIoU=0.7641  Rate=192 bpt
+
+  --- OPQ K=256, emb=32, G=32 ---
+    MSE=4273.0  L_ref=134058.0  Acc=0.9480  mIoU=0.7879  Rate=256 bpt
+
+  --- OPQ K=64, emb=16, G=64 ---
+    MSE=3870.2  L_ref=107824.2  Acc=0.9560  mIoU=0.7899  Rate=384 bpt
+
+  --- OPQ K=256, emb=16, G=64 ---
+    MSE=3269.0  L_ref=72600.7  Acc=0.9720  mIoU=0.7974  Rate=512 bpt
+
+  --- OPQ K=64, emb=8, G=128 ---
+    MSE=2550.7  L_ref=46672.2  Acc=0.9740  mIoU=0.8040  Rate=768 bpt
+
+  --- OPQ K=256, emb=8, G=128 ---
+    MSE=1902.1  L_ref=30038.6  Acc=0.9800  mIoU=0.8055  Rate=1024 bpt
+
+  Loaded 8 existing DOPQ results
+
+  Saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/results/analysis_intro_v2/correlation_dinov2_vitl14_blk15.json
+
+  === OPQ Correlation Summary ===
+    Pearson r(MSE, Acc)   = -0.7910
+    Pearson r(L_ref, Acc) = -0.9701
+    Pearson r(MSE, mIoU)  = -0.7820
+    Pearson r(L_ref,mIoU) = -0.9633
+
+  === DOPQ Summary (8 configs) ===
+    K= 16 emb=32 λ=0.5  Acc=0.9600  L_ref=106879.6  mIoU=0.7893
+    K=256 emb=16 λ=0.2  Acc=0.9780  L_ref=52071.4  mIoU=0.8044
+    K=256 emb=16 λ=0.5  Acc=0.9800  L_ref=44574.4  mIoU=0.8039
+    K=256 emb=32 λ=0.5  Acc=0.9760  L_ref=67032.3  mIoU=0.7999
+    K=  4 emb=32 λ=0.5  Acc=0.9440  L_ref=174614.1  mIoU=0.7807
+    K= 64 emb=16 λ=0.5  Acc=0.9800  L_ref=53896.9  mIoU=0.8034
+    K= 64 emb=32 λ=0.5  Acc=0.9640  L_ref=79618.9  mIoU=0.7956
+    K=  8 emb=32 λ=0.5  Acc=0.9600  L_ref=129169.1  mIoU=0.7890
+  [OK] 9.9min
+[GPU 5] dinov2_vitl14 blk20 (~50min)
+
+######################################################################
+# Figure 1: MSE vs L_ref correlation with downstream Acc
+# layer=blk20
+# 2026-03-07 16:10:45
+######################################################################
+  Train features: 5000 files from /data4/workspace/zlt/featcodec/features/train/dinov2_vitl14/blk20
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:   7%|▋         | 371/5000 [00:00<00:01, 3692.07it/s]Loading:  15%|█▍        | 741/5000 [00:00<00:01, 3055.10it/s]Loading:  21%|██        | 1054/5000 [00:00<00:01, 3021.67it/s]Loading:  27%|██▋       | 1367/5000 [00:00<00:01, 3053.69it/s]Loading:  34%|███▎      | 1675/5000 [00:00<00:01, 2881.79it/s]Loading:  40%|████      | 2015/5000 [00:00<00:00, 3041.94it/s]Loading:  46%|████▋     | 2323/5000 [00:00<00:00, 2974.96it/s]Loading:  53%|█████▎    | 2626/5000 [00:00<00:00, 2987.98it/s]Loading:  59%|█████▊    | 2927/5000 [00:01<00:00, 2611.45it/s]Loading:  64%|██████▍   | 3197/5000 [00:01<00:00, 2435.03it/s]Loading:  69%|██████▉   | 3448/5000 [00:01<00:00, 2324.14it/s]Loading:  74%|███████▎  | 3686/5000 [00:01<00:00, 2214.95it/s]Loading:  78%|███████▊  | 3911/5000 [00:01<00:00, 2181.48it/s]Loading:  83%|████████▎ | 4158/5000 [00:01<00:00, 2258.55it/s]Loading:  88%|████████▊ | 4387/5000 [00:01<00:00, 2215.89it/s]Loading:  94%|█████████▎| 4684/5000 [00:01<00:00, 2425.34it/s]Loading:  99%|█████████▉| 4963/5000 [00:01<00:00, 2527.07it/s]Loading: 100%|██████████| 5000/5000 [00:01<00:00, 2607.61it/s]
+  Test features: 500 files from /data4/workspace/zlt/featcodec/features/test/dinov2_vitl14/blk20
+  并行加载特征 (workers=8)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  61%|██████    | 306/500 [00:00<00:00, 3039.20it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 2917.88it/s]
+  Loading dinov2_vitl14...
+
+  --- OPQ K=4, emb=32, G=32 ---
+    MSE=894.0  L_ref=661320.9  Acc=0.3760  mIoU=0.5479  Rate=64 bpt
+
+  --- OPQ K=8, emb=32, G=32 ---
+    MSE=769.4  L_ref=385545.1  Acc=0.8100  mIoU=0.7269  Rate=96 bpt
+
+  --- OPQ K=16, emb=32, G=32 ---
+    MSE=695.5  L_ref=264509.2  Acc=0.9080  mIoU=0.7783  Rate=128 bpt
+
+  --- OPQ K=32, emb=32, G=32 ---
+    MSE=642.9  L_ref=208749.4  Acc=0.9500  mIoU=0.7952  Rate=160 bpt
+
+  --- OPQ K=64, emb=32, G=32 ---
+    MSE=594.9  L_ref=169058.9  Acc=0.9580  mIoU=0.8026  Rate=192 bpt
+
+  --- OPQ K=256, emb=32, G=32 ---
+    MSE=513.7  L_ref=111670.3  Acc=0.9660  mIoU=0.8064  Rate=256 bpt
+
+  --- OPQ K=64, emb=16, G=64 ---
+    MSE=432.9  L_ref=76441.6  Acc=0.9780  mIoU=0.8093  Rate=384 bpt
+
+  --- OPQ K=256, emb=16, G=64 ---
+    MSE=356.4  L_ref=53274.4  Acc=0.9840  mIoU=0.8117  Rate=512 bpt
+
+  --- OPQ K=64, emb=8, G=128 ---
+    MSE=268.9  L_ref=34326.3  Acc=0.9820  mIoU=0.8125  Rate=768 bpt
+
+  --- OPQ K=256, emb=8, G=128 ---
+    MSE=197.8  L_ref=22466.6  Acc=0.9840  mIoU=0.8131  Rate=1024 bpt
+
+  Loaded 15 existing DOPQ results
+
+  Saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/results/analysis_intro_v2/correlation_dinov2_vitl14_blk10.json
+
+  === OPQ Correlation Summary ===
+    Pearson r(MSE, Acc)   = -0.7202
+    Pearson r(L_ref, Acc) = -0.9371
+    Pearson r(MSE, mIoU)  = -0.7329
+    Pearson r(L_ref,mIoU) = -0.9455
+
+  === DOPQ Summary (15 configs) ===
+    K= 16 emb=16 λ=0.5  Acc=0.9820  L_ref=64517.6  mIoU=0.8076
+    K= 16 emb=32 λ=0.5  Acc=0.9800  L_ref=99778.5  mIoU=0.7991
+    K= 16 emb=32 λ=0.5  Acc=0.9760  L_ref=99278.2  mIoU=0.7994
+    K= 16 emb=32 λ=0.5  Acc=0.9720  L_ref=98701.1  mIoU=0.7974
+    K=256 emb=16 λ=0.5  Acc=0.9820  L_ref=37706.3  mIoU=0.8111
+    K=256 emb=16 λ=0.5  Acc=0.9800  L_ref=37761.2  mIoU=0.8107
+    K=256 emb=16 λ=0.5  Acc=0.9920  L_ref=37738.5  mIoU=0.8113
+    K=256 emb=32 λ=0.5  Acc=0.9860  L_ref=61767.1  mIoU=0.8057
+    K=256 emb=32 λ=0.0  Acc=0.9820  L_ref=62818.4  mIoU=0.8072
+    K=  4 emb=32 λ=0.5  Acc=0.9440  L_ref=175456.6  mIoU=0.7889
+    K=  4 emb=32 λ=0.5  Acc=0.9480  L_ref=175586.3  mIoU=0.7879
+    K=  4 emb=32 λ=0.5  Acc=0.9680  L_ref=169926.2  mIoU=0.7907
+    K= 64 emb=16 λ=0.5  Acc=0.9940  L_ref=46623.3  mIoU=0.8102
+    K= 64 emb=32 λ=0.0  Acc=0.9880  L_ref=76114.2  mIoU=0.8071
+    K=  8 emb=32 λ=0.5  Acc=0.9700  L_ref=127502.4  mIoU=0.8003
+  [OK] 10.7min
+  Loading dinov2_vitl14...
+
+  --- OPQ K=4, emb=32, G=32 ---
+    MSE=405.5  L_ref=938586.4  Acc=0.0040  mIoU=0.0342  Rate=64 bpt
+
+  --- OPQ K=8, emb=32, G=32 ---
+    MSE=343.7  L_ref=793378.3  Acc=0.2340  mIoU=0.4228  Rate=96 bpt
+
+  --- OPQ K=16, emb=32, G=32 ---
+    MSE=298.8  L_ref=609391.2  Acc=0.6240  mIoU=0.7119  Rate=128 bpt
+
+  --- OPQ K=32, emb=32, G=32 ---
+    MSE=268.0  L_ref=554520.8  Acc=0.7040  mIoU=0.7658  Rate=160 bpt
+
+  --- OPQ K=64, emb=32, G=32 ---
+    MSE=244.2  L_ref=471596.1  Acc=0.8040  mIoU=0.7826  Rate=192 bpt
+
+  --- OPQ K=256, emb=32, G=32 ---
+    MSE=208.0  L_ref=355784.5  Acc=0.8980  mIoU=0.8112  Rate=256 bpt
+
+  --- OPQ K=64, emb=16, G=64 ---
+    MSE=169.8  L_ref=252992.1  Acc=0.9380  mIoU=0.8164  Rate=384 bpt
+
+  --- OPQ K=256, emb=16, G=64 ---
+    MSE=134.9  L_ref=159378.3  Acc=0.9700  mIoU=0.8165  Rate=512 bpt
+
+  --- OPQ K=64, emb=8, G=128 ---
+    MSE=96.7  L_ref=83141.7  Acc=0.9800  mIoU=0.8190  Rate=768 bpt
+
+  --- OPQ K=256, emb=8, G=128 ---
+    MSE=67.4  L_ref=49709.1  Acc=0.9800  mIoU=0.8184  Rate=1024 bpt
+
+  Loaded 8 existing DOPQ results
+
+  Saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/results/analysis_intro_v2/correlation_dinov2_vitl14_blk05.json
+
+  === OPQ Correlation Summary ===
+    Pearson r(MSE, Acc)   = -0.9134
+    Pearson r(L_ref, Acc) = -0.9389
+    Pearson r(MSE, mIoU)  = -0.7954
+    Pearson r(L_ref,mIoU) = -0.8227
+
+  === DOPQ Summary (8 configs) ===
+    K= 16 emb=32 λ=0.5  Acc=0.9640  L_ref=148310.5  mIoU=0.7917
+    K=256 emb=16 λ=0.2  Acc=0.9780  L_ref=76750.3  mIoU=0.8050
+    K=256 emb=16 λ=0.5  Acc=0.9800  L_ref=66781.4  mIoU=0.8091
+    K=256 emb=32 λ=0.5  Acc=0.9800  L_ref=96102.0  mIoU=0.8001
+    K=  4 emb=32 λ=0.5  Acc=0.9420  L_ref=260787.6  mIoU=0.6881
+    K= 64 emb=16 λ=0.5  Acc=0.9780  L_ref=76714.9  mIoU=0.8060
+    K= 64 emb=32 λ=0.5  Acc=0.9780  L_ref=112497.2  mIoU=0.7893
+    K=  8 emb=32 λ=0.5  Acc=0.9680  L_ref=181109.8  mIoU=0.7731
+  [OK] 11.4min
+  Loading dinov2_vitg14...
+
+  --- OPQ K=4, emb=32, G=48 ---
+    MSE=68085.2  L_ref=621767.3  Acc=0.2980  mIoU=0.2732  Rate=96 bpt
+
+  --- OPQ K=8, emb=32, G=48 ---
+    MSE=59383.8  L_ref=495028.6  Acc=0.6240  mIoU=0.4761  Rate=144 bpt
+
+  --- OPQ K=16, emb=32, G=48 ---
+    MSE=55522.0  L_ref=363359.9  Acc=0.8460  mIoU=0.6734  Rate=192 bpt
+
+  --- OPQ K=32, emb=32, G=48 ---
+    MSE=53060.3  L_ref=271474.7  Acc=0.9360  mIoU=0.7610  Rate=240 bpt
+
+  --- OPQ K=64, emb=32, G=48 ---
+    MSE=47915.4  L_ref=234024.2  Acc=0.9460  mIoU=0.7796  Rate=288 bpt
+
+  --- OPQ K=256, emb=32, G=48 ---
+    MSE=40272.8  L_ref=169194.9  Acc=0.9720  mIoU=0.8070  Rate=384 bpt
+
+  --- OPQ K=64, emb=16, G=96 ---
+    MSE=39186.4  L_ref=145225.1  Acc=0.9680  mIoU=0.8084  Rate=576 bpt
+
+  --- OPQ K=256, emb=16, G=96 ---
+    MSE=32567.2  L_ref=109379.5  Acc=0.9780  mIoU=0.8202  Rate=768 bpt
+
+  --- OPQ K=64, emb=8, G=192 ---
+    MSE=27987.8  L_ref=77185.0  Acc=0.9820  mIoU=0.8249  Rate=1152 bpt
+
+  --- OPQ K=256, emb=8, G=192 ---
+    MSE=19744.1  L_ref=52892.0  Acc=0.9880  mIoU=0.8275  Rate=1536 bpt
+
+  Loaded 12 existing DOPQ results
+
+  Saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/results/analysis_intro_v2/correlation_dinov2_vitg14_blk29.json
+
+  === OPQ Correlation Summary ===
+    Pearson r(MSE, Acc)   = -0.7729
+    Pearson r(L_ref, Acc) = -0.9247
+    Pearson r(MSE, mIoU)  = -0.8115
+    Pearson r(L_ref,mIoU) = -0.9535
+
+  === DOPQ Summary (12 configs) ===
+    K= 16 emb=32 λ=0.5  Acc=0.9780  L_ref=145653.7  mIoU=0.8138
+    K= 16 emb=32 λ=0.5  Acc=0.9780  L_ref=146431.6  mIoU=0.8127
+    K= 16 emb=32 λ=0.5  Acc=0.9700  L_ref=149279.8  mIoU=0.8118
+    K=256 emb=32 λ=0.5  Acc=0.9860  L_ref=100466.0  mIoU=0.8236
+    K=256 emb=32 λ=0.0  Acc=0.9880  L_ref=95798.1  mIoU=0.8250
+    K=  4 emb=32 λ=0.5  Acc=0.9560  L_ref=221496.6  mIoU=0.7975
+    K= 64 emb=16 λ=0.5  Acc=0.9840  L_ref=90165.3  mIoU=0.8218
+    K= 64 emb=32 λ=0.5  Acc=0.9760  L_ref=117713.1  mIoU=0.8193
+    K= 64 emb=32 λ=0.5  Acc=0.9820  L_ref=116616.5  mIoU=0.8204
+    K= 64 emb=32 λ=0.5  Acc=0.9760  L_ref=117014.3  mIoU=0.8165
+    K= 64 emb=32 λ=0.0  Acc=0.9800  L_ref=117071.8  mIoU=0.8178
+    K=  8 emb=32 λ=0.5  Acc=0.9620  L_ref=174942.9  mIoU=0.8080
+  [OK] 16.5min
+  Loading dinov2_vitg14...
+
+  --- OPQ K=4, emb=32, G=48 ---
+    MSE=6293.1  L_ref=433341.4  Acc=0.8780  mIoU=0.7976  Rate=96 bpt
+
+  --- OPQ K=8, emb=32, G=48 ---
+    MSE=5721.3  L_ref=275648.8  Acc=0.9540  mIoU=0.8168  Rate=144 bpt
+
+  --- OPQ K=16, emb=32, G=48 ---
+    MSE=5279.4  L_ref=206005.7  Acc=0.9780  mIoU=0.8250  Rate=192 bpt
+
+  --- OPQ K=32, emb=32, G=48 ---
+    MSE=4929.4  L_ref=170719.4  Acc=0.9840  mIoU=0.8256  Rate=240 bpt
+
+  --- OPQ K=64, emb=32, G=48 ---
+    MSE=4608.6  L_ref=143717.9  Acc=0.9820  mIoU=0.8262  Rate=288 bpt
+
+  --- OPQ K=256, emb=32, G=48 ---
+    MSE=4051.7  L_ref=109241.5  Acc=0.9940  mIoU=0.8275  Rate=384 bpt
+
+  --- OPQ K=64, emb=16, G=96 ---
+    MSE=3591.2  L_ref=82394.6  Acc=0.9900  mIoU=0.8283  Rate=576 bpt
+
+  --- OPQ K=256, emb=16, G=96 ---
+    MSE=3019.2  L_ref=61711.3  Acc=0.9960  mIoU=0.8291  Rate=768 bpt
+
+  --- OPQ K=64, emb=8, G=192 ---
+    MSE=2367.4  L_ref=43669.0  Acc=0.9940  mIoU=0.8294  Rate=1152 bpt
+
+  --- OPQ K=256, emb=8, G=192 ---
+    MSE=1749.5  L_ref=29915.1  Acc=0.9940  mIoU=0.8302  Rate=1536 bpt
+
+  Loaded 8 existing DOPQ results
+
+  Saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/results/analysis_intro_v2/correlation_dinov2_vitg14_blk19.json
+
+  === OPQ Correlation Summary ===
+    Pearson r(MSE, Acc)   = -0.7087
+    Pearson r(L_ref, Acc) = -0.9337
+    Pearson r(MSE, mIoU)  = -0.7396
+    Pearson r(L_ref,mIoU) = -0.9477
+
+  === DOPQ Summary (8 configs) ===
+    K= 16 emb=32 λ=0.5  Acc=0.9940  L_ref=100567.1  mIoU=0.8322
+    K=256 emb=32 λ=0.5  Acc=0.9940  L_ref=67381.6  mIoU=0.8326
+    K=256 emb=32 λ=0.0  Acc=0.9940  L_ref=68367.9  mIoU=0.8348
+    K=  4 emb=32 λ=0.5  Acc=0.9760  L_ref=154237.8  mIoU=0.8313
+    K= 64 emb=16 λ=0.5  Acc=0.9960  L_ref=52423.1  mIoU=0.8319
+    K= 64 emb=32 λ=0.5  Acc=0.9940  L_ref=80076.9  mIoU=0.8322
+    K= 64 emb=32 λ=0.0  Acc=0.9920  L_ref=79099.9  mIoU=0.8343
+    K=  8 emb=32 λ=0.5  Acc=0.9880  L_ref=123043.0  mIoU=0.8343
+  [OK] 18.5min
+  Loading dinov2_vitl14...
+
+  --- OPQ K=4, emb=32, G=32 ---
+    MSE=114438.4  L_ref=698755.0  Acc=0.0380  mIoU=0.0744  Rate=64 bpt
+
+  --- OPQ K=8, emb=32, G=32 ---
+    MSE=105691.9  L_ref=535963.2  Acc=0.3080  mIoU=0.2417  Rate=96 bpt
+
+  --- OPQ K=16, emb=32, G=32 ---
+    MSE=98588.1  L_ref=437680.8  Acc=0.5580  mIoU=0.3807  Rate=128 bpt
+
+  --- OPQ K=32, emb=32, G=32 ---
+    MSE=92364.2  L_ref=367771.4  Acc=0.7160  mIoU=0.4866  Rate=160 bpt
+
+  --- OPQ K=64, emb=32, G=32 ---
+    MSE=85710.2  L_ref=313709.5  Acc=0.7820  mIoU=0.5701  Rate=192 bpt
+
+  --- OPQ K=256, emb=32, G=32 ---
+    MSE=75306.7  L_ref=242552.2  Acc=0.8460  mIoU=0.6310  Rate=256 bpt
+
+  --- OPQ K=64, emb=16, G=64 ---
+    MSE=72112.9  L_ref=215718.5  Acc=0.8900  mIoU=0.6622  Rate=384 bpt
+
+  --- OPQ K=256, emb=16, G=64 ---
+    MSE=61248.4  L_ref=160115.6  Acc=0.9320  mIoU=0.7128  Rate=512 bpt
+
+  --- OPQ K=64, emb=8, G=128 ---
+    MSE=48569.7  L_ref=108332.9  Acc=0.9580  mIoU=0.7293  Rate=768 bpt
+
+  --- OPQ K=256, emb=8, G=128 ---
+    MSE=36265.8  L_ref=71494.7  Acc=0.9700  mIoU=0.7579  Rate=1024 bpt
+
+  Loaded 72 existing DOPQ results
+
+  Saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/results/analysis_intro_v2/correlation_dinov2_vitl14_blk20.json
+
+  === OPQ Correlation Summary ===
+    Pearson r(MSE, Acc)   = -0.8702
+    Pearson r(L_ref, Acc) = -0.9750
+    Pearson r(MSE, mIoU)  = -0.9166
+    Pearson r(L_ref,mIoU) = -0.9917
+
+  === DOPQ Summary (72 configs) ===
+    K=1024 emb=16 λ=0.5  Acc=0.9620  L_ref=86535.9  mIoU=0.7785
+    K=128 emb=32 λ=0.5  Acc=0.9480  L_ref=137878.7  mIoU=0.7308
+    K= 16 emb=16 λ=0.5  Acc=0.9440  L_ref=142626.8  mIoU=0.7346
+    K= 16 emb=32 λ=0.5  Acc=0.9060  L_ref=194550.1  mIoU=0.6882
+    K= 16 emb=32 λ=0.5  Acc=0.9080  L_ref=221572.4  mIoU=0.6685
+    K= 16 emb=32 λ=0.5  Acc=0.8980  L_ref=222612.5  mIoU=0.6529
+    K= 16 emb=32 λ=0.5  Acc=0.9080  L_ref=194253.3  mIoU=0.6889
+    K= 16 emb=32 λ=0.1  Acc=0.9100  L_ref=198248.1  mIoU=0.7076
+    K= 16 emb=32 λ=0.2  Acc=0.9160  L_ref=193664.3  mIoU=0.7075
+    K= 16 emb=32 λ=0.5  Acc=0.8140  L_ref=265645.6  mIoU=0.5949
+    K= 16 emb=32 λ=0.5  Acc=0.0620  L_ref=498821.0  mIoU=0.2158
+    K= 16 emb=32 λ=0.5  Acc=0.9060  L_ref=193930.4  mIoU=0.7068
+    K= 16 emb=32 λ=0.5  Acc=0.9100  L_ref=205467.8  mIoU=0.6951
+    K= 16 emb=32 λ=0.5  Acc=0.9200  L_ref=193118.9  mIoU=0.7074
+    K= 16 emb=32 λ=0.5  Acc=0.9300  L_ref=192893.8  mIoU=0.6944
+    K= 16 emb=32 λ=0.5  Acc=0.9080  L_ref=193101.4  mIoU=0.7142
+    K= 16 emb=32 λ=0.5  Acc=0.9140  L_ref=187851.3  mIoU=0.7113
+    K= 16 emb=32 λ=0.5  Acc=0.8980  L_ref=193990.2  mIoU=0.7142
+    K= 16 emb=32 λ=0.5  Acc=0.9180  L_ref=191974.1  mIoU=0.6987
+    K= 16 emb=32 λ=0.5  Acc=0.9140  L_ref=190290.2  mIoU=0.7011
+    K= 16 emb=32 λ=0.5  Acc=0.9180  L_ref=191021.0  mIoU=0.7011
+    K= 16 emb=32 λ=0.5  Acc=0.9260  L_ref=191713.2  mIoU=0.7012
+    K= 16 emb=32 λ=0.5  Acc=0.9120  L_ref=191057.1  mIoU=0.6906
+    K= 16 emb=32 λ=1.0  Acc=0.8860  L_ref=205558.5  mIoU=0.6912
+    K= 16 emb=32 λ=1.0  Acc=0.9200  L_ref=202498.5  mIoU=0.7041
+    K= 16 emb=32 λ=2.0  Acc=0.9160  L_ref=200696.4  mIoU=0.6910
+    K= 16 emb=32 λ=0.5  Acc=0.5280  L_ref=439141.2  mIoU=0.4064  mse_loss
+    K= 16 emb=32 λ=0.0  Acc=0.9160  L_ref=192560.6  mIoU=0.6979
+    K= 16 emb= 8 λ=0.5  Acc=0.9640  L_ref=94711.3  mIoU=0.7513
+    K=256 emb=16 λ=0.5  Acc=0.9580  L_ref=94042.2  mIoU=0.7445
+    K=256 emb=16 λ=0.5  Acc=0.9520  L_ref=117307.1  mIoU=0.7380
+    K=256 emb=16 λ=0.5  Acc=0.9580  L_ref=118473.4  mIoU=0.7454
+    K=256 emb=16 λ=0.5  Acc=0.9660  L_ref=94112.4  mIoU=0.7494
+    K=256 emb=16 λ=0.1  Acc=0.9480  L_ref=145531.3  mIoU=0.7305
+    K=256 emb=16 λ=0.2  Acc=0.9520  L_ref=110177.8  mIoU=0.7498
+    K=256 emb=16 λ=0.3  Acc=0.9560  L_ref=100161.3  mIoU=0.7553
+    K=256 emb=16 λ=0.5  Acc=0.9640  L_ref=114460.6  mIoU=0.7353
+    K=256 emb=16 λ=0.5  Acc=0.6020  L_ref=389733.3  mIoU=0.2335
+    K=256 emb=16 λ=0.5  Acc=0.9620  L_ref=94362.1  mIoU=0.7568
+    K=256 emb=16 λ=0.5  Acc=0.9660  L_ref=94306.1  mIoU=0.7615
+    K=256 emb=16 λ=0.5  Acc=0.9580  L_ref=94382.3  mIoU=0.7579
+    K=256 emb=16 λ=0.5  Acc=0.8820  L_ref=215121.4  mIoU=0.6735  mse_loss
+    K=256 emb=16 λ=0.0  Acc=0.9640  L_ref=91984.5  mIoU=0.7594
+    K=256 emb=32 λ=0.5  Acc=0.9460  L_ref=127504.8  mIoU=0.7240
+    K=256 emb=32 λ=0.0  Acc=0.9540  L_ref=123982.2  mIoU=0.7413
+    K=  2 emb=16 λ=0.0  Acc=0.1560  L_ref=311135.7  mIoU=0.6229
+    K= 32 emb=32 λ=0.1  Acc=0.9220  L_ref=181962.3  mIoU=0.7103
+    K= 32 emb=32 λ=0.2  Acc=0.9300  L_ref=173558.1  mIoU=0.7260
+    K= 32 emb=32 λ=0.5  Acc=0.9420  L_ref=171264.7  mIoU=0.7062
+    K=  4 emb=16 λ=0.5  Acc=0.9000  L_ref=212591.7  mIoU=0.6915
+    K=  4 emb=32 λ=0.5  Acc=0.7900  L_ref=289752.6  mIoU=0.6347
+    K=  4 emb=32 λ=0.5  Acc=0.2560  L_ref=299294.6  mIoU=0.6146
+    K=  4 emb=32 λ=0.5  Acc=0.2000  L_ref=299061.3  mIoU=0.6357
+    K=  4 emb=32 λ=0.0  Acc=0.8280  L_ref=281341.9  mIoU=0.6615
+    K=  4 emb=32 λ=0.0  Acc=0.1900  L_ref=286676.4  mIoU=0.6347
+    K=512 emb=16 λ=0.5  Acc=0.9660  L_ref=89617.1  mIoU=0.7703
+    K= 64 emb=16 λ=0.5  Acc=0.9400  L_ref=145590.4  mIoU=0.7267
+    K= 64 emb=16 λ=0.5  Acc=0.4480  L_ref=419419.1  mIoU=0.1251
+    K= 64 emb=16 λ=0.5  Acc=0.9540  L_ref=112720.3  mIoU=0.7490
+    K= 64 emb=16 λ=0.5  Acc=0.9520  L_ref=112111.8  mIoU=0.7485
+    K= 64 emb=16 λ=0.5  Acc=0.9600  L_ref=112862.9  mIoU=0.7486
+    K= 64 emb=16 λ=0.5  Acc=0.8500  L_ref=267055.6  mIoU=0.6281  mse_loss
+    K= 64 emb=32 λ=0.0  Acc=0.9360  L_ref=152579.8  mIoU=0.7309
+    K= 64 emb= 8 λ=0.5  Acc=0.9680  L_ref=73601.5  mIoU=0.7628
+    K=  8 emb=32 λ=0.1  Acc=0.8920  L_ref=227467.5  mIoU=0.6808
+    K=  8 emb=32 λ=0.2  Acc=0.8860  L_ref=226433.2  mIoU=0.6743
+    K=  8 emb=32 λ=0.5  Acc=0.7320  L_ref=320651.0  mIoU=0.5738
+    K=  8 emb=32 λ=0.5  Acc=0.0320  L_ref=499301.1  mIoU=0.0337
+    K=  8 emb=32 λ=0.5  Acc=0.8740  L_ref=226027.5  mIoU=0.6736
+    K=  8 emb=32 λ=0.5  Acc=0.8680  L_ref=226892.9  mIoU=0.6869
+    K=  8 emb=32 λ=0.5  Acc=0.8760  L_ref=227185.8  mIoU=0.6861
+    K=  8 emb=32 λ=0.5  Acc=0.3360  L_ref=524982.8  mIoU=0.2872  mse_loss
+  [OK] 8.6min
+  Loading dinov2_vitg14...
+
+  --- OPQ K=4, emb=32, G=48 ---
+    MSE=966.3  L_ref=526851.1  Acc=0.9100  mIoU=0.7976  Rate=96 bpt
+
+  --- OPQ K=8, emb=32, G=48 ---
+    MSE=855.0  L_ref=405263.3  Acc=0.9440  mIoU=0.8147  Rate=144 bpt
+
+  --- OPQ K=16, emb=32, G=48 ---
+    MSE=773.8  L_ref=301422.7  Acc=0.9740  mIoU=0.8218  Rate=192 bpt
+
+  --- OPQ K=32, emb=32, G=48 ---
+    MSE=711.7  L_ref=247337.6  Acc=0.9740  mIoU=0.8221  Rate=240 bpt
+
+  --- OPQ K=64, emb=32, G=48 ---
+    MSE=657.5  L_ref=204664.4  Acc=0.9680  mIoU=0.8249  Rate=288 bpt
+
+  --- OPQ K=256, emb=32, G=48 ---
+    MSE=569.7  L_ref=149813.9  Acc=0.9880  mIoU=0.8238  Rate=384 bpt
+
+  --- OPQ K=64, emb=16, G=96 ---
+    MSE=473.0  L_ref=107627.0  Acc=0.9960  mIoU=0.8257  Rate=576 bpt
+
+  --- OPQ K=256, emb=16, G=96 ---
+    MSE=383.8  L_ref=79505.6  Acc=0.9920  mIoU=0.8268  Rate=768 bpt
+
+  --- OPQ K=64, emb=8, G=192 ---
+    MSE=286.1  L_ref=55624.2  Acc=0.9900  mIoU=0.8284  Rate=1152 bpt
+
+  --- OPQ K=256, emb=8, G=192 ---
+    MSE=205.2  L_ref=38673.7  Acc=0.9940  mIoU=0.8296  Rate=1536 bpt
+
+  Loaded 8 existing DOPQ results
+
+  Saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/results/analysis_intro_v2/correlation_dinov2_vitg14_blk09.json
+
+  === OPQ Correlation Summary ===
+    Pearson r(MSE, Acc)   = -0.8418
+    Pearson r(L_ref, Acc) = -0.9494
+    Pearson r(MSE, mIoU)  = -0.8185
+    Pearson r(L_ref,mIoU) = -0.9262
+
+  === DOPQ Summary (8 configs) ===
+    K= 16 emb=32 λ=0.5  Acc=0.9900  L_ref=147298.1  mIoU=0.8306
+    K=256 emb=32 λ=0.5  Acc=0.9920  L_ref=103624.2  mIoU=0.8305
+    K=256 emb=32 λ=0.0  Acc=0.9880  L_ref=109251.6  mIoU=0.8316
+    K=  4 emb=32 λ=0.5  Acc=0.9740  L_ref=219600.8  mIoU=0.8222
+    K= 64 emb=16 λ=0.5  Acc=0.9900  L_ref=81710.8  mIoU=0.8322
+    K= 64 emb=32 λ=0.5  Acc=0.9920  L_ref=120449.2  mIoU=0.8315
+    K= 64 emb=32 λ=0.0  Acc=0.9880  L_ref=120290.4  mIoU=0.8325
+    K=  8 emb=32 λ=0.5  Acc=0.9780  L_ref=172743.2  mIoU=0.8292
+  [OK] 20.5min
+
+Done. Check results/analysis_intro_v2/correlation_*.json

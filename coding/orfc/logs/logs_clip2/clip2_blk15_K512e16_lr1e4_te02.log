@@ -1,0 +1,67 @@
+
+######################################################################
+# Feature Codec Experiment (OrthogonalTransform + PQ)
+# layer=blk15 (idx=15), K=512, emb=16, bt=1024
+# transform: all trainable
+# epochs=100, lr=0.0001, λ=0.5, τ=0.5→0.02
+# max_train=5000, batch=32
+# 2026-02-24 16:59:59
+######################################################################
+
+Data: train=5000, test=500
+  并行加载特征 (workers=16)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:  99%|█████████▉| 4941/5000 [00:00<00:00, 48153.48it/s]Loading: 100%|██████████| 5000/5000 [00:00<00:00, 43226.97it/s]
+  并行加载特征 (workers=16)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  61%|██████    | 303/500 [00:00<00:00, 3005.79it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 2781.91it/s]
+  D=1024, D'=1024, T=257, G=64, d=16
+  bits/token=576
+
+Loading CLIP ViT-L/14 (classnames=/data4/workspace/zlt/CPAO_cls/dataset/imagenet/classnames.txt)...
+  Tail: 8 blocks (blk16..blk23) + norm
+
+============================================================
+  [Standard OPQ] baseline
+============================================================
+    OPQ done: MSE=0.05223009 (71.4s)
+    OPQ empirical ppl=435.9 (for prior init)
+  * Standard OPQ Acc = 0.7840
+  * Standard OPQ ΔL_ref = 68060.4
+
+============================================================
+  [Codec] K=512, λ=0.5, bt=1024, epochs=100, τ=0.5→0.02
+============================================================
+  Warm-start from OPQ (transform + codebooks)
+  log_prior init from OPQ empirical frequency
+  Trainable params: 1,080,832
+  Orthogonal transform: ||R'R-I||=6.29e-04
+  Soft PQ: τ 0.50 → 0.0200 (exponential)
+  Pre-computing teacher outputs (5000 images)...
+  Teacher cache: 5.3 GB CPU (15.4s)
+  ep   0/100  D=158864.3  ppl=5.5  R=422.58b/t  λD=79432.1  dead=24570  τ=0.5000  val=142861.5  (36.2s)
+  ep  10/100  D=109872.6  ppl=9.4  R=415.55b/t  λD=54936.3  dead=27655  τ=0.3612  val=106815.3  (35.9s)
+  ep  20/100  D=95518.8  ppl=15.3  R=406.66b/t  λD=47759.4  dead=29041  τ=0.2610  val=93448.6  (35.9s)
+  ep  30/100  D=88938.1  ppl=18.9  R=396.02b/t  λD=44469.0  dead=29676  τ=0.1885  val=87224.4  (35.8s)
+  ep  40/100  D=85497.3  ppl=20.2  R=386.14b/t  λD=42748.6  dead=29926  τ=0.1362  val=83882.1  (35.7s)
+  ep  50/100  D=83406.3  ppl=20.7  R=378.37b/t  λD=41703.1  dead=30043  τ=0.0984  val=81896.4  (35.6s)
+  ep  60/100  D=81971.0  ppl=20.9  R=372.85b/t  λD=40985.5  dead=30116  τ=0.0711  val=80631.6  (35.7s)
+  ep  70/100  D=80989.6  ppl=20.9  R=369.37b/t  λD=40494.8  dead=30143  τ=0.0513  val=79798.6  (35.7s)
+  ep  80/100  D=80328.6  ppl=20.9  R=367.49b/t  λD=40164.3  dead=30166  τ=0.0371  val=79236.5  (35.3s)
+  ep  90/100  D=79947.8  ppl=20.9  R=366.74b/t  λD=39973.9  dead=30171  τ=0.0268  val=78930.4  (35.4s)
+  ep  99/100  D=79798.5  ppl=20.9  R=366.54b/t  λD=39899.2  dead=30171  τ=0.0200  val=78827.1  (35.3s)
+  Codec training: 3622.2s
+  * Codec Acc = 0.7360 (d=-0.0480)
+  * Codec ΔL_ref = 84304.0 (d=+16243.6)
+  Computing train histogram PMF...
+  * Rate: xent=366.72  xent_train=254.05  H_emp=253.72  max=576  rANS=366.77  rANS_train=256.49  bits/token
+
+============================================================
+  Summary: blk15 K=512 emb=16  bt=1024
+  bits/token: OPQ=576 (G=64)  codec=576 (G=64)
+  Standard OPQ  Acc=0.7840  ΔL_ref=68060.4
+  Codec         Acc=0.7360  ΔL_ref=84304.0
+  Δ(Acc)=-0.0480  Δ(ΔL_ref)=+16243.6
+  Rate: xent=366.72  xent_train=254.05  H_emp=253.72  max=576  rANS=366.77 bits/token
+  Train time: std=71.4s  codec=3622.2s
+============================================================
+
+Results saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/results/soft_pq/clip_vitl14/blk15_K512_emb16_bt1024_ws_lmbda0.5_tau0.5_lr0.0001_ep100_n5000_s42.json

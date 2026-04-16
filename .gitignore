@@ -1,0 +1,38 @@
+# Data & model weights (user must prepare locally)
+data/
+features/
+pretrained/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.eggs/
+dist/
+build/
+*.so
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Intermediate outputs
+*.yuv
+*_tmp/
+*_tmp_seg/
+
+# Logs (optional: remove this line to track logs)
+# coding/orfc/logs/
+
+# Large generated files
+coding/orfc/checkpoints/
+coding/orfc/features_recon/
+coding/orfc/figures/seg_vis/
