@@ -35,13 +35,15 @@ conda activate featcodec2
 # 安装 CLIP (develop 模式)
 cd backbone/clip && pip install -e . && cd ../..
 
-# 安装 CompressAI (develop 模式，约 9 分钟)
+# 安装 CompressAI (develop 模式，需编译 C++ 扩展，约 9 分钟)
 cd coding/CompressAI && pip install -e . && cd ../..
 ```
 
 ### 2. 预训练权重
 
-下载权重并设置目录结构:
+#### DINOv2 权重
+
+下载 DINOv2 权重并设置 torch.hub 兼容目录结构:
 
 ```bash
 mkdir -p pretrained/hub/checkpoints && cd pretrained
@@ -54,13 +56,13 @@ wget https://dl.fbaipublicfiles.com/dinov2/dinov2_vitl14/dinov2_vitl14_linear_he
 wget https://dl.fbaipublicfiles.com/dinov2/dinov2_vitg14/dinov2_vitg14_pretrain.pth
 wget https://dl.fbaipublicfiles.com/dinov2/dinov2_vitg14/dinov2_vitg14_linear_head.pth
 
-# 创建 hub/checkpoints 链接 (torch.hub 兼容)
+# 创建 hub/checkpoints 链接 (torch.hub 加载兼容)
 cd hub/checkpoints && ln -sf ../../*.pth . && cd ../../..
 ```
 
 > DINOv2 分割头权重 (`*_voc2012_linear_head.pth`) 请参考 [DINOv2 官方仓库](https://github.com/facebookresearch/dinov2) 获取，同样放入 `pretrained/` 和 `pretrained/hub/checkpoints/`。
 
-完整权重列表:
+DINOv2 完整权重列表:
 
 | 文件 | 大小 | 用途 |
 |------|------|------|
@@ -70,6 +72,16 @@ cd hub/checkpoints && ln -sf ../../*.pth . && cd ../../..
 | `dinov2_vitg14_pretrain.pth` | 4.3 GB | ViT-G backbone |
 | `dinov2_vitg14_linear_head.pth` | 12 MB | ViT-G 分类头 |
 | `dinov2_vitg14_voc2012_linear_head.pth` | 437 KB | ViT-G 分割头 |
+
+#### CLIP 权重
+
+CLIP ViT-L/14 权重在首次调用 `clip.load("ViT-L/14")` 时自动下载到 `~/.cache/clip/`（约 890 MB），无需手动准备。也可以预先下载:
+
+```bash
+mkdir -p ~/.cache/clip && cd ~/.cache/clip
+wget https://openaipublic.azureedge.net/clip/models/b8cca3fd41ae0c99ba7e8951adf17d267cdb84cd88be6f7c2e0eca1737a03836/ViT-L-14.pt
+cd -
+```
 
 ### 3. 数据集
 
@@ -88,44 +100,63 @@ cd ..
 
 ### 4. 特征提取
 
-从原始图像提取 ViT 中间层特征:
+本框架使用两个独立的特征提取脚本，分别对应不同数据集格式:
+
+#### ImageNet 分类特征 (双列列表: `<wnid> <basename>`)
 
 ```bash
-# DINOv2 ViT-L/14: 训练集 (5000 张, 4 个 block)
+export TORCH_HOME=$(pwd)/pretrained
+
+# DINOv2 ViT-L/14: 训练集 (5000 张, 4 层)
 python tools/dinov2_feat_pipeline_simple.py extract \
     --model vitl14 \
     --weights_root pretrained \
     --root /path/to/imagenet/val \
     --out_root features/train/dinov2_vitl14 \
     --list utils/imagenet_selected_pathname5000.txt \
-    --blocks 5 10 15 20
+    --blocks 5,10,15,20
 
-# DINOv2 ViT-L/14: VOC2012 分割评估集 (100 张)
-python tools/dinov2_feat_pipeline_simple.py extract \
-    --model vitl14 \
-    --weights_root pretrained \
-    --root data/VOCdevkit/VOC2012/JPEGImages \
-    --out_root features/voc2012_100/dinov2_vitl14 \
-    --list utils/voc2012_val_100.txt \
-    --blocks 5 10 15 20
-
-# CLIP ViT-L/14: 训练集
+# CLIP ViT-L/14: 训练集 (5000 张, 4 层)
 python tools/clip_feat_pipeline_simple.py extract \
     --root /path/to/imagenet/val \
     --out_root features/train/clip_vitl14 \
     --list utils/imagenet_selected_pathname5000.txt \
-    --blocks 5 10 15 20
+    --blocks 5,10,15,20
 ```
 
-特征目录结构:
+#### VOC 分割特征 (单列列表: `<basename>`，滑窗模式)
+
+```bash
+export TORCH_HOME=$(pwd)/pretrained
+
+# DINOv2 ViT-L/14: VOC2012 评估集 (100 张, 滑窗)
+python tools/dinov2_seg_pipeline.py extract \
+    --model vitl14 \
+    --out_root features/voc2012_100/dinov2_vitl14 \
+    --blocks 5,10,15,20 \
+    --image_list utils/voc2012_val_100.txt
+
+# DINOv2 ViT-L/14: VOC2012 训练集 (5000 张, 滑窗)
+python tools/dinov2_seg_pipeline.py extract \
+    --model vitl14 \
+    --out_root features/voc2012_5000/dinov2_vitl14 \
+    --blocks 5,10,15,20 \
+    --image_list utils/voc2012_all_5000.txt
+```
+
+#### 特征目录结构
+
 ```
 features/
-├── train/<backbone>/blk{05,10,15,20}/*.npy   # 训练用
-├── val/<backbone>/blk{05,10,15,20}/*.npy      # 分类评估用
-└── voc2012_100/<backbone>/blk{05,10,15,20}/*.npy  # 分割评估用
+├── train/<backbone>/blk{05,10,15,20}/*.npy        # ImageNet 训练用
+├── val/<backbone>/blk{05,10,15,20}/*.npy           # ImageNet 分类评估用
+├── voc2012_100/<backbone>/blk{05,10,15,20}/*.npy   # VOC 分割评估用 (100 张)
+└── voc2012_5000/<backbone>/blk{05,10,15,20}/*.npy  # VOC 分割训练用 (5000 张)
 ```
 
-每个 `.npy` 文件形状为 `[N_tokens, D]`（如 ViT-L: `[257, 1024]`，ViT-G: `[257, 1536]`）。
+每个 `.npy` 文件形状:
+- ImageNet 特征: `[N_tokens, D]`（如 ViT-L: `[257, 1024]`）
+- VOC 分割特征: `[N_slides, 1+N, D]`（滑窗模式，含 CLS token）
 
 ## 使用方法
 
@@ -143,6 +174,14 @@ python run_soft_pq.py \
     --lmbda 0.5 --tau_start 0.5 --tau_end 0.005 \
     --epochs 100 --max_train_images 5000 \
     --eval_seg
+
+# CLIP 实验 (需指定 classnames)
+python run_soft_pq.py \
+    --backbone clip_vitl14 \
+    --layer blk20 \
+    --K 16 --embedding_dim 32 \
+    --bottleneck_dim 768 --warm_start_opq \
+    --lmbda 0.5 --epochs 100
 
 # 多层 + 多配置批量训练 (ViT-G/14, 6 GPU)
 bash run_exp_vitg14.sh
@@ -214,8 +253,8 @@ python plot_exp3_gkd.py
 | `coding/orfc/entropy_coding.py` | ANS 熵编码 |
 | `coding/orfc/simple_fcvq.py` | 基础 VQ 编码器 |
 | `coding/orfc/metric_estimator.py` | 下游任务指标估计 |
-| `tools/dinov2_feat_pipeline_simple.py` | DINOv2 特征提取 (extract + replay) |
-| `tools/clip_feat_pipeline_simple.py` | CLIP 特征提取 (extract + replay) |
-| `tools/dinov2_seg_pipeline.py` | DINOv2 分割特征评估管线 |
+| `tools/dinov2_feat_pipeline_simple.py` | DINOv2 分类特征提取 (ImageNet，extract + replay) |
+| `tools/clip_feat_pipeline_simple.py` | CLIP 特征提取 (ImageNet，extract + replay) |
+| `tools/dinov2_seg_pipeline.py` | DINOv2 分割特征提取 (VOC，滑窗 extract + replay) |
 | `utils/classnames.txt` | ImageNet 1000 类名 (CLIP zero-shot 用) |
 | `utils/cal_bd_rate.py` | BD-Rate 计算工具 |
