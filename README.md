@@ -6,20 +6,21 @@
 
 ```
 ORFC/
-├── backbone/          # 骨干网络源码
-│   ├── clip/          # OpenAI CLIP ViT-L/14
-│   └── dinov2/        # Meta DINOv2 ViT-L/14 & ViT-G/14
+├── backbone/                   # 骨干网络源码
+│   ├── clip/                   # OpenAI CLIP ViT-L/14
+│   └── dinov2/                 # Meta DINOv2 ViT-L/14 & ViT-G/14
 ├── coding/
-│   ├── orfc/          # 核心方法: Soft PQ 编解码器
-│   ├── chen2019/      # 基线: HM-16.21 (HEVC)
-│   ├── CompressAI/    # 基线: 学习型图像压缩 (Hyperprior)
-│   └── vtm_baseline/  # 基线: VTM (VVC)
-├── tools/             # 特征提取脚本
-├── utils/             # 工具脚本、标签文件、评估配置
-├── data/              # 数据集 (需用户准备)
-├── features/          # 预提取特征 (需用户生成)
-├── pretrained/        # 预训练权重 (需用户下载)
-├── environment.yml    # Conda 环境定义
+│   ├── orfc/                   # 核心方法: Soft PQ 编解码器
+│   │   └── checkpoints/        # 预训练 ORFC codec 权重 (需用户下载, ~1.4 GB)
+│   ├── chen2019/               # 基线: HM-16.21 (HEVC)
+│   ├── CompressAI/             # 基线: 学习型图像压缩 (Hyperprior)
+│   └── vtm_baseline/           # 基线: VTM (VVC)
+├── tools/                      # 特征提取脚本
+├── utils/                      # 工具脚本、标签文件、评估配置
+├── data/                       # 数据集 (需用户准备)
+├── features/                   # 预提取特征 (需用户生成)
+├── pretrained/                 # 骨干网络预训练权重 (需用户下载)
+├── environment.yml             # Conda 环境定义
 └── README.md
 ```
 
@@ -83,7 +84,60 @@ wget https://openaipublic.azureedge.net/clip/models/b8cca3fd41ae0c99ba7e8951adf1
 cd -
 ```
 
-### 3. 数据集
+### 3. ORFC Codec 预训练权重 (可选)
+
+论文所有 Rate-Distortion 曲线与消融实验的 Soft PQ codec checkpoints 已整理发布。如果你只想**复现评估 / 画图 / 用已训好的 codec 压缩特征**，无需重训，直接下载即可。
+
+#### 下载地址
+
+- **阿里云盘**: `https://www.alipan.com/s/<TBD>`（分享码 `TBD`，共 **1.4 GB**）
+
+下载后按目录结构放入 `coding/orfc/checkpoints/`:
+
+```
+coding/orfc/checkpoints/
+├── clip_vitl14/          #   4 个 .pt, ~41 MB  (Exp 1 sensitivity: blk{05,10,15,20}, K=16)
+├── dinov2_vitl14/        #  73 个 .pt, ~763 MB (论文主 RD 曲线 + Exp 1/3/4/5/6 消融)
+└── dinov2_vitg14/        #  27 个 .pt, ~620 MB (ViT-G/14 主 RD 曲线 + 多 seed)
+```
+
+> 阿里云盘不支持命令行直接下载，请通过浏览器打开链接下载压缩包后手动解压到上述路径，或逐目录同步。
+
+#### 验证
+
+```bash
+cd coding/orfc
+ls checkpoints/dinov2_vitl14/ | wc -l    # 应为 73
+ls checkpoints/dinov2_vitg14/ | wc -l    # 应为 27
+ls checkpoints/clip_vitl14/   | wc -l    # 应为  4
+```
+
+#### 命名规则
+
+```
+{layer}_K{K}_emb{d}_bt{bt_dim}_{ws|km}[{_mse}][{_lmbda*}][{_fzR}][{_rot*}][{_tau*}][{_te*}][{_ts*}]_lr{lr}_ep{ep}_n{n}_s{seed}.pt
+```
+
+| 字段 | 含义 |
+|------|------|
+| `layer` | 压缩的 backbone 层, 如 `blk20` 代表 DINOv2 ViT-L 第 20 个 block 输出 |
+| `K`, `emb` | PQ 的码本大小 K 和子向量维度 d |
+| `bt{bt_dim}` | 输入特征维度 (ViT-L=1024, ViT-G=1536) |
+| `ws` / `km` | OPQ warm-start / 纯 k-means 初始化 |
+| `_mse` | 仅 MSE 损失 (消融) |
+| `_lmbda*` | 速率正则权重 λ (无此标则 λ=0) |
+| `_fzR` | 冻结旋转矩阵 R (消融) |
+| `_rot{pca,randomorth,identity}` | 替换 OPQ 为其它初始化 (Exp 5) |
+| `_tau*`, `_te*`, `_ts*` | 温度退火起点 / 终点 / schedule (Exp 4) |
+| `_lr*`, `_ep*`, `_s*` | 学习率 / 训练轮数 / 随机种子 |
+
+每个 `.pt` 对应的评估结果（Acc, mIoU, MSE, rANS BPT）都保存在 `results/soft_pq/{backbone}/<同名>.json` 中，训练 / 配置信息写在 json 的 `config` 字段里。
+
+#### Checkpoint 清单
+
+论文主要的最优 RD 点、Exp 1-6 的消融实验均覆盖，共 **104 个 checkpoint**；**最优点清单**见 `coding/orfc/best config.csv`，**批量训练清单**见 `coding/orfc/experiment_manifest.json`。
+
+### 4. 数据集
 
 **Pascal VOC 2012** (分割评估):
 
@@ -98,7 +152,7 @@ cd ..
 
 从 [ImageNet 官方](https://image-net.org/) 下载验证集，解压后应为 `<imagenet_root>/<wnid>/ILSVRC2012_val_*.JPEG` 格式。
 
-### 4. 特征提取
+### 5. 特征提取
 
 本框架使用两个独立的特征提取脚本，分别对应不同数据集格式:
 
@@ -161,6 +215,34 @@ features/
 ## 使用方法
 
 ### ORFC: Soft PQ 编解码器 (核心方法)
+
+#### 用预训练 codec 直接评估（无需训练）
+
+下载好 `coding/orfc/checkpoints/` 后即可复用已训好的 codec 做评估 / 分析：
+
+```bash
+cd coding/orfc
+
+# 仅评估（跳过训练），复用已下载的 checkpoint
+#   --ckpt_path 里的超参 (K, emb, bt, lmbda, tau, lr, ep, seed) 必须与文件名一致
+python run_soft_pq.py \
+    --backbone dinov2_vitl14 --layer blk20 \
+    --K 16 --embedding_dim 32 --bottleneck_dim 1024 --warm_start_opq \
+    --lmbda 0.5 --tau_start 0.5 --tau_end 0.005 \
+    --lr 3e-4 --epochs 100 --max_train_images 5000 --eval_seg \
+    --eval_only \
+    --ckpt_path checkpoints/dinov2_vitl14/blk20_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.pt
+
+# 灵敏度 / 温度 / 初始化 / 多 seed 分析脚本也都基于已有 checkpoint：
+python compute_sensitivity.py --gpu 0 \
+    --codec_path checkpoints/dinov2_vitl14/blk20_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.pt
+python compute_multi_sensitivity.py --gpu 0
+python plot_exp4_temperature.py   # Exp 4 温度退火
+python plot_exp5_init.py          # Exp 5 初始化
+python plot_exp6_seed.py          # Exp 6 多 seed
+```
+
+#### 从零训练
 
 ```bash
 cd coding/orfc

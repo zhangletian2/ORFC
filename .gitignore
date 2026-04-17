@@ -33,6 +33,7 @@ Thumbs.db
 # coding/orfc/logs/
 
 # Large generated files
+coding/orfc/checkpoints
 coding/orfc/checkpoints/
 coding/orfc/features_recon/
 coding/orfc/figures/seg_vis/
