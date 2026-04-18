@@ -24,6 +24,28 @@ ORFC/
 └── README.md
 ```
 
+## 资源下载
+
+所有预训练权重和数据集均已托管到阿里云盘（Aliyun Drive），按需下载对应目录后放到仓库相应位置即可（每个章节下都有目标路径说明）。
+
+- **Aliyun Drive**: `https://www.aliyundrive.com/s/<SHARE_ID>` _(TODO: replace with actual share link)_
+
+云盘目录结构：
+
+```
+/
+├── Checkpoints/ORFC/           # ORFC codec 权重, 104 .pt, ~1.4 GB
+│   ├── clip_vitl14/            # 4 个 .pt
+│   ├── dinov2_vitl14/          # 73 个 .pt
+│   └── dinov2_vitg14/          # 27 个 .pt
+├── Pretrained/
+│   ├── dinov2/                 # DINOv2 ViT-L/G backbone + linear heads (6 个 .pth, ~5.4 GB)
+│   └── clip/                   # CLIP ViT-L/14 等 (~1.7 GB, 仅 ViT-L-14.pt 必需)
+└── Dataset/
+    ├── Segmentation/VOCdevkit/VOC2012.tar.gz          # ~1.9 GB
+    └── Classification/imagenet/images/val.tar.gz      # ~6.2 GB (+ devkit/meta)
+```
+
 ## 快速开始
 
 ### 1. 环境配置
@@ -74,6 +96,8 @@ DINOv2 完整权重列表:
 | `dinov2_vitg14_linear_head.pth` | 12 MB | ViT-G 分类头 |
 | `dinov2_vitg14_voc2012_linear_head.pth` | 437 KB | ViT-G 分割头 |
 
+> 境内访问 `dl.fbaipublicfiles.com` 受限时，可从顶部 [Aliyun Drive](#资源下载) 的 `/Pretrained/dinov2/` 取这 6 个 `.pth`，放入 `pretrained/` 后同样执行 `cd pretrained/hub/checkpoints && ln -sf ../../*.pth .`。
+
 #### CLIP 权重
 
 CLIP ViT-L/14 权重在首次调用 `clip.load("ViT-L/14")` 时自动下载到 `~/.cache/clip/`（约 890 MB），无需手动准备。也可以预先下载:
@@ -84,15 +108,11 @@ wget https://openaipublic.azureedge.net/clip/models/b8cca3fd41ae0c99ba7e8951adf1
 cd -
 ```
 
+> 境内访问 `openaipublic.azureedge.net` 受限时，可从顶部 [Aliyun Drive](#资源下载) 的 `/Pretrained/clip/ViT-L-14.pt` 取，放入 `~/.cache/clip/` 即可被 `clip.load()` 直接读取。
+
 ### 3. ORFC Codec 预训练权重 (可选)
 
-论文所有 Rate-Distortion 曲线与消融实验的 Soft PQ codec checkpoints 已整理发布。如果你只想**复现评估 / 画图 / 用已训好的 codec 压缩特征**，无需重训，直接下载即可。
-
-#### 下载地址
-
-- **阿里云盘**: `https://www.alipan.com/s/<TBD>`（分享码 `TBD`，共 **1.4 GB**）
-
-下载后按目录结构放入 `coding/orfc/checkpoints/`:
+论文所有 Rate-Distortion 曲线与消融实验的 Soft PQ codec checkpoints 已整理发布。如果你只想**复现评估 / 画图 / 用已训好的 codec 压缩特征**，无需重训，从顶部 [Aliyun Drive](#资源下载) 取 `/Checkpoints/ORFC/` 即可，目标路径：
 
 ```
 coding/orfc/checkpoints/
@@ -101,9 +121,7 @@ coding/orfc/checkpoints/
 └── dinov2_vitg14/        #  27 个 .pt, ~620 MB (ViT-G/14 主 RD 曲线 + 多 seed)
 ```
 
-> 阿里云盘不支持命令行直接下载，请通过浏览器打开链接下载压缩包后手动解压到上述路径，或逐目录同步。
-
-#### 验证
+验证：
 
 ```bash
 cd coding/orfc
@@ -151,6 +169,8 @@ cd ..
 **ImageNet ILSVRC2012 Validation Set** (特征提取 / 分类评估):
 
 从 [ImageNet 官方](https://image-net.org/) 下载验证集，解压后应为 `<imagenet_root>/<wnid>/ILSVRC2012_val_*.JPEG` 格式。
+
+> 境内可直接从顶部 [Aliyun Drive](#资源下载) 的 `/Dataset/Segmentation/VOCdevkit/VOC2012.tar.gz` 和 `/Dataset/Classification/imagenet/images/val.tar.gz` 下载，解压后目录结构与官方一致。
 
 ### 5. 特征提取
 
