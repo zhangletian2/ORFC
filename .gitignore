@@ -57,7 +57,9 @@ coding/orfc_uneval/__pycache__/
 # Comparison method - DTUFC
 coding/dtufc/checkpoints/
 coding/dtufc/checkpoints_notrun/
-coding/dtufc/coding/CompressAI/
+coding/dtufc/coding/CompressAI/__pycache__/
+coding/dtufc/coding/CompressAI/compressai/__pycache__/
+coding/dtufc/coding/CompressAI/**/*.so
 coding/dtufc/machines/
 coding/dtufc/.git/
 coding/dtufc/__pycache__/
