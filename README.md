@@ -352,7 +352,7 @@ python plot_exp3_gkd.py
 | **GAPC** | `coding/gapc/` | 零参数稀疏列选择 + DEFLATE 无损压缩 | — |
 | **VAQ-Soft** | `coding/vaq/` | 方差感知量化（含 C++ 引擎 + Python soft-PQ 适配） | eigen (已含) |
 | **Non-uniform PQ** | `coding/orfc_uneval/` | 非均匀比特分配乘积量化 | — |
-| **DT-UFC** | `coding/dtufc/` | CompressAI hyperprior + kmeans 预处理 | `pip install compressai` |
+| **DT-UFC** | `coding/dtufc/` | CompressAI hyperprior + kmeans 预处理 | 已含 (`coding/dtufc/coding/CompressAI/`) |
 | **VTM** | `coding/vtm_baseline/` | VVC (VTM) intra 编码 | VTM encoder/decoder binary |
 
 所有对比方法共享 `coding/orfc/` 中的骨干网络封装和评估工具（通过相对路径 `../orfc` 引用）。
