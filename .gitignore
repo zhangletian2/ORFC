@@ -1,7 +1,7 @@
 # Data & model weights (user must prepare locally)
-data/
-features/
-pretrained/
+/data/
+/features/
+/pretrained/
 
 # Python
 __pycache__/
