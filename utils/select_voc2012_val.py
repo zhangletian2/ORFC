@@ -51,31 +51,34 @@ def load_image_list(voc_root, split="val"):
             return [line.strip() for line in f if line.strip()]
 
 
-def read_exclude_list(exclude_paths):
+def read_name_list(file_paths, label):
     """
-    读取排除列表，支持多个文件
+    读取名称列表，支持多个文件
     格式：每行一个图片名（不含扩展名）
+    返回 set 和保序 list
     """
-    exclude = set()
-    if not exclude_paths:
-        return exclude
-    
-    for exclude_path in exclude_paths:
-        p = Path(exclude_path)
+    names_set = set()
+    names_ordered = []
+    if not file_paths:
+        return names_set, names_ordered
+
+    for fpath in file_paths:
+        p = Path(fpath)
         if not p.exists():
-            print(f"[Warn] 排除文件不存在：{p}，将跳过。")
+            print(f"[Warn] {label}文件不存在：{p}，将跳过。")
             continue
-        count_before = len(exclude)
+        count_before = len(names_set)
         with open(p, "r", encoding="utf-8") as f:
             for line in f:
                 name = line.strip()
-                if name:
-                    exclude.add(name)
-        count_added = len(exclude) - count_before
-        print(f"[Info] 从 {p.name} 加载排除样本：{count_added} 条")
-    
-    print(f"[Info] 总共需排除样本数：{len(exclude)}")
-    return exclude
+                if name and name not in names_set:
+                    names_set.add(name)
+                    names_ordered.append(name)
+        count_added = len(names_set) - count_before
+        print(f"[Info] 从 {p.name} 加载{label}样本：{count_added} 条")
+
+    print(f"[Info] 总共{label}样本数：{len(names_set)}")
+    return names_set, names_ordered
 
 
 def main():
@@ -92,6 +95,8 @@ def main():
                     help="输出文件名（默认 voc2012_<split>_<num>.txt）")
     ap.add_argument("--exclude", type=str, nargs='*', default=[],
                     help="排除列表文件路径（支持多个）")
+    ap.add_argument("--include", type=str, nargs='*', default=[],
+                    help="必须包含的样本列表（支持多个），优先写入输出，剩余配额再从池中补充。")
     ap.add_argument("--shuffle", action="store_true",
                     help="是否随机打乱（默认按原顺序）")
     ap.add_argument("--seed", type=int, default=42,
@@ -102,20 +107,23 @@ def main():
     all_names = load_image_list(args.voc_root, args.split)
     print(f"[Info] VOC2012({args.split})共 {len(all_names)} 张图片")
 
-    # 读取排除列表
-    exclude_set = read_exclude_list(args.exclude)
+    # 读取排除和包含列表
+    exclude_set, _ = read_name_list(args.exclude, "排除")
+    include_set, include_ordered = read_name_list(args.include, "强制包含")
 
-    # 过滤
-    available = [n for n in all_names if n not in exclude_set]
-    print(f"[Info] 排除后剩余 {len(available)} 张可选")
+    # 过滤：排除已有 + 已在 include 中的
+    available = [n for n in all_names if n not in exclude_set and n not in include_set]
+    print(f"[Info] 排除后剩余 {len(available)} 张可选（不含 include）")
 
     # 打乱（可选）
     if args.shuffle:
         random.seed(args.seed)
         random.shuffle(available)
 
-    # 选取
-    selected = available[:args.num]
+    # 先放入 include，再用剩余配额从池中补充
+    remaining = args.num - len(include_ordered)
+    selected = list(include_ordered) + available[:max(0, remaining)]
+    print(f"[Info] 其中强制包含：{len(include_ordered)} 张")
     
     # 输出
     out_dir = Path(args.out_dir)

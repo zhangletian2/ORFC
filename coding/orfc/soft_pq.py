@@ -28,6 +28,51 @@ PROJECT_ROOT = os.path.normpath(os.path.join(ORFC_ROOT, "..", ".."))
 from opq import batch_normalize_gpu, batch_inv_normalize_gpu, batched_kmeans
 
 
+try:
+    from compressai._CXX import pmf_to_quantized_cdf as _pmf_to_quantized_cdf
+    from compressai import ans as _ans
+    _HAS_ANS = True
+except (ImportError, ModuleNotFoundError):
+    _HAS_ANS = False
+
+
+def _rans_encode_bpt(labels_np, pmf_list, G, K_per_group, precision=16):
+    """Encode labels with rANS and return actual bits per token.
+
+    Args:
+        labels_np: [G, N] integer labels.
+        pmf_list: list of G numpy arrays, each [K_g].
+        K_per_group: int or list[int].
+    """
+    if not _HAS_ANS:
+        return None
+    if isinstance(K_per_group, int):
+        K_per_group = [K_per_group] * G
+    encoder = _ans.RansEncoder()
+    N = labels_np.shape[1]
+    cdfs = []
+    cdf_sizes = []
+    for g in range(G):
+        p = torch.from_numpy(pmf_list[g]).float()
+        overflow = (1.0 - p.sum()).clamp_min(0)
+        p = torch.cat([p, overflow.unsqueeze(0)])
+        cdf = _pmf_to_quantized_cdf(p.tolist(), precision)
+        cdfs.append(cdf)
+        cdf_sizes.append(K_per_group[g] + 2)
+    symbols = []
+    cdf_indices = []
+    for n in range(N):
+        for g in range(G):
+            symbols.append(int(labels_np[g, n]))
+            cdf_indices.append(g)
+    byte_string = encoder.encode_with_indexes(
+        symbols, cdf_indices, cdfs,
+        cdf_sizes, [0] * G,
+    )
+    total_bits = len(byte_string) * 8
+    return total_bits / N
+
+
 class FeatureDataset(Dataset):
     """Wraps a pre-stacked [N, T, D] numpy array for DataLoader prefetch."""
 

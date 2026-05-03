@@ -205,6 +205,8 @@ def main():
 
     # 收集所有任务
     all_tasks = []
+    skipped_stems = defaultdict(list)
+
     for model in args.models:
         for qp in args.qps:
             for layer in args.layers:
@@ -215,7 +217,14 @@ def main():
                     print(f"[WARN] empty: {in_dir}")
                     continue
 
+                skipped = 0
                 for p in npy_list:
+                    stem = Path(p).stem
+                    out_npy = out_dir / f"{stem}.npy"
+                    if out_npy.exists():
+                        skipped_stems[(model, layer, qp)].append(stem)
+                        skipped += 1
+                        continue
                     task = (
                         p,                    # npy_path
                         str(out_dir),         # out_dir
@@ -229,16 +238,22 @@ def main():
                         layer,                # layer
                     )
                     all_tasks.append(task)
+                if skipped:
+                    print(f"[INFO] {model}/{layer}/QP{qp}: skipped {skipped} existing, "
+                          f"remaining {len(npy_list) - skipped}")
 
-    if not all_tasks:
+    if not all_tasks and not skipped_stems:
         print("[WARN] 没有找到任何任务")
         return
 
-    print(f"\n[INFO] 总任务数: {len(all_tasks)}, 并行workers: {args.workers}")
+    print(f"\n[INFO] 总任务数: {len(all_tasks)}, 跳过: {sum(len(v) for v in skipped_stems.values())}, "
+          f"并行workers: {args.workers}")
 
     # 执行任务
     results = []
-    if args.workers <= 1:
+    if not all_tasks:
+        print("[INFO] 所有文件已存在，仅更新统计")
+    elif args.workers <= 1:
         for idx, task in enumerate(all_tasks, 1):
             rec = process_one_file_wrapper(task)
             results.append(rec)
@@ -273,35 +288,53 @@ def main():
     csv_header = ["filename","model","layer","qp","orig_shape","encode_shape",
                   "bitstream_bytes","bits","bpfp","encode_s","decode_s","total_s"]
 
-    for (model, layer, qp), recs in grouped.items():
-        out_dir = feat_root / model / "decoded" / "vtm" / str(qp) / layer
-        stats_csv = out_dir.parent / "_stats.csv"
+    all_groups = set(grouped.keys()) | set(skipped_stems.keys())
+    for (model, layer, qp) in all_groups:
+        stats_csv = feat_root / model / "decoded" / "vtm" / str(qp) / "_stats.csv"
         stats_csv.parent.mkdir(parents=True, exist_ok=True)
 
-        rows = []
-        for rec in sorted(recs, key=lambda x: x["filename"]):
-            rows.append([
+        # 读取已有 csv，保留其他 layer 的行，捞回本 layer 被跳过文件的旧行
+        other_rows = []
+        carried_rows = []
+        skip_set = set(skipped_stems.get((model, layer, qp), []))
+        if stats_csv.exists():
+            with open(stats_csv, "r", newline="") as f:
+                reader = csv.reader(f)
+                header = next(reader, None)
+                for row in reader:
+                    if len(row) < 4:
+                        continue
+                    if row[2] == layer and str(row[3]) == str(qp):
+                        if row[0] in skip_set:
+                            carried_rows.append(row)
+                    else:
+                        other_rows.append(row)
+
+        # 构建本次新处理的行
+        new_rows = []
+        for rec in sorted(grouped.get((model, layer, qp), []), key=lambda x: x["filename"]):
+            new_rows.append([
                 rec["filename"], model, layer, qp,
                 rec["orig_shape"], rec["encode_shape"],
                 rec["bitstream_bytes"], rec["bits"], f"{rec['bpfp']:.6f}",
                 f"{rec['encode_s']:.6f}", f"{rec['decode_s']:.6f}", f"{rec['total_s']:.6f}"
             ])
 
-        write_header = not stats_csv.exists()
-        with open(stats_csv, "a", newline="") as f:
+        # 整体重写
+        with open(stats_csv, "w", newline="") as f:
             w = csv.writer(f)
-            if write_header:
-                w.writerow(csv_header)
-            w.writerows(rows)
+            w.writerow(csv_header)
+            w.writerows(other_rows)
+            w.writerows(sorted(carried_rows, key=lambda r: r[0]))
+            w.writerows(new_rows)
 
-        if rows:
-            avg_bpfp = sum(float(r[8]) for r in rows) / len(rows)
-            avg_enc  = sum(float(r[9]) for r in rows) / len(rows)
-            avg_dec  = sum(float(r[10]) for r in rows) / len(rows)
+        total_rows = len(carried_rows) + len(new_rows)
+        if total_rows:
+            all_bpfp = [float(r[8]) for r in carried_rows] + [float(r[8]) for r in new_rows]
+            avg_bpfp = sum(all_bpfp) / len(all_bpfp)
             print(f"[DONE] {model}/{layer}/QP{qp}: "
-                  f"avg BPFP={avg_bpfp:.4f} bits/scalar, "
-                  f"enc={avg_enc:.3f}s, dec={avg_dec:.3f}s, "
-                  f"files={len(rows)}")
+                  f"{len(carried_rows)} carried + {len(new_rows)} new = {total_rows} total, "
+                  f"avg BPFP={avg_bpfp:.4f}")
 
 
 if __name__ == "__main__":

@@ -39,22 +39,21 @@ def allocate_counts(total, num_classes):
     rem = total % num_classes
     return [base + (1 if i < rem else 0) for i in range(num_classes)]
 
-def read_exclude_pairs(exclude_paths):
+def read_pair_list(file_paths, label):
     """
-    exclude 文件格式：<wnid> <stem>（例如：n01440764 ILSVRC2012_val_00000293）
-    支持多个排除文件路径（列表）
+    读取 pathname 文件列表，格式：<wnid> <stem>
     返回 set[(wnid, stem)]
     """
-    exclude = set()
-    if not exclude_paths:
-        return exclude
-    
-    for exclude_path in exclude_paths:
-        p = Path(exclude_path)
+    pairs = set()
+    if not file_paths:
+        return pairs
+
+    for fpath in file_paths:
+        p = Path(fpath)
         if not p.exists():
-            print(f"[Warn] 排除文件不存在：{p}，将跳过该文件。")
+            print(f"[Warn] {label}文件不存在：{p}，将跳过该文件。")
             continue
-        count_before = len(exclude)
+        count_before = len(pairs)
         with open(p, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
@@ -64,12 +63,12 @@ def read_exclude_pairs(exclude_paths):
                 if len(parts) < 2:
                     continue
                 wnid, stem = parts[0], parts[1]
-                exclude.add((wnid, stem))
-        count_added = len(exclude) - count_before
-        print(f"[Info] 从 {p.name} 加载排除样本：{count_added} 条")
-    
-    print(f"[Info] 总共需排除样本数：{len(exclude)}")
-    return exclude
+                pairs.add((wnid, stem))
+        count_added = len(pairs) - count_before
+        print(f"[Info] 从 {p.name} 加载{label}样本：{count_added} 条")
+
+    print(f"[Info] 总共{label}样本数：{len(pairs)}")
+    return pairs
 
 def main():
     ap = argparse.ArgumentParser(description="Select ImageNet val images and write pathname/label txts (with exclusion).")
@@ -88,11 +87,20 @@ def main():
                     help="标签清单输出文件名")
     ap.add_argument("--exclude_pathname", type=str, nargs='*', default=[],
                     help="已选样本列表（支持多个txt文件路径），将跳过其中项。例如：--exclude_pathname a.txt b.txt")
+    ap.add_argument("--include_pathname", type=str, nargs='*', default=[],
+                    help="必须包含的样本列表（支持多个txt文件路径），这些样本会优先写入输出，剩余配额再从池中补充。")
     args = ap.parse_args()
 
     wnids, wnid_to_idx = read_classnames(args.classnames)
     images_per_class = collect_images_per_class(args.val_root, wnids)
-    exclude_pairs = read_exclude_pairs(args.exclude_pathname)
+    exclude_pairs = read_pair_list(args.exclude_pathname, "排除")
+    include_pairs = read_pair_list(args.include_pathname, "强制包含")
+
+    # 按类别统计 include 中各类已有多少
+    from collections import defaultdict
+    include_per_class = defaultdict(list)
+    for wnid, stem in include_pairs:
+        include_per_class[wnid].append(stem)
 
     per_class_counts = allocate_counts(args.num, len(wnids))
 
@@ -103,30 +111,44 @@ def main():
 
     selected = 0
     skipped_by_exclude = 0
+    included_count = 0
 
     with open(f_path, "w", encoding="utf-8") as fp, open(f_label, "w", encoding="utf-8") as fl:
         for i, wnid in enumerate(wnids):
             need = per_class_counts[i]
             pool = images_per_class.get(wnid, [])
-            if not pool or need <= 0:
-                continue
 
+            # 1) 先写入该类中的 include 样本
+            inc_stems = include_per_class.get(wnid, [])
             taken = 0
-            for p in pool:
-                stem = p.stem
-                if (wnid, stem) in exclude_pairs:
-                    skipped_by_exclude += 1
-                    continue
-                # 选中该样本
+            for stem in inc_stems:
                 fp.write(f"{wnid} {stem}\n")
                 fl.write(f"{stem} {wnid_to_idx[wnid]}\n")
                 selected += 1
+                included_count += 1
                 taken += 1
-                if taken >= need:
+
+            # 2) 剩余配额从池中补充
+            remaining = need - taken
+            if remaining <= 0 or not pool:
+                continue
+            already_written = set(inc_stems)
+            for p in pool:
+                stem = p.stem
+                if stem in already_written:
+                    continue
+                if (wnid, stem) in exclude_pairs:
+                    skipped_by_exclude += 1
+                    continue
+                fp.write(f"{wnid} {stem}\n")
+                fl.write(f"{stem} {wnid_to_idx[wnid]}\n")
+                selected += 1
+                remaining -= 1
+                if remaining <= 0:
                     break
 
     print(f"[Done] 实际写入 {selected} 张（目标 {args.num}）。")
-    print(f"[Info] 因去重跳过：{skipped_by_exclude} 张。")
+    print(f"[Info] 其中强制包含：{included_count} 张，因排除跳过：{skipped_by_exclude} 张。")
     print(f" - Pathname list: {f_path}")
     print(f" - Label list   : {f_label}")
     if selected != args.num:

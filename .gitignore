@@ -29,11 +29,37 @@ Thumbs.db
 *_tmp/
 *_tmp_seg/
 
-# Logs (optional: remove this line to track logs)
-# coding/orfc/logs/
-
 # Large generated files
 coding/orfc/checkpoints
 coding/orfc/checkpoints/
 coding/orfc/features_recon/
 coding/orfc/figures/seg_vis/
+
+# ORFC eval artifacts
+coding/orfc/logs/
+coding/orfc/results/
+
+# Comparison method - GAPC
+coding/gapc/logs/
+coding/gapc/__pycache__/
+coding/gapc/*.pdf
+
+# Comparison method - VAQ
+coding/vaq/checkpoints_soft/
+coding/vaq/.DS_Store
+coding/vaq/*.pdf
+
+# Comparison method - orfc_uneval
+coding/orfc_uneval/checkpoints/
+coding/orfc_uneval/logs/
+coding/orfc_uneval/__pycache__/
+
+# Comparison method - DTUFC
+coding/dtufc/checkpoints/
+coding/dtufc/checkpoints_notrun/
+coding/dtufc/coding/CompressAI/
+coding/dtufc/machines/
+coding/dtufc/.git/
+coding/dtufc/__pycache__/
+coding/dtufc/docker/
+coding/dtufc/job/

@@ -392,11 +392,17 @@ def run_experiment(args):
 
     # ---- Load features ----
     train_dir = Path(args.feat_root) / args.train_subset / args.backbone / args.layer
-    test_dir = Path(args.feat_root) / "test" / args.backbone / args.layer
+    test_dir = Path(args.feat_root) / args.test_subset / args.backbone / args.layer
     train_files = sorted(train_dir.glob("*.npy"))
     test_files = sorted(test_dir.glob("*.npy"))
 
     print(f"\nData: train={len(train_files)}, test={len(test_files)}")
+    print(f"  train_dir={train_dir}")
+    print(f"  test_dir={test_dir}")
+    if not train_files:
+        raise FileNotFoundError(f"No train features found in {train_dir}")
+    if not test_files:
+        raise FileNotFoundError(f"No test features found in {test_dir}")
     features_train, _ = preload_features(train_files, num_workers=8)
     features_test, basenames_test = preload_features(test_files, num_workers=8)
     gt_test = load_gt(args.gt_path)
@@ -889,6 +895,13 @@ def run_experiment(args):
            f"{fz_tag}{rot_tag}"
            f"{pfloor_tag}{tau_tag}{tau_end_tag}{tau_sched_tag}"
            f"_lr{args.lr}_ep{args.epochs}_n{args.max_train_images}_s{args.seed}")
+    result_suffix = getattr(args, 'result_suffix', '').strip()
+    if result_suffix:
+        safe_suffix = ''.join(
+            ch if (ch.isalnum() or ch in ('-', '_')) else '_'
+            for ch in result_suffix
+        )
+        tag = f"{tag}_{safe_suffix}"
     out_path = os.path.join(out_dir, f'{tag}.json')
     with open(out_path, 'w') as f:
         json.dump(results, f, indent=2, default=str)
@@ -941,7 +954,7 @@ def main():
                         choices=["exponential", "linear"],
                         help="Temperature annealing schedule")
 
-    parser.add_argument("--max_train_images", type=int, default=500)
+    parser.add_argument("--max_train_images", type=int, default=5000)
     parser.add_argument("--kmeans_max_samples", type=int, default=2_000_000,
                         help="Max flat vectors for OPQ / k-means init")
     parser.add_argument("--n_val", type=int, default=200,
@@ -951,6 +964,8 @@ def main():
     parser.add_argument("--feat_root", type=str,
                         default=os.path.join(PROJECT_ROOT, "features"))
     parser.add_argument("--train_subset", type=str, default="train")
+    parser.add_argument("--test_subset", type=str, default="test",
+                        help="Classification test subset under --feat_root")
     parser.add_argument("--backbone", type=str, default="dinov2_vitl14",
                         help="Backbone name (dinov2_vitl14, dinov2_vitg14, or clip_vitl14)")
     parser.add_argument("--classnames", type=str,
@@ -965,6 +980,8 @@ def main():
                         help="Skip training, load codec from --ckpt_path and evaluate")
     parser.add_argument("--ckpt_path", type=str, default="",
                         help="Checkpoint path for --eval_only mode")
+    parser.add_argument("--result_suffix", type=str, default="",
+                        help="Optional suffix appended to result JSON filename")
 
     parser.add_argument("--eval_seg", action="store_true",
                         help="Evaluate segmentation mIoU (VOC2012)")
