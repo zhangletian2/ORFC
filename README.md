@@ -12,9 +12,11 @@ ORFC/
 ├── coding/
 │   ├── orfc/                   # 核心方法: Soft PQ 编解码器
 │   │   └── checkpoints/        # 预训练 ORFC codec 权重 (需用户下载, ~1.4 GB)
-│   ├── chen2019/               # 基线: HM-16.21 (HEVC)
-│   ├── CompressAI/             # 基线: 学习型图像压缩 (Hyperprior)
-│   └── vtm_baseline/           # 基线: VTM (VVC)
+│   ├── gapc/                   # 对比方法: GAPC (稀疏列选择 + DEFLATE)
+│   ├── vaq/                    # 对比方法: VAQ-Soft (方差感知量化)
+│   ├── orfc_uneval/            # 对比方法: 非均匀比特分配 PQ
+│   ├── dtufc/                  # 对比方法: DT-UFC (CompressAI hyperprior)
+│   └── vtm_baseline/           # 对比方法: VTM (VVC intra)
 ├── tools/                      # 特征提取脚本
 ├── utils/                      # 工具脚本、标签文件、评估配置
 ├── data/                       # 数据集 (需用户准备)
@@ -342,6 +344,18 @@ python plot_exp1_sensitivity.py
 python plot_exp2_correlation.py
 python plot_exp3_gkd.py
 ```
+
+## 对比方法 (Baselines)
+
+| 方法 | 目录 | 说明 | 额外依赖 |
+|------|------|------|----------|
+| **GAPC** | `coding/gapc/` | 零参数稀疏列选择 + DEFLATE 无损压缩 | — |
+| **VAQ-Soft** | `coding/vaq/` | 方差感知量化（含 C++ 引擎 + Python soft-PQ 适配） | eigen (已含) |
+| **Non-uniform PQ** | `coding/orfc_uneval/` | 非均匀比特分配乘积量化 | — |
+| **DT-UFC** | `coding/dtufc/` | CompressAI hyperprior + kmeans 预处理 | `pip install compressai` |
+| **VTM** | `coding/vtm_baseline/` | VVC (VTM) intra 编码 | VTM encoder/decoder binary |
+
+所有对比方法共享 `coding/orfc/` 中的骨干网络封装和评估工具（通过相对路径 `../orfc` 引用）。
 
 ## 核心代码说明
 
