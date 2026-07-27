@@ -1,0 +1,16 @@
+# Generated experiment state
+/artifacts/
+/checkpoints/
+/logs/
+/results/
+
+# Python and local runtime caches
+/__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local editor/system files
+.DS_Store
+*.swp
+*.tmp
+
