@@ -52,8 +52,10 @@ class CodecV1SegEval(SegmentationEvaluator):
     """Thin wrapper: quantize via FeatureCodecV1, then feed to seg head."""
 
     def __init__(self, codec, norm_mode, layer_idx,
-                 voc_root, weights_root, device, model_name='dinov2_vitl14'):
+                 voc_root, weights_root, device, model_name='dinov2_vitl14',
+                 modes=None):
         self.codec = codec
+        self.modes = modes
         self.norm_mode = norm_mode
         self.layer_idx = layer_idx
         self.voc_root = voc_root
@@ -66,7 +68,7 @@ class CodecV1SegEval(SegmentationEvaluator):
     def quantize_tokens(self, tokens_np):
         X = torch.from_numpy(tokens_np).float().unsqueeze(0).to(self.device)
         Y, Mu, Std = batch_normalize_gpu(X, mode=self.norm_mode)
-        Y_hat, _ = self.codec(Y)
+        Y_hat, _ = self.codec(Y, modes=self.modes)
         X_hat = batch_inv_normalize_gpu(Y_hat, Mu, Std)
         return X_hat.squeeze(0)
 
@@ -103,7 +105,9 @@ class OPQSegEval(SegmentationEvaluator):
         return X_hat.squeeze(0)
 
 
-def codec_encode_decode(features, codec, norm_mode, device, chunk=200):
+def codec_encode_decode(
+    features, codec, norm_mode, device, chunk=200, modes=None,
+):
     """Quantize a list of per-image features through a FeatureCodecV1."""
     codec.eval()
     out = []
@@ -112,7 +116,7 @@ def codec_encode_decode(features, codec, norm_mode, device, chunk=200):
             e = min(s + chunk, len(features))
             X = torch.from_numpy(np.stack(features[s:e])).float().to(device)
             Y, Mu, Std = batch_normalize_gpu(X, mode=norm_mode)
-            Y_hat, _ = codec(Y)
+            Y_hat, _ = codec(Y, modes=modes)
             X_hat = batch_inv_normalize_gpu(Y_hat, Mu, Std)
             for i in range(X_hat.shape[0]):
                 out.append(X_hat[i].cpu().numpy())
@@ -164,6 +168,11 @@ def main():
     parser.add_argument("--backbone", type=str, default="dinov2_vitl14")
     parser.add_argument("--skip_seg", action="store_true")
     parser.add_argument("--skip_cls", action="store_true")
+    parser.add_argument("--modes", default="",
+                        help="Comma-separated per-group mode indices")
+    parser.add_argument("--allocation_npz", default="")
+    parser.add_argument("--allocation_index", type=int, default=-1)
+    parser.add_argument("--codec_chunk", type=int, default=16)
 
     parser.add_argument("--feat_root", type=str,
                         default=os.path.join(PROJECT_ROOT, "features"))
@@ -182,6 +191,16 @@ def main():
                                              "voc2012_val_100.txt"))
     parser.add_argument("--out", type=str, default="")
     args = parser.parse_args()
+    modes, allocation_rate = None, None
+    if args.allocation_npz:
+        allocation = np.load(args.allocation_npz, allow_pickle=False)
+        if not 0 <= args.allocation_index < len(allocation["allocations"]):
+            parser.error("--allocation_index is outside allocation_npz")
+        modes = allocation["allocations"][args.allocation_index].tolist()
+        allocation_rate = float(
+            allocation["total_rates"][args.allocation_index])
+    elif args.modes:
+        modes = [int(value) for value in args.modes.split(",")]
 
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
     device = torch.device("cuda:0")
@@ -284,10 +303,23 @@ def main():
 
         codec = load_codec_v1(ckpt_path, device=device)
         r = {'name': short, 'ckpt': ckpt_path, 'type': 'codec'}
+        if hasattr(codec.pq, "mode_sizes"):
+            if modes is None or len(modes) != codec.pq.G:
+                raise ValueError(
+                    "MultiModeSoftPQ evaluation requires one mode per group")
+            bits = np.log2(np.asarray(codec.pq.mode_sizes))
+            nominal_rate = float(bits[np.asarray(modes)].sum())
+            if allocation_rate is not None and abs(
+                    nominal_rate - allocation_rate) > 1e-8:
+                raise ValueError("allocation rate does not match checkpoint")
+            r.update({"modes": modes, "nominal_rate": nominal_rate})
+        elif modes is not None:
+            raise TypeError("explicit modes require MultiModeSoftPQ")
 
         if not args.skip_cls:
             xhat = codec_encode_decode(
-                features_test, codec, args.norm_mode, device)
+                features_test, codec, args.norm_mode, device,
+                chunk=args.codec_chunk, modes=modes)
             wrapper.backbone.to(device)
             if wrapper.head is not None:
                 wrapper.head.to(device)
@@ -306,7 +338,7 @@ def main():
             evaluator = CodecV1SegEval(
                 codec, args.norm_mode, layer_idx,
                 args.voc_root, wrapper.weights_root, device,
-                model_name=args.backbone)
+                model_name=args.backbone, modes=modes)
             seg = evaluator.evaluate(
                 seg_feat_dir=seg_feat_dir,
                 image_list=args.seg_image_list, verbose=False)

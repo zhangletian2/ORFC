@@ -21,6 +21,7 @@ from soft_pq import (
     SoftPQ, OrthogonalTransform, FeatureTransform, FeatureCodec,
     FrozenTail, save_codec as _save_codec_base, load_codec as _load_codec_base,
 )
+from multimode_pq import MultiModeSoftPQ
 
 
 class FeatureCodecV1(nn.Module):
@@ -47,7 +48,7 @@ class FeatureCodecV1(nn.Module):
     #  Core forward (drop-in compatible with FeatureCodec)
     # ------------------------------------------------------------------
     def forward(self, Y_norm, return_details=False, differentiable_groups=None,
-                detail_level='diagnostic'):
+                detail_level='diagnostic', modes=None):
         """Forward pass with optional per-group residual decomposition.
 
         Parameters
@@ -64,6 +65,9 @@ class FeatureCodecV1(nn.Module):
             'train'      — only sampled-group e_g_diff + r_g for q_g;
                            skips full e_g, Z, Z_hat, labels to save memory.
             'diagnostic' — full output including e_g [G,N,D] for held-out.
+        modes : sequence[int] or Tensor[G] or None
+            Per-group mode indices for MultiModeSoftPQ.  ``None`` preserves
+            the original single-mode behaviour.
         """
         B, T, D = Y_norm.shape
         flat = Y_norm.reshape(B * T, D)
@@ -77,7 +81,13 @@ class FeatureCodecV1(nn.Module):
         else:
             Z = self.transform.encode(flat) if self.transform else flat
 
-        Z_hat, usage = self.pq._quantise(Z)
+        if modes is None:
+            Z_hat, usage = self.pq._quantise(Z)
+        elif isinstance(self.pq, MultiModeSoftPQ):
+            Z_hat, usage = self.pq._quantise(Z, modes=modes)
+        else:
+            raise TypeError(
+                "per-group modes require MultiModeSoftPQ")
 
         if is_orth:
             Y_hat = Z_hat @ R.t()
@@ -121,6 +131,8 @@ class FeatureCodecV1(nn.Module):
             'e_g_diff': e_g_diff,         # {g: [N, D]} differentiable, for loss
             'usage': usage.detach(),
         }
+        if isinstance(self.pq, MultiModeSoftPQ):
+            info['modes'] = self.pq._last_modes.detach()
 
         if detail_level == 'diagnostic':
             info['Z'] = Z.detach()
@@ -275,12 +287,15 @@ def save_codec_v1(codec, path):
     pq = codec.pq
     meta = {
         'version': 'v1',
+        'pq_type': type(pq).__name__,
         'G': pq.G, 'K': pq.K, 'd': pq.d,
         'lmbda': pq.lmbda, 'prior_floor': pq.prior_floor,
         'has_transform': codec.transform is not None,
         'transform_type': (type(codec.transform).__name__
                            if codec.transform else None),
     }
+    if isinstance(pq, MultiModeSoftPQ):
+        meta['mode_sizes'] = list(pq.mode_sizes)
     if codec.transform is not None and hasattr(codec.transform, 'D'):
         meta['D'] = codec.transform.D
     elif codec.transform is not None and hasattr(codec.transform, 'D_in'):
@@ -303,9 +318,15 @@ def load_codec_v1(path, device='cuda'):
     """Load V1 codec."""
     meta = torch.load(path, map_location='cpu')
     G, K, d = meta['G'], meta['K'], meta['d']
-    pq = SoftPQ(G, K, d,
-                lmbda=meta.get('lmbda', 0.0),
-                prior_floor=meta.get('prior_floor', 0.0))
+    pq_kwargs = {
+        'lmbda': meta.get('lmbda', 0.0),
+        'prior_floor': meta.get('prior_floor', 0.0),
+    }
+    if meta.get('pq_type') == 'MultiModeSoftPQ':
+        pq = MultiModeSoftPQ(
+            G, meta['mode_sizes'], d, **pq_kwargs)
+    else:
+        pq = SoftPQ(G, K, d, **pq_kwargs)
     transform = None
     if meta.get('has_transform'):
         ttype = meta.get('transform_type')

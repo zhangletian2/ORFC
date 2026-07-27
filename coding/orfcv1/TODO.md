@@ -1364,3 +1364,70 @@ operational marginal。
 - [ ] 执行 `run_exp_v1_1.sh ... validation`，冻结 K8 选择。
 - [ ] 人工复核 `selection_v1_1.json` 后执行
   `run_exp_v1_1.sh ... postselect`。
+
+---
+
+## 16. 固定总码率余项测量（Smoke 已通过，正式实验未运行）
+
+### 16.1 最小改动原则
+
+- [x] 保留现有 `SoftPQ`、`FeatureCodecV1`、teacher cache、frozen tail 和
+  下游评估主路径。
+- [x] 在 `coding/orfcv1/` 内新增 `MultiModeSoftPQ`，不修改当前存在用户
+  改动的 `coding/orfc/soft_pq.py`。
+- [x] 多模式只组合现有 `SoftPQ` 实例，共享同一个正交表示和分组；
+  不复制 ORFC 编码器、tail 或训练主流程，默认选择最大模式时保持原接口。
+- [x] `FeatureCodecV1.forward` 只增加可选逐组 `modes` 参数；单模式调用
+  和旧 checkpoint 加载保持兼容。
+
+### 16.2 已实现接口
+
+- [x] `multimode_pq.py`
+  - 逐组选择模式；
+  - 固定长度模式码率；
+  - hard/soft assignment、usage、label 和可选先验码率沿用 `SoftPQ`
+    语义；
+  - 模式元数据进入 checkpoint。
+- [x] `fixed_rate_remainder.py`
+  - 名义或外部实际码长表；
+  - 固定总码率契约检查；
+  - 相邻两组交换、随机多步交换和小菜单完整枚举；
+  - 复用现有归一化、codec 和 frozen-tail 批量前向；
+  - 计算 \(D,\Phi,E=D-\Phi,\widehat\Omega\)、理想间隔、候选集合及
+    单步交换余项变化；
+  - 保留逐图数组以支持配对置信区间。
+
+### 16.3 运行前必须完成
+
+- [x] 本阶段保持 `train_v1.py` 不变；P1 先在同一冻结 \(U\) 下按模式复用
+  `SoftPQ.init_from_kmeans` 建立码本菜单。P2 再接入多分配联合训练。
+- [x] 正式模式菜单预注册为 K8/K16/K32/K64/K128/K256；所有模式在
+  同一个冻结 \(U\) 下独立初始化，不能直接拼接具有不同 \(U\) 的
+  K8/K256 checkpoint。
+- [x] P1 采用 3--8 bit/group 的固定长度模式成本，明确标记为受控代理；
+  实际熵码长留作后续独立实验，validation/test 不重新估计成本。
+- [x] 用训练集上的实际模式量化误差和有限差分 JVP 估计与当前 \(U\)
+  一致的 \(c_g\)，blk20 步长固定为 0.01。
+- [x] 增加薄入口 `p1_fixed_rate.py`，直接复用 codec、teacher cache、
+  frozen tail 和 `fixed_rate_remainder.py`。
+- [ ] 补充交换回返及线性 tail 的 \(E=0\) 单元契约；多模式 checkpoint、
+  固定总码率和 allocation chunk 已由 smoke 验证。
+
+### 16.4 Smoke 记录
+
+- [x] `RUN_ID=p1_smoke_20260727T083454Z`；Identity、OPQ、原始 ORFC、
+  response-ORFC 四个独立任务分别使用 GPU 4、5、6、7。
+- [x] K8/K16 菜单、有限差分系数、112 bit/token 等预算候选、完整
+  tail 失真及汇总审计全部通过；4 个 arm-budget 结果的码率误差均为 0。
+- [x] 批量 allocation 重构与逐 allocation 参考实现相对误差为 0；
+  allocation chunk 1/4 的失真相对差为 \(1.24\times10^{-7}\)。
+- [x] Smoke 只使用 2 张图和 9 个候选验证链路，数值不作科学结论；
+  正式实验尚未启动。
+
+### 16.5 正式协议
+
+- [ ] 四个阶段依次为：多模式菜单准备、训练集系数与候选校准、
+  validation 完整余项测量、CPU 汇总审计。
+- [ ] GPU 4--7 只做四个表示任务的并发；单任务内部保持单卡执行。
+- [ ] 正式预算为 128/192 bit/token，validation 使用 300 张图；
+  每个预算保留解析候选、32 个单次交换和 32 个随机多组交换。
