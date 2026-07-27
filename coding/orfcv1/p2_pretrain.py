@@ -210,8 +210,33 @@ def _objective(
     loss = args.remainder_weight * remainder + args.anchor_weight * anchor
     return loss, {
         "remainder": remainder.detach(), "anchor": anchor.detach(),
+        "_remainder": remainder, "_anchor": anchor,
         "c_min": c.min().detach(), "c_max": c.max().detach(),
     }
+
+
+def _term_grad_stats(info, params):
+    grads = [
+        torch.autograd.grad(
+            info[key], params, retain_graph=True, allow_unused=True)
+        for key in ("_remainder", "_anchor")]
+    norms = [
+        torch.sqrt(sum(g.square().sum() for g in row if g is not None))
+        for row in grads]
+    dot = sum(
+        (a * b).sum() for a, b in zip(*grads)
+        if a is not None and b is not None)
+    return {
+        "remainder_grad_norm": float(norms[0]),
+        "anchor_grad_norm": float(norms[1]),
+        "grad_cosine": float(dot / (norms[0] * norms[1]).clamp_min(1e-12)),
+    }
+
+
+@torch.no_grad()
+def _rotation_distance(codec, reference):
+    current = codec.transform.get_rotation()
+    return float((current - reference).norm() / math.sqrt(current.shape[0]))
 
 
 def _fit_state(measured, distortion, calibration, args, device, seed):
@@ -354,6 +379,7 @@ def command_step(args):
     params = _parameters(codec, args.parameters)
     before = _hard_report(codec, tail, args, measured, calibration)
     optimizer = torch.optim.Adam(params, lr=args.lr)
+    rotation0 = codec.transform.get_rotation().detach().clone()
     history, stages, active_sets = [], [], [selected.tolist()]
     stage_start = None
     for step in range(args.steps):
@@ -361,17 +387,52 @@ def command_step(args):
         loss, info = _objective(
             codec, tail, batch, allocations, A, intercept, c, args,
             scale, anchor_scale)
+        collect_stats = (
+            step == 0 and (
+                args.grad_stats_every >= 0
+                or args.target_remainder_grad_ratio >= 0)
+            or args.grad_stats_every > 0
+            and (step + 1) % args.grad_stats_every == 0)
+        stats = _term_grad_stats(info, params) if collect_stats else {}
+        if step == 0 and args.target_remainder_grad_ratio >= 0:
+            if (args.anchor_weight <= 0
+                    or not all(math.isfinite(value) and value > 0 for value in (
+                        stats["anchor_grad_norm"],
+                        stats["remainder_grad_norm"]))):
+                raise RuntimeError("cannot calibrate non-positive gradient norms")
+            args.remainder_weight = (
+                args.target_remainder_grad_ratio * args.anchor_weight
+                * stats["anchor_grad_norm"]
+                / max(stats["remainder_grad_norm"], 1e-12))
+            loss = (
+                args.remainder_weight * info["_remainder"]
+                + args.anchor_weight * info["_anchor"])
+        if stats:
+            stats["weighted_grad_ratio"] = (
+                args.remainder_weight * stats["remainder_grad_norm"]
+                / max(args.anchor_weight * stats["anchor_grad_norm"], 1e-12))
         if stage_start is None:
             stage_start = float(loss.detach())
         loss.backward()
         grad_norm = torch.nn.utils.clip_grad_norm_(params, args.grad_clip)
         optimizer.step()
-        history.append({
+        row = {
             "step": step + 1, "loss": float(loss.detach()),
             "remainder": float(info["remainder"]),
             "anchor": float(info["anchor"]), "grad_norm": float(grad_norm),
             "coefficient_min": float(info["c_min"]),
-        })
+            "rotation_distance": _rotation_distance(codec, rotation0),
+            "remainder_weight": args.remainder_weight,
+        }
+        row.update(stats)
+        if (args.checkpoint and args.checkpoint_every > 0
+                and (step + 1) % args.checkpoint_every == 0):
+            path = Path(args.checkpoint)
+            snapshot = path.with_name(
+                f"{path.stem}.step{step + 1:03d}{path.suffix}")
+            save_codec_v1(codec, snapshot)
+            row["checkpoint"] = str(snapshot)
+        history.append(row)
         refresh = (
             args.refresh_steps > 0 and (step + 1) % args.refresh_steps == 0
             and step + 1 < args.steps)
@@ -529,13 +590,62 @@ def command_arrays(args):
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(output, **arrays)
+    summary["mean_distortion"] = float(arrays["distortion_mean"].mean())
+    if args.reference_codec:
+        reference = load_codec_v1(args.reference_codec, device)
+        summary["rotation_distance"] = _rotation_distance(
+            codec, reference.transform.get_rotation())
     summary.update({
         "codec": args.codec, "measurement": args.measurement,
         "calibration": args.calibration, "features": args.features,
         "coefficients": coefficient_path, "coefficient_kind": kind,
         "teachers": args.teachers, "image_offset": args.image_offset,
+        "reference_codec": args.reference_codec,
     })
     _write(output.with_suffix(".json"), summary)
+
+
+def command_match(args):
+    def read(paths):
+        rows = []
+        for path in paths:
+            row = json.loads(Path(path).read_text(encoding="utf-8"))
+            rows.append({
+                "summary": path, "codec": row["codec"],
+                "mean_distortion": row["mean_distortion"],
+                "omega": row["omega_sampled"],
+                "rotation_distance": row["rotation_distance"],
+            })
+        return rows
+
+    pairs = []
+    for mean in read(args.mean_inputs):
+        for joint in read(args.joint_inputs):
+            d_scale = max(
+                (mean["mean_distortion"] + joint["mean_distortion"]) / 2, 1e-12)
+            u_scale = max(
+                (mean["rotation_distance"] + joint["rotation_distance"]) / 2,
+                1e-12)
+            pairs.append({
+                "mean": mean, "joint": joint,
+                "mean_relative_gap": abs(
+                    mean["mean_distortion"] - joint["mean_distortion"]) / d_scale,
+                "rotation_relative_gap": abs(
+                    mean["rotation_distance"] - joint["rotation_distance"])
+                / u_scale,
+                "omega_delta_joint_minus_mean":
+                    joint["omega"] - mean["omega"],
+            })
+    mean = sorted(pairs, key=lambda row: row["mean_relative_gap"])[:args.top]
+    rotation = sorted(
+        pairs, key=lambda row: row["rotation_relative_gap"])[:args.top]
+    _write(args.output, {
+        "mean_match_pass": mean[0]["mean_relative_gap"] <= args.mean_tolerance,
+        "rotation_match_pass":
+            rotation[0]["rotation_relative_gap"] <= args.rotation_tolerance,
+        "matched_mean_distortion": mean,
+        "matched_rotation_distance": rotation,
+    })
 
 
 def command_paired(args):
@@ -672,6 +782,10 @@ def parser():
     step.add_argument("--lr", type=float, default=1e-5)
     step.add_argument("--grad-clip", type=float, default=1.0)
     step.add_argument("--checkpoint", default="")
+    step.add_argument("--checkpoint-every", type=int, default=0)
+    step.add_argument("--grad-stats-every", type=int, default=-1)
+    step.add_argument(
+        "--target-remainder-grad-ratio", type=float, default=-1.0)
     compare = sub.add_parser("compare")
     compare.add_argument("--inputs", nargs="+", required=True)
     compare.add_argument("--names", nargs="+", required=True)
@@ -697,6 +811,14 @@ def parser():
     arrays.add_argument("--images", type=int, default=128)
     arrays.add_argument("--batch-size", type=int, default=4)
     arrays.add_argument("--allocation-chunk", type=int, default=8)
+    arrays.add_argument("--reference-codec", default="")
+    match = sub.add_parser("match")
+    match.add_argument("--mean-inputs", nargs="+", required=True)
+    match.add_argument("--joint-inputs", nargs="+", required=True)
+    match.add_argument("--output", required=True)
+    match.add_argument("--top", type=int, default=5)
+    match.add_argument("--mean-tolerance", type=float, default=1e-3)
+    match.add_argument("--rotation-tolerance", type=float, default=2e-2)
     paired = sub.add_parser("paired")
     paired.add_argument("--inputs", nargs="+", required=True)
     paired.add_argument("--names", nargs="+", required=True)
