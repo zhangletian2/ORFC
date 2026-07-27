@@ -15,6 +15,11 @@ Usage:
 """
 
 import os, sys, argparse, json, glob, time
+if "CUDA_VISIBLE_DEVICES" not in os.environ:
+    try:
+        os.environ["CUDA_VISIBLE_DEVICES"] = sys.argv[sys.argv.index("--gpu") + 1]
+    except (ValueError, IndexError):
+        os.environ["CUDA_VISIBLE_DEVICES"] = "7"
 import numpy as np
 import torch
 from pathlib import Path
@@ -202,7 +207,6 @@ def main():
     elif args.modes:
         modes = [int(value) for value in args.modes.split(",")]
 
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
     device = torch.device("cuda:0")
 
     layer_idx = int(args.layer[-2:])

@@ -15,6 +15,11 @@ Usage:
 """
 
 import os, sys, argparse, json, glob, time, math
+if "CUDA_VISIBLE_DEVICES" not in os.environ:
+    try:
+        os.environ["CUDA_VISIBLE_DEVICES"] = sys.argv[sys.argv.index("--gpu") + 1]
+    except (ValueError, IndexError):
+        os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import numpy as np
 import torch
 from pathlib import Path
@@ -151,9 +156,7 @@ def main():
 
     args.seg_feat_dir = Path(args.seg_feat_root) / args.backbone / args.layer
 
-    device = torch.device(f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu")
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
-    device = torch.device("cuda:0")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Collect checkpoints
     ckpt_list = []

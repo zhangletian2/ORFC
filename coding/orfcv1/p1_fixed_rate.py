@@ -100,6 +100,17 @@ def command_prepare(args):
     pq = MultiModeSoftPQ(args.groups, sizes, features.shape[-1] // args.groups)
     pq.init_from_kmeans(
         z, device=device, max_iter=args.kmeans_iters, seed=args.seed)
+    anchor_bits = args.anchor_bits
+    if args.anchor_codec:
+        anchor = load_codec_v1(args.anchor_codec, device=device)
+        anchor_bits = anchor_bits or int(np.log2(anchor.pq.K))
+        if 2**anchor_bits not in sizes or anchor.pq.K != 2**anchor_bits:
+            raise ValueError("anchor codec size is absent from the mode menu")
+        if not torch.allclose(
+                rotation, anchor.transform.get_rotation(), atol=0, rtol=0):
+            raise ValueError("anchor codec and source transform differ")
+        pq.quantizers[sizes.index(2**anchor_bits)].codebooks.copy_(
+            anchor.pq.codebooks.detach().cpu())
     codec = FeatureCodecV1(pq.to(device), transform)
     output.parent.mkdir(parents=True, exist_ok=True)
     save_codec_v1(codec, output)
@@ -107,6 +118,8 @@ def command_prepare(args):
         "arm": args.arm, "mode_bits": list(csv_ints(args.mode_bits)),
         "training_images": int(len(ids)), "vectors": int(len(z)),
         "kmeans_iters": args.kmeans_iters, "seed": args.seed,
+        "source_kind": args.source_kind, "source": args.source,
+        "anchor_codec": args.anchor_codec, "anchor_bits": anchor_bits,
     })
     print(f"saved {output}")
 
@@ -348,6 +361,8 @@ def parser():
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--norm-mode", default="per_image")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--anchor-codec", default="")
+    p.add_argument("--anchor-bits", type=int, default=0)
     p.add_argument("--force", action="store_true")
     p = sub.add_parser("calibrate", parents=[common])
     p.add_argument("--output-dir", required=True)
