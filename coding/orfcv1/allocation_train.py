@@ -211,8 +211,10 @@ def command_repair(args):
         bits, seeded, args.monotonic_tolerance)
     best_key = (
         seeded_report["violations"],
-        seeded_report["max_relative_violation"],
-        float(np.mean(np.delete(seeded, anchor))))
+        int((seeded[anchor] - seeded[-1]) / max(
+            seeded[anchor], 1e-12) < args.minimum_high_rate_gain),
+        float(np.mean(np.delete(seeded, anchor))),
+        seeded_report["max_relative_violation"])
     best_state = {
         key: value.detach().cpu().clone()
         for key, value in codec.state_dict().items()}
@@ -241,8 +243,11 @@ def command_repair(args):
                 codec, tail, val_x, val_y, allocations, args)
             report = _curve_report(bits, curve, args.monotonic_tolerance)
             key = (
-                report["violations"], report["max_relative_violation"],
-                float(np.mean(np.delete(curve, anchor))))
+                report["violations"],
+                int((curve[anchor] - curve[-1]) / max(
+                    curve[anchor], 1e-12) < args.minimum_high_rate_gain),
+                float(np.mean(np.delete(curve, anchor))),
+                report["max_relative_violation"])
             row["validation"] = report
             if best_key is None or key < best_key:
                 best_key = key

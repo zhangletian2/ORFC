@@ -12,13 +12,14 @@ REPAIR_STEPS=${REPAIR_STEPS:-100}
 SHORT_STEPS=${SHORT_STEPS:-10}
 
 mkdir -p "$OUT"/logs
+# `repair` replaces every non-anchor codebook; this call only builds the menu.
 CUDA_VISIBLE_DEVICES=${GPU_REPAIR:-4} "$PY" p1_fixed_rate.py prepare \
   --arm candidate --features "$CACHE/features_train_blk20_n4500_ss1608637542.npy" \
   --output "$OUT/menu_anchored.pt" \
   --source-kind checkpoint --source "$ANCHOR" \
   --anchor-codec "$ANCHOR" --anchor-bits 6 \
-  --mode-bits 3,4,5,6,7,8 --groups 32 --images 1000 \
-  --max-vectors 62500 --kmeans-iters 100 --seed 42 \
+  --mode-bits 3,4,5,6,7,8 --groups 32 --images 64 \
+  --max-vectors 4096 --kmeans-iters 1 --seed 42 \
   >"$OUT/logs/menu_prepare.log" 2>&1
 
 CUDA_VISIBLE_DEVICES=${GPU_REPAIR:-4} "$PY" allocation_train.py repair \
