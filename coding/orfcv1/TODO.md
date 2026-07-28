@@ -37,6 +37,13 @@
 - Label the fixed audit pool and all adaptively mined pools as empirical.
   Report their size against the exact number of feasible allocations; do not
   treat absence of a sampled counterexample as a certificate.
+- Select the ideal-set size from an independent bootstrap stability audit.
+  Report nominal Top-K coverage of bootstrap optima and fail the calibration
+  gate when the requested probability mass cannot fit the trainable set.
+- Use 300 calibration images, a disjoint 64-image hard-mining slice and a
+  later optimisation slice in the next short experiment. Evaluate the complete
+  Top-256 set only at outer refreshes and use an active 16-member subset for
+  inner gradients.
 - Run the paired `primary_only` versus `primary_recovery` short experiment from
   `run_outer_inner_short.sh`. Do not start full optimisation until held-out
   target distortion is non-inferior and the empirical recovery margin improves.

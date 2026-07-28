@@ -20,9 +20,10 @@ Current pipeline:
 4. `allocation_train.py short` jointly updates the rotation and all codebooks.
    With `--outer-refresh`, each outer block recomputes the discrete JVP table,
    exact Top-K ideal allocation set and hard fixed-rate competitors on reserved
-   training images.  The inner block minimizes the best ideal-set distortion
-   and the empirical violation between the best set member and best sampled
-   outside competitor, using the active pair's subgradient. Codebooks use
+   training images. The outer pass evaluates the complete ideal set; the inner
+   pass keeps a small active subset containing the lowest-distortion and nominal
+   best members. It minimizes the active best distortion and its violation
+   against the best sampled outside competitor. Codebooks use
    Adam; the rotation uses Cayley-SGD directly on the orthogonal manifold.
    The recovery auxiliary updates both the rotation and every active codebook;
    conflicting gradients are projected against the primary distortion
@@ -35,6 +36,10 @@ Current pipeline:
    earlier checkpoint.
 6. `eval_v1_1_all.py` evaluates a frozen non-uniform allocation on downstream
    classification and segmentation tasks.
+7. `ideal_set_statistics.py` measures bootstrap stability of the ideal
+   allocation and draws exact uniform samples from the complete fixed-budget
+   allocation space. Both outputs explicitly carry empirical/probabilistic
+   scope and never claim a worst-case certificate.
 
 Stable artifacts:
 
@@ -76,3 +81,15 @@ only with the recovery auxiliary, but its held-out target distortion was
 7.37 higher than primary-only (95% CI [1.07, 13.68]).  The near-zero
 best-versus-runner-up ideal gap made the single target unstable; this motivated
 the Top-K set objective.
+
+With 64 calibration images, 5000 nonparametric bootstrap resamples produced
+4172 different ideal optima; a 95% frequency-ranked set contained 3922
+allocations. With 300 images these numbers fell to 588 and 338, respectively,
+but the 64-image and 300-image nominal Top-16 sets were disjoint. Outer
+calibration therefore requires more than 64 images before another training
+claim is made.
+
+For the next short run, the statistical outer set is nominal Top-256 and the
+inner active set is 16. On the 300-image calibration, Top-256 contains 84.38%
+of bootstrap optima; this is a measured stability level, not a 95% confidence
+guarantee.

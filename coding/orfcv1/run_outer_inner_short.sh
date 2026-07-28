@@ -9,6 +9,9 @@ RUN_ID=${RUN_ID:-outer_inner_short_$(date -u +%Y%m%dT%H%M%SZ)}
 OUT=${OUT:-results/dinov2_vitl14/rate_allocation/$RUN_ID}
 CACHE=artifacts/dinov2_vitl14/cache
 STEPS=${STEPS:-10}
+OUTER_CALIBRATION_IMAGES=${OUTER_CALIBRATION_IMAGES:-300}
+OUTER_MINING_OFFSET=${OUTER_MINING_OFFSET:-300}
+TRAIN_IMAGE_OFFSET=${TRAIN_IMAGE_OFFSET:-364}
 
 mkdir -p "$OUT/logs"
 run_one() {
@@ -21,15 +24,18 @@ run_one() {
     --hard-teachers "$CACHE/teacher_val_blk20_n500_ss1608637542.npy" \
     --output "$OUT/$name.json" --checkpoint "$OUT/$name.pt" \
     --steps "$STEPS" --images 4 --train-images 512 \
-    --train-image-offset 128 --hard-images 64 --hard-image-offset 0 \
+    --train-image-offset "$TRAIN_IMAGE_OFFSET" \
+    --hard-images 64 --hard-image-offset 0 \
     --hard-batch-size 8 --allocation-chunk 8 --allocations 16 \
     --refresh-steps 5 --select-steps 5 --log-steps 1 \
-    --outer-refresh --outer-calibration-images 64 \
+    --outer-refresh --outer-calibration-images "$OUTER_CALIBRATION_IMAGES" \
+    --minimum-saved-calibration-images 300 \
     --outer-calibration-offset 0 --outer-mining-images 64 \
-    --outer-mining-offset 64 --outer-batch-size 4 \
+    --outer-mining-offset "$OUTER_MINING_OFFSET" --outer-batch-size 8 \
     --outer-group-chunk 8 --outer-eps 0.01 \
     --dynamic-allocations --dynamic-single 32 --dynamic-random 32 \
-    --ideal-set-size "${IDEAL_SET_SIZE:-16}" \
+    --ideal-set-size "${IDEAL_SET_SIZE:-256}" \
+    --ideal-batch-size "${IDEAL_BATCH_SIZE:-16}" \
     --candidate-mean-weight 0.1 \
     --recovery-margin 0 --remainder-grad-ratio "$ratio" \
     --rotation-lr 0.00001 --lr 0.00001 \

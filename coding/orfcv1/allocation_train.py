@@ -228,6 +228,29 @@ def _base(args):
     return device, codec, tail, train_x, train_y, val_x, val_y
 
 
+def _validate_training_slices(args, count):
+    ranges = {
+        "calibration": (
+            args.outer_calibration_offset,
+            args.outer_calibration_offset + args.outer_calibration_images),
+        "mining": (
+            args.outer_mining_offset,
+            args.outer_mining_offset + args.outer_mining_images),
+        "inner": (
+            args.train_image_offset,
+            args.train_image_offset + args.train_images),
+    }
+    for name, (first, last) in ranges.items():
+        if first < 0 or last > count or first >= last:
+            raise ValueError(f"{name} image slice is invalid")
+    names = list(ranges)
+    for i, left in enumerate(names):
+        for right in names[i + 1:]:
+            a, b = ranges[left], ranges[right]
+            if max(a[0], b[0]) < min(a[1], b[1]):
+                raise ValueError(f"{left} and {right} image slices overlap")
+
+
 def command_warmup(args):
     device, codec, tail, train_x, train_y, val_x, val_y = _base(args)
     bits = np.log2(codec.pq.mode_sizes).astype(int)
@@ -291,18 +314,30 @@ def _select_state(source, distortion, calibration, args):
             raise ValueError(
                 "allocation pool must contain every ideal-set member")
         target_set.append(int(hits[0]))
-    target_set = np.asarray(sorted(set(target_set)), dtype=int)
+    target_set = np.asarray(list(dict.fromkeys(target_set)), dtype=int)
     if not np.intersect1d(target_set, minimizers).size:
         raise RuntimeError("ideal set does not contain the ideal minimizer")
     outside = np.setdiff1d(np.arange(len(phi)), target_set)
     target = int(target_set[np.argmin(distortion[target_set])])
+    active_count = min(
+        getattr(args, "ideal_batch_size", len(target_set)),
+        len(target_set))
+    active_targets = [target]
+    if active_count > 1 and int(target_set[0]) != target:
+        active_targets.append(int(target_set[0]))
+    for index in target_set[np.argsort(distortion[target_set])]:
+        if int(index) not in active_targets:
+            active_targets.append(int(index))
+        if len(active_targets) >= active_count:
+            break
+    active_targets = np.asarray(active_targets, dtype=int)
     gap = float(calibration.get(
         "ideal_set_gap", calibration["ideal_gap"]))
     order = np.argsort(remainder)
     edge = max(2, args.allocations // 4)
     selected = (
         set(order[:edge]) | set(order[-edge:])
-        | set(map(int, minimizers)) | set(map(int, target_set)))
+        | set(map(int, minimizers)) | set(map(int, active_targets)))
     outside_bits = np.asarray(
         calibration.get("ideal_set_outside_bits", np.empty(0)))
     if outside_bits.size:
@@ -328,7 +363,7 @@ def _select_state(source, distortion, calibration, args):
     local = {index: position for position, index in enumerate(selected)}
     target_local = local[target]
     target_set_local = np.asarray([
-        local[int(index)] for index in target_set], dtype=int)
+        local[int(index)] for index in active_targets], dtype=int)
     target_local_set = set(map(int, target_set_local))
     competitor_local = np.asarray([
         position for position in range(len(selected))
@@ -340,6 +375,7 @@ def _select_state(source, distortion, calibration, args):
         "selected": selected, "allocations": source["allocations"][selected],
         "phi": phi[selected], "full_phi": phi,
         "target": target, "target_set": target_set,
+        "active_target_set": active_targets,
         "minimizers": minimizers,
         "target_local": target_local,
         "target_set_local": target_set_local,
@@ -608,7 +644,9 @@ def _state_report(state):
         "target_phi": float(state["phi"][state["target_local"]]),
         "ideal_set_count": int(len(state["target_set"])),
         "ideal_set_indices": state["target_set"].tolist(),
-        "ideal_set_allocations": state["allocations"][
+        "active_ideal_set_count": int(len(state["active_target_set"])),
+        "active_ideal_set_indices": state["active_target_set"].tolist(),
+        "active_ideal_set_allocations": state["allocations"][
             state["target_set_local"]].tolist(),
         "minimizers": state["minimizers"].tolist(),
         "gap": float(state["gap"]),
@@ -679,6 +717,15 @@ def command_short(args):
         calibration = _calibration_dict(saved)
     if args.outer_refresh and not args.dynamic_allocations:
         raise ValueError("outer refresh requires dynamic allocations")
+    if args.outer_refresh:
+        _validate_training_slices(args, len(train_x))
+    saved_images = (
+        calibration["q_per_image_by_bit"].shape[1]
+        if "q_per_image_by_bit" in calibration else 0)
+    if saved_images < args.minimum_saved_calibration_images:
+        raise ValueError(
+            f"saved calibration has {saved_images} images; "
+            f"{args.minimum_saved_calibration_images} required")
     calibration = _with_ideal_set(calibration, args)
     audit_calibration = dict(calibration)
     audit_allocations = np.unique(np.concatenate([
@@ -752,7 +799,7 @@ def command_short(args):
             args.images, len(train_x) - args.train_image_offset)))
     remainder_weight = _calibrate_remainder(
         codec, tail, calibration_batch, state, args, params, rotation)
-    history, active, refresh = [], [], 0
+    history, active, refresh, last_refresh_step = [], [], 0, 0
     initial_terms = _objective_terms(
         initial_dynamic_D, initial_dynamic_state, args, remainder_weight)
     validation_trace = [{"step": 0, **initial_terms}]
@@ -804,6 +851,8 @@ def command_short(args):
                     len(training_source["allocations"])),
                 "target_index": int(state["target"]),
                 "ideal_set_count": int(len(state["target_set"])),
+                "active_ideal_set_count": int(
+                    len(state["active_target_set"])),
                 "minimizer_count": int(len(state["minimizers"])),
                 "set_external_gap": float(state["gap"]),
                 "epoch": epoch, "temperature": temperature,
@@ -812,6 +861,7 @@ def command_short(args):
             args.refresh_steps > 0 and (step + 1) % args.refresh_steps == 0
         ):
             refresh += 1
+            last_refresh_step = step + 1
             calibration, training_source, state = _refresh_training_state(
                 codec, tail, train_x, train_y, audit, state,
                 calibration, args, refresh)
@@ -837,7 +887,7 @@ def command_short(args):
                 f"margin={terms_val['empirical_margin']:.6g} "
                 f"omega={terms_val['omega']:.6g} "
                 f"pool={len(training_source['allocations'])}", flush=True)
-    if args.outer_refresh:
+    if args.outer_refresh and last_refresh_step != total_steps:
         refresh += 1
         calibration, training_source, state = _refresh_training_state(
             codec, tail, train_x, train_y, audit, state,
@@ -917,6 +967,7 @@ def command_short(args):
         "global_remainder_upper_bound": None,
         "strict_recovery_certified": False,
         "ideal_set_size": int(len(calibration["ideal_set_bits"])),
+        "ideal_batch_size": args.ideal_batch_size,
         "ideal_set_definition": "exact_top_k_phi",
         "recovery_objective": "empirical_best_outside_minus_best_inside",
         "epochs": args.epochs, "train_images": args.train_images,
@@ -932,6 +983,7 @@ def command_short(args):
         "remainder_grad_ratio": args.remainder_grad_ratio,
         "outer_refresh": args.outer_refresh,
         "outer_calibration_images": args.outer_calibration_images,
+        "saved_calibration_images": saved_images,
         "outer_mining_images": args.outer_mining_images,
         "candidate_mean_weight": args.candidate_mean_weight,
         "recovery_margin": args.recovery_margin,
@@ -995,6 +1047,7 @@ def parser():
     short.add_argument("--recovery-margin", type=float, default=0.0)
     short.add_argument("--candidate-mean-weight", type=float, default=0.0)
     short.add_argument("--ideal-set-size", type=int, default=16)
+    short.add_argument("--ideal-batch-size", type=int, default=16)
     short.add_argument("--reference-bit", type=int, default=6)
     short.add_argument("--remainder-weight", type=float, default=0.0)
     short.add_argument("--remainder-grad-ratio", type=float, default=-1.0)
@@ -1013,6 +1066,8 @@ def parser():
     short.add_argument("--outer-batch-size", type=int, default=4)
     short.add_argument("--outer-group-chunk", type=int, default=8)
     short.add_argument("--outer-eps", type=float, default=0.01)
+    short.add_argument(
+        "--minimum-saved-calibration-images", type=int, default=0)
     return main
 
 

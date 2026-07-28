@@ -11,11 +11,12 @@ from cayley import CayleySGD, DirectOrthogonalTransform
 from allocation_train import (
     _allocation_source, _backward, _curve_report, _dynamic_source,
     _objective_terms, _protect_primary, _select_state,
-    _tangent_gradient, _with_ideal_set,
+    _tangent_gradient, _validate_training_slices, _with_ideal_set,
 )
 from fixed_rate_remainder import (
     decompose_output_vectors, validate_fixed_total_rate,
 )
+from ideal_set_statistics import _solve_batch, _suffix_counts
 from p1_fixed_rate import (
     make_allocations, top2_allocate, top2_cost_allocate, topk_cost_allocate,
 )
@@ -93,6 +94,27 @@ def test_fixed_rate_and_curve_contracts():
     assert passed["monotonic"] and not failed["monotonic"]
 
 
+def test_statistical_allocation_helpers():
+    bits = np.asarray([1, 2, 3])
+    table = np.asarray([[[3., 2., 1.], [1., 2., 4.]]])
+    modes = _solve_batch(table, bits, 4)
+    assert modes.tolist() == [[2, 0]]
+    counts = _suffix_counts(2, tuple(bits), 4)
+    assert counts[0][4] == 3
+    slices = Namespace(
+        outer_calibration_offset=0, outer_calibration_images=10,
+        outer_mining_offset=10, outer_mining_images=5,
+        train_image_offset=15, train_images=20)
+    _validate_training_slices(slices, 35)
+    slices.train_image_offset = 14
+    try:
+        _validate_training_slices(slices, 35)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("overlapping training slices were accepted")
+
+
 def test_dynamic_pool_and_selection_objective():
     costs = np.broadcast_to(np.arange(1, 4, dtype=float), (2, 3))
     calibration = {
@@ -128,8 +150,10 @@ def test_dynamic_pool_and_selection_objective():
     assert state["target"] == 2 and state["full_phi"].tolist() == [7, 4, 2]
     set_args = Namespace(ideal_set_size=2)
     discrete = _with_ideal_set(discrete, set_args)
+    select_args.ideal_batch_size = 1
     state = _select_state(audit, distortion, discrete, select_args)
-    assert state["target_set"].tolist() == [1, 2]
+    assert state["target_set"].tolist() == [2, 1]
+    assert state["active_target_set"].tolist() == [1]
     assert state["gap"] == 5 and state["empirical_margin"] == 2
 
 
@@ -196,6 +220,7 @@ if __name__ == "__main__":
     test_fixed_ideal_candidate_binding()
     test_top2_matches_brute_force()
     test_fixed_rate_and_curve_contracts()
+    test_statistical_allocation_helpers()
     test_dynamic_pool_and_selection_objective()
     test_primary_gradient_protection()
     test_joint_recovery_gradients()
