@@ -440,7 +440,12 @@ def _objective_terms(distortion, state, args, remainder_weight):
     recovery = max(args.recovery_margin - margin, 0.0) / (
         state["distortion_scale"])
     candidate = target_value / state["distortion_scale"]
-    base = candidate + (
+    operational_best = float(D.min()) / state["distortion_scale"]
+    primary = (
+        operational_best
+        if getattr(args, "primary_target", "ideal_set") == "operational_best"
+        else candidate)
+    base = primary + (
         args.candidate_mean_weight * D.mean() / state["distortion_scale"])
     return {
         "score": float(base + remainder_weight * recovery),
@@ -448,7 +453,9 @@ def _objective_terms(distortion, state, args, remainder_weight):
         "omega": float(np.ptp(e)), "gap": float(state["gap"]),
         "sampled_omega_to_set_gap": float(
             np.ptp(e) / max(state["gap"], 1e-12)),
-        "candidate": float(candidate), "empirical_margin": margin,
+        "candidate": float(candidate),
+        "operational_best": float(operational_best),
+        "empirical_margin": margin,
     }
 
 
@@ -482,12 +489,16 @@ def _loss(codec, tail, batch, state, args, remainder_weight):
         recovery = candidate.new_zeros(())
         recovery_constraint = candidate.new_zeros(())
         empirical_margin = candidate.new_tensor(float("inf"))
-    base = candidate + (
-        args.candidate_mean_weight * D.mean() / state["distortion_scale"])
+    operational_best = normalized.min()
+    primary = (
+        operational_best
+        if getattr(args, "primary_target", "ideal_set") == "operational_best"
+        else candidate)
+    base = primary + args.candidate_mean_weight * normalized.mean()
     return base + remainder_weight * recovery, {
         "base": base, "omega": omega, "recovery": recovery,
         "recovery_constraint": recovery_constraint,
-        "candidate": candidate,
+        "candidate": candidate, "operational_best": operational_best,
         "empirical_margin": empirical_margin,
     }
 
@@ -845,6 +856,7 @@ def command_short(args):
                 "base": float(terms["base"]), "omega": float(terms["omega"]),
                 "recovery": float(terms["recovery"]),
                 "candidate": float(terms["candidate"]),
+                "operational_best": float(terms["operational_best"]),
                 "empirical_margin": float(terms["empirical_margin"]),
                 "grad_norm": float(grad),
                 "rotation_grad_norm": parameter_grad_norms[0],
@@ -994,6 +1006,7 @@ def command_short(args):
         "saved_calibration_images": saved_images,
         "outer_mining_images": args.outer_mining_images,
         "candidate_mean_weight": args.candidate_mean_weight,
+        "primary_target": args.primary_target,
         "recovery_margin": args.recovery_margin,
         "fixed_member_paired_delta": float(paired.mean()),
         "fixed_member_paired_delta_ci95": [
@@ -1054,6 +1067,9 @@ def parser():
     short.add_argument("--lse-temperature", type=float, default=0.1)
     short.add_argument("--recovery-margin", type=float, default=0.0)
     short.add_argument("--candidate-mean-weight", type=float, default=0.0)
+    short.add_argument(
+        "--primary-target", choices=("ideal_set", "operational_best"),
+        default="ideal_set")
     short.add_argument("--ideal-set-size", type=int, default=16)
     short.add_argument("--ideal-batch-size", type=int, default=16)
     short.add_argument("--reference-bit", type=int, default=6)

@@ -142,6 +142,11 @@ def test_dynamic_pool_and_selection_objective():
         distortion[state["selected"]], state, select_args, 0.5)
     assert terms["score"] >= terms["base"] and terms["omega"] >= 0
     assert terms["empirical_margin"] == 1.0
+    select_args.primary_target = "operational_best"
+    select_args.candidate_mean_weight = 0.0
+    terms = _objective_terms(
+        distortion[state["selected"]], state, select_args, 0.5)
+    assert np.isclose(terms["base"], terms["operational_best"])
 
     discrete = dict(calibration)
     discrete["ideal_cost_table"] = np.asarray([[3, 2, 1], [1, 2, 4]])
