@@ -227,6 +227,8 @@ class SoftPQ(nn.Module):
         Z_flat = Z_flat.to(device)
         N = Z_flat.shape[0]
         sub = Z_flat.reshape(N, self.G, self.d).permute(1, 0, 2).contiguous()
+        del Z_flat
+        torch.cuda.empty_cache()
         with torch.no_grad():
             centroids = batched_kmeans(sub, self.K,
                                        max_iter=max_iter,
@@ -453,6 +455,47 @@ class CLIPFrozenTail:
         return self
 
 
+class Siglip2FrozenTail:
+    """Wraps SigLIP2 encoder tail layers + post_layernorm for ΔL_ref.
+
+    SigLIP2 encoder layers take [B, N, D] directly (no permute),
+    require attention_mask=None, and return (hidden_states, ...) tuples.
+    """
+
+    def __init__(self, layers, post_ln, device='cuda'):
+        self.layers = list(layers)
+        self.post_ln = post_ln
+        self.device = device
+        for blk in self.layers:
+            blk.to(device).eval()
+            for p in blk.parameters():
+                p.requires_grad_(False)
+        self.post_ln.to(device).eval()
+        for p in self.post_ln.parameters():
+            p.requires_grad_(False)
+
+    def _forward(self, x):
+        for blk in self.layers:
+            out = blk(x, attention_mask=None)
+            x = out[0] if isinstance(out, tuple) else out
+        x = self.post_ln(x)
+        return x
+
+    def __call__(self, x):
+        return self._forward(x)
+
+    @torch.no_grad()
+    def forward_nograd(self, x):
+        return self._forward(x)
+
+    def to(self, device):
+        for blk in self.layers:
+            blk.to(device)
+        self.post_ln.to(device)
+        self.device = device
+        return self
+
+
 # ================================================================
 #                    Training
 # ================================================================
@@ -490,6 +533,7 @@ def train_soft_pq(
     tau_start=1.0,
     tau_end=0.01,
     tau_schedule='exponential',
+    n_prefix=0,
 ):
     """Train FeatureCodec (transform + PQ) to minimise J = R + λ·D.
 
@@ -501,8 +545,13 @@ def train_soft_pq(
     np.random.seed(seed)
 
     N_img = len(features_train)
-    D = features_train[0].shape[1]
-    features_array = np.stack(features_train)
+    if isinstance(features_train, np.ndarray) and features_train.ndim == 3:
+        features_array = features_train
+        D = features_array.shape[2]
+    else:
+        D = features_train[0].shape[1]
+        features_array = np.stack(features_train)
+        del features_train
     pq = SoftPQ(G, K, d, lmbda=lmbda, prior_floor=prior_floor).to(device)
     if transform is not None:
         transform = transform.to(device)
@@ -533,7 +582,7 @@ def train_soft_pq(
             end = min(start + 200, N_img)
             X = torch.from_numpy(features_array[start:end]).float().to(device)
             with torch.no_grad():
-                Y, _, _ = batch_normalize_gpu(X, mode=norm_mode)
+                Y, _, _ = batch_normalize_gpu(X, mode=norm_mode, n_prefix=n_prefix)
                 flat = Y.reshape(-1, D)
                 Z = transform.encode(flat) if transform else flat
             all_Z.append(Z.cpu())
@@ -662,7 +711,7 @@ def train_soft_pq(
             T = X.shape[1]
 
             with torch.no_grad():
-                Y, Mu, Std = batch_normalize_gpu(X, mode=norm_mode)
+                Y, Mu, Std = batch_normalize_gpu(X, mode=norm_mode, n_prefix=n_prefix)
 
             Y_hat, usage = codec(Y)
 
@@ -714,7 +763,7 @@ def train_soft_pq(
                     ve = min(vs + batch_size, n_val)
                     X_v = torch.from_numpy(val_array[vs:ve]).float().to(device)
                     Bv = X_v.shape[0]
-                    Y_v, Mu_v, Std_v = batch_normalize_gpu(X_v, mode=norm_mode)
+                    Y_v, Mu_v, Std_v = batch_normalize_gpu(X_v, mode=norm_mode, n_prefix=n_prefix)
                     Yh_v, _ = codec(Y_v)
                     if use_mse_loss:
                         val_loss_sum += ((Y_v - Yh_v) ** 2).sum().item() / Bv * Bv
@@ -773,7 +822,7 @@ def train_soft_pq(
 # ================================================================
 
 def soft_pq_encode_decode(features, codec, norm_mode, device,
-                          chunk_images=None):
+                          chunk_images=None, n_prefix=0):
     """Encode/decode features using trained FeatureCodec (hard PQ at eval)."""
     codec.eval()
     N = len(features)
@@ -791,7 +840,7 @@ def soft_pq_encode_decode(features, codec, norm_mode, device,
             end = min(start + chunk_images, N)
             X = torch.from_numpy(np.stack(features[start:end])).float().to(device)
             B = X.shape[0]
-            Y, Mu, Std = batch_normalize_gpu(X, mode=norm_mode)
+            Y, Mu, Std = batch_normalize_gpu(X, mode=norm_mode, n_prefix=n_prefix)
             Y_hat, _ = codec(Y)
             X_hat = batch_inv_normalize_gpu(Y_hat, Mu, Std)
             for i in range(B):

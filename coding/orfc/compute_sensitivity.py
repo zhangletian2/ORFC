@@ -3,13 +3,19 @@
 Per-group sensitivity ablation (restore-one-group).
 
 Extended from compute_cls_sensitivity.py:
-  - L_cls ablation (classification cross-entropy, DINOv2 only)
+  - L_cls ablation (classification cross-entropy)
   - L_ref ablation (frozen-tail feature distortion, any backbone)
   - Gini coefficient of sensitivity distribution
+
+Supports: dinov2_vitl14, dinov2_vitg14, clip_vitl14.
+CLIP uses zero-shot classification via text embeddings.
 
 Usage:
     python compute_sensitivity.py --gpu 0 --layer blk20 --backbone dinov2_vitl14 \
         --codec_path checkpoints/dinov2_vitl14/blk20_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.pt
+
+    python compute_sensitivity.py --gpu 0 --layer blk20 --backbone clip_vitl14 \
+        --codec_path /data4/workspace/zlt/featcodec/coding/vq/v3.4/checkpoints/clip_vitl14/blk20_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.pt
 """
 
 import os, sys, argparse, json, time
@@ -31,7 +37,7 @@ from opq import (
 )
 from soft_pq import (
     SoftPQ, OrthogonalTransform, FeatureCodec,
-    FrozenTail, train_soft_pq, load_codec,
+    FrozenTail, CLIPFrozenTail, train_soft_pq, load_codec,
 )
 
 import warnings
@@ -201,7 +207,7 @@ def lref_ablation(codec, tail, features, norm_mode, device, batch_size=8):
 
 def cls_ablation(codec, tail, head, features, norm_mode,
                  device, batch_size=8):
-    """Restore-one-group ablation for L_cls (classification loss)."""
+    """Restore-one-group ablation for L_cls (DINOv2 linear head)."""
     pq = codec.pq
     G, d = pq.G, pq.d
     D = G * d
@@ -256,7 +262,75 @@ def cls_ablation(codec, tail, head, features, norm_mode,
     return delta_L / max(n, 1)
 
 
+def cls_ablation_clip(codec, tail, proj, text_emb, logit_scale,
+                      features, norm_mode, device, batch_size=8):
+    """Restore-one-group ablation for L_cls (CLIP zero-shot)."""
+    pq = codec.pq
+    G, d = pq.G, pq.d
+    D = G * d
+    delta_L = np.zeros(G)
+    n = 0
+    codec.eval()
+
+    def _logits(X_hat):
+        x = tail.forward_nograd(X_hat)
+        cls = x[:, 0]
+        if isinstance(proj, torch.Tensor):
+            img_feat = cls @ proj
+        else:
+            img_feat = proj(cls)
+        img_feat = img_feat / img_feat.norm(dim=-1, keepdim=True).clamp(min=1e-12)
+        return logit_scale * img_feat @ text_emb.t()
+
+    with torch.no_grad():
+        for s in range(0, len(features), batch_size):
+            e = min(s + batch_size, len(features))
+            X = torch.from_numpy(np.stack(features[s:e])).float().to(device)
+            B, T, C = X.shape
+            Y, Mu, Std = batch_normalize_gpu(X, mode=norm_mode)
+            flat = Y.reshape(B * T, C)
+
+            labels = _logits(X).argmax(dim=1)
+
+            Z = codec.transform.encode(flat) if codec.transform else flat
+            Z_hat, _ = pq._quantise(Z)
+
+            Y_hat_base = (codec.transform.decode(Z_hat)
+                          if codec.transform else Z_hat)
+            X_hat_base = batch_inv_normalize_gpu(
+                Y_hat_base.reshape(B, T, C), Mu, Std)
+            L_base = F.cross_entropy(_logits(X_hat_base), labels,
+                                     reduction='sum')
+
+            Z_g = Z.reshape(-1, G, d)
+            Z_hat_g = Z_hat.reshape(-1, G, d)
+
+            for g in range(G):
+                oracle = Z_hat_g.clone()
+                oracle[:, g, :] = Z_g[:, g, :]
+                Y_hat_g = (codec.transform.decode(oracle.reshape(-1, D))
+                           if codec.transform else oracle.reshape(-1, D))
+                X_hat_g = batch_inv_normalize_gpu(
+                    Y_hat_g.reshape(B, T, C), Mu, Std)
+                L_g = F.cross_entropy(_logits(X_hat_g), labels,
+                                      reduction='sum')
+                delta_L[g] += (L_base - L_g).item()
+
+            n += 1
+            del X, Y, Mu, Std, flat, Z, Z_hat
+            torch.cuda.empty_cache()
+
+    return delta_L / max(n, 1)
+
+
 # ── main ─────────────────────────────────────────────────────────────
+
+_EMBED_DIMS = {
+    'dinov2_vitl14': 1024,
+    'dinov2_vitg14': 1536,
+    'clip_vitl14': 1024,
+}
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -274,9 +348,13 @@ def main():
     parser.add_argument("--feat_root", type=str,
                         default=os.path.join(PROJECT_ROOT, "features"))
     parser.add_argument("--backbone", type=str, default="dinov2_vitl14")
+    parser.add_argument("--classnames", type=str,
+                        default=os.path.join(PROJECT_ROOT, "utils",
+                                             "classnames.txt"),
+                        help="Classnames file for CLIP zero-shot")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--skip_cls", action="store_true",
-                        help="Skip L_cls ablation (e.g. for non-DINOv2)")
+                        help="Skip L_cls ablation")
     args = parser.parse_args()
 
     device = torch.device(f"cuda:{args.gpu}")
@@ -291,12 +369,7 @@ def main():
     else:
         from backbone.wrapper import Dinov2Wrapper as BackboneWrapper
 
-    if args.backbone == 'dinov2_vitg14':
-        D = 1536
-    elif is_clip:
-        D = 768
-    else:
-        D = 1024
+    D = _EMBED_DIMS.get(args.backbone, 1024)
 
     G = D // args.embedding_dim
     d = args.embedding_dim
@@ -332,12 +405,21 @@ def main():
 
     print(f"Loading {args.backbone} ...")
     if is_clip:
-        wrapper = BackboneWrapper(device=device)
+        wrapper = BackboneWrapper(args.classnames, device=device)
     elif args.backbone == 'dinov2_vitg14':
         wrapper = BackboneWrapper(head_layers=1, model_name='dinov2_vitg14',
                                   device=device)
     else:
         wrapper = BackboneWrapper(head_layers=1, device=device)
+
+    # CLIP zero-shot classification components (keep on GPU)
+    clip_proj = clip_text_emb = clip_logit_scale = None
+    if is_clip:
+        clip_proj = wrapper._proj
+        if isinstance(clip_proj, torch.Tensor):
+            clip_proj = clip_proj.to(device)
+        clip_text_emb = wrapper.text_emb.to(device)
+        clip_logit_scale = wrapper.model.logit_scale.exp().to(device)
 
     wrapper.backbone.cpu()
     if hasattr(wrapper, 'head') and wrapper.head is not None:
@@ -345,11 +427,15 @@ def main():
     torch.cuda.empty_cache()
 
     tail_blocks = list(wrapper.backbone.blocks[layer_idx + 1:])
-    tail = FrozenTail(tail_blocks, wrapper.backbone.norm, device=device)
+    if is_clip:
+        tail = CLIPFrozenTail(tail_blocks, wrapper.backbone.norm,
+                              device=device)
+    else:
+        tail = FrozenTail(tail_blocks, wrapper.backbone.norm, device=device)
 
     head = None
-    run_cls = not args.skip_cls and not is_clip
-    if run_cls:
+    run_cls = not args.skip_cls
+    if run_cls and not is_clip:
         head = wrapper.head.to(device)
         head.eval()
         for p in head.parameters():
@@ -388,10 +474,16 @@ def main():
         print(f"  L_ref: CV={res['ablation_lref']['cv']:.4f}  "
               f"Gini={res['ablation_lref']['gini']:.4f}")
 
-        if run_cls and head is not None:
-            abl_cls = cls_ablation(codec, tail, head, features_diag,
-                                   norm_mode, device,
-                                   batch_size=args.batch_size)
+        if run_cls:
+            if is_clip:
+                abl_cls = cls_ablation_clip(
+                    codec, tail, clip_proj, clip_text_emb,
+                    clip_logit_scale, features_diag,
+                    norm_mode, device, batch_size=args.batch_size)
+            else:
+                abl_cls = cls_ablation(codec, tail, head, features_diag,
+                                       norm_mode, device,
+                                       batch_size=args.batch_size)
             res['ablation_cls'] = stats(abl_cls)
             print(f"  L_cls: CV={res['ablation_cls']['cv']:.4f}  "
                   f"Gini={res['ablation_cls']['gini']:.4f}")

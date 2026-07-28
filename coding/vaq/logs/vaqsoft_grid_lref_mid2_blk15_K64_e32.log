@@ -1,0 +1,135 @@
+
+######################################################################
+# VAQ-Soft Feature Codec  [VAQ-init + MSE finetune]
+# backbone=dinov2_vitl14, layer=blk15 (idx=15)
+# bit_budget=192, num_subspaces=32, min_bits=1, max_bits=10 (K_max=1024)
+# percent_var=1.0 (enforced), objective=linear
+# epochs=100, lr=0.001, batch=32, tau=1.0->1.0 (exponential)
+# freeze_transform=True, freeze_codebooks=False
+# Distortion: ΔL_ref distillation through frozen ViT tail
+# 2026-04-27 15:56:07
+######################################################################
+
+Data: train=5000, test=500
+  train_dir=/data4/workspace/zlt/featcodec/ORFC/features/train/dinov2_vitl14/blk15
+  test_dir=/data4/workspace/zlt/featcodec/ORFC/features/test/dinov2_vitl14/blk15
+  D=1024, T=257, subspaces=32, bit_budget=192 bits/token  (BPFP=0.187500)
+
+[ΔL_ref] Loading wrapper for tail (layer_idx=15)...
+  tail: 8 blocks + final norm (all frozen, no_grad teacher cache)
+
+[stage 1] VAQ initialisation (PCA + bit alloc + k-means)...
+  VAQ fit vectors: 1,285,000/1,285,000 tokens
+  PCA: N=1,285,000, D=1024, padded_D=1024
+  VAQ variance/subspace (first 10): [0.12889644 0.12451387 0.08212117 0.06370147 0.05468442 0.04896262
+ 0.0434333  0.04001195 0.03683841 0.03330734]
+  VAQ highest_subspaces=32/32
+  VAQ objective=linear
+  VAQ bits: [10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 9, 8, 8, 7, 6, 5, 4, 3, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1] (sum=192)
+  VAQ k-means group 1/32: bits=10, K=1024 (flat)
+  VAQ k-means group 2/32: bits=10, K=1024 (flat)
+  VAQ k-means group 3/32: bits=10, K=1024 (flat)
+  VAQ k-means group 4/32: bits=10, K=1024 (flat)
+  VAQ k-means group 5/32: bits=10, K=1024 (flat)
+  VAQ k-means group 6/32: bits=10, K=1024 (flat)
+  VAQ k-means group 7/32: bits=10, K=1024 (flat)
+  VAQ k-means group 8/32: bits=10, K=1024 (flat)
+  VAQ k-means group 9/32: bits=10, K=1024 (flat)
+  VAQ k-means group 10/32: bits=10, K=1024 (flat)
+  VAQ k-means group 11/32: bits=10, K=1024 (flat)
+  VAQ k-means group 12/32: bits=10, K=1024 (flat)
+  VAQ k-means group 13/32: bits=10, K=1024 (flat)
+  VAQ k-means group 14/32: bits=9, K=512 (flat)
+  VAQ k-means group 15/32: bits=8, K=256 (flat)
+  VAQ k-means group 16/32: bits=8, K=256 (flat)
+  VAQ k-means group 17/32: bits=7, K=128 (flat)
+  VAQ k-means group 18/32: bits=6, K=64 (flat)
+  VAQ k-means group 19/32: bits=5, K=32 (flat)
+  VAQ k-means group 20/32: bits=4, K=16 (flat)
+  VAQ k-means group 21/32: bits=3, K=8 (flat)
+  VAQ k-means group 22/32: bits=2, K=4 (flat)
+  VAQ k-means group 23/32: bits=1, K=2 (flat)
+  VAQ k-means group 24/32: bits=1, K=2 (flat)
+  VAQ k-means group 25/32: bits=1, K=2 (flat)
+  VAQ k-means group 26/32: bits=1, K=2 (flat)
+  VAQ k-means group 27/32: bits=1, K=2 (flat)
+  VAQ k-means group 28/32: bits=1, K=2 (flat)
+  VAQ k-means group 29/32: bits=1, K=2 (flat)
+  VAQ k-means group 30/32: bits=1, K=2 (flat)
+  VAQ k-means group 31/32: bits=1, K=2 (flat)
+  VAQ k-means group 32/32: bits=1, K=2 (flat)
+  VAQ bits: [10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 9, 8, 8, 7, 6, 5, 4, 3, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1] (sum=192), K_g (first 16): [1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 512, 256, 256] K_max=1024
+
+[stage 2] Wrapping into VAQ-Soft codec and finetuning with ΔL_ref...
+  Trainable params: 1,048,576
+  freeze_transform=True  freeze_codebooks=False
+  K_per_group (first 16): [1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 512, 256, 256]  K_max=1024
+  orth_error(R-init)=2.24e-03
+  Soft PQ: tau 1.0 -> 1.0 (exponential)
+  Distortion: ΔL_ref distillation through frozen ViT tail
+  Pre-computing teacher outputs (train, 5000 images)...
+  Teacher cache (train): 5.26 GB CPU (15.2s)
+  init        D(MSE_baseline)=135983.11  val_D=135321.65  (VAQ-init)
+  ep   0/100  D=312747.48  ppl=452.6  dead=0  tau=1.0000  val_D=246402.66  (37.2s)
+  ep  10/100  D=139131.11  ppl=450.1  dead=0  tau=1.0000  val_D=133450.81  (38.9s)
+  ep  20/100  D=121130.10  ppl=448.1  dead=0  tau=1.0000  val_D=117147.46  (37.2s)
+  ep  30/100  D=112884.31  ppl=446.5  dead=0  tau=1.0000  val_D=109638.48  (43.0s)
+  ep  40/100  D=108169.11  ppl=445.4  dead=0  tau=1.0000  val_D=105100.97  (36.1s)
+  ep  50/100  D=105228.49  ppl=444.7  dead=0  tau=1.0000  val_D=102497.59  (44.7s)
+  ep  60/100  D=103439.76  ppl=444.3  dead=0  tau=1.0000  val_D=101119.46  (45.2s)
+  ep  70/100  D=102226.25  ppl=444.1  dead=0  tau=1.0000  val_D=100243.74  (44.5s)
+  ep  80/100  D=101591.18  ppl=443.9  dead=0  tau=1.0000  val_D=99699.03  (56.3s)
+  ep  90/100  D=101276.90  ppl=443.9  dead=0  tau=1.0000  val_D=99497.19  (61.0s)
+  ep  99/100  D=101203.75  ppl=443.9  dead=0  tau=1.0000  val_D=99494.12  (59.2s)
+  Codec saved: /data4/workspace/zlt/featcodec/ORFC/coding/vaq/checkpoints_soft/dinov2_vitl14/blk15_vaqsoft_B192_m32_min1_max10_objlinear_lref_ep100_lr0.001_tau1.0-1.0_fzR1_fzC0_n5000_s42_grid_lref_mid2_blk15_K64_e32.pt
+
+Loading DINOv2 wrapper...
+
+============================================================
+  [Stage 1] VAQ argmin baseline
+============================================================
+  * VAQ Acc = 0.7600
+  * VAQ Delta L_ref = 396219.0
+  * VAQ Rate: xent=191.36  H_emp=190.86  max=192 bits/token
+  * VAQ rANS=191.55  rANS_train=191.55
+
+============================================================
+  [Stage 2] VAQ-Soft (finetuned) evaluation
+============================================================
+  * VAQ-Soft Acc = 0.9520
+  * VAQ-Soft Delta L_ref = 144773.1
+  * Rate: xent=190.32  H_emp=189.86  max=192 bits/token
+  * rANS=190.39  rANS_train=190.39
+
+============================================================
+  [Segmentation] VOC2012 mIoU evaluation
+  seg features: /data4/workspace/zlt/featcodec/ORFC/features/voc2012_100/dinov2_vitl14/blk15
+============================================================
+  加载 backbone + 分割头 (dinov2_vitl14)...
+  图片数: 100, 特征目录: /data4/workspace/zlt/featcodec/ORFC/features/voc2012_100/dinov2_vitl14/blk15
+  开始 slide inference...
+Seg eval:   0%|          | 0/100 [00:00<?, ?it/s]Seg eval:   1%|          | 1/100 [00:00<00:19,  5.15it/s]Seg eval:   3%|▎         | 3/100 [00:00<00:10,  9.55it/s]Seg eval:   5%|▌         | 5/100 [00:00<00:08, 11.19it/s]Seg eval:   7%|▋         | 7/100 [00:00<00:07, 12.16it/s]Seg eval:   9%|▉         | 9/100 [00:00<00:07, 12.75it/s]Seg eval:  11%|█         | 11/100 [00:00<00:06, 13.08it/s]Seg eval:  13%|█▎        | 13/100 [00:01<00:06, 13.34it/s]Seg eval:  15%|█▌        | 15/100 [00:01<00:06, 13.52it/s]Seg eval:  17%|█▋        | 17/100 [00:01<00:06, 13.58it/s]Seg eval:  19%|█▉        | 19/100 [00:01<00:06, 13.46it/s]Seg eval:  21%|██        | 21/100 [00:01<00:05, 13.45it/s]Seg eval:  23%|██▎       | 23/100 [00:01<00:05, 13.45it/s]Seg eval:  25%|██▌       | 25/100 [00:01<00:05, 13.54it/s]Seg eval:  27%|██▋       | 27/100 [00:02<00:05, 13.52it/s]Seg eval:  29%|██▉       | 29/100 [00:02<00:05, 13.49it/s]Seg eval:  31%|███       | 31/100 [00:02<00:05, 13.48it/s]Seg eval:  33%|███▎      | 33/100 [00:02<00:04, 13.46it/s]Seg eval:  35%|███▌      | 35/100 [00:02<00:04, 13.50it/s]Seg eval:  37%|███▋      | 37/100 [00:02<00:04, 13.53it/s]Seg eval:  39%|███▉      | 39/100 [00:02<00:04, 13.48it/s]Seg eval:  41%|████      | 41/100 [00:03<00:04, 13.49it/s]Seg eval:  43%|████▎     | 43/100 [00:03<00:04, 13.53it/s]Seg eval:  45%|████▌     | 45/100 [00:03<00:03, 13.87it/s]Seg eval:  47%|████▋     | 47/100 [00:03<00:03, 14.07it/s]Seg eval:  49%|████▉     | 49/100 [00:03<00:03, 14.31it/s]Seg eval:  51%|█████     | 51/100 [00:03<00:03, 14.42it/s]Seg eval:  53%|█████▎    | 53/100 [00:03<00:03, 14.52it/s]Seg eval:  55%|█████▌    | 55/100 [00:04<00:03, 14.57it/s]Seg eval:  57%|█████▋    | 57/100 [00:04<00:02, 14.62it/s]Seg eval:  59%|█████▉    | 59/100 [00:04<00:02, 14.57it/s]Seg eval:  61%|██████    | 61/100 [00:04<00:02, 14.90it/s]Seg eval:  63%|██████▎   | 63/100 [00:04<00:02, 14.88it/s]Seg eval:  65%|██████▌   | 65/100 [00:04<00:02, 14.84it/s]Seg eval:  67%|██████▋   | 67/100 [00:04<00:02, 14.77it/s]Seg eval:  69%|██████▉   | 69/100 [00:05<00:02, 14.82it/s]Seg eval:  71%|███████   | 71/100 [00:05<00:01, 14.79it/s]Seg eval:  73%|███████▎  | 73/100 [00:05<00:01, 14.74it/s]Seg eval:  75%|███████▌  | 75/100 [00:05<00:01, 14.71it/s]Seg eval:  77%|███████▋  | 77/100 [00:05<00:01, 14.74it/s]Seg eval:  79%|███████▉  | 79/100 [00:05<00:01, 14.67it/s]Seg eval:  81%|████████  | 81/100 [00:05<00:01, 14.72it/s]Seg eval:  83%|████████▎ | 83/100 [00:05<00:01, 14.76it/s]Seg eval:  85%|████████▌ | 85/100 [00:06<00:01, 14.75it/s]Seg eval:  87%|████████▋ | 87/100 [00:06<00:00, 14.79it/s]Seg eval:  89%|████████▉ | 89/100 [00:06<00:00, 14.87it/s]Seg eval:  91%|█████████ | 91/100 [00:06<00:00, 14.93it/s]Seg eval:  93%|█████████▎| 93/100 [00:06<00:00, 14.97it/s]Seg eval:  95%|█████████▌| 95/100 [00:06<00:00, 14.92it/s]Seg eval:  97%|█████████▋| 97/100 [00:06<00:00, 14.92it/s]Seg eval:  99%|█████████▉| 99/100 [00:07<00:00, 14.94it/s]Seg eval: 100%|██████████| 100/100 [00:07<00:00, 14.02it/s]
+  * VAQ        mIoU = 0.5766
+  加载 backbone + 分割头 (dinov2_vitl14)...
+  图片数: 100, 特征目录: /data4/workspace/zlt/featcodec/ORFC/features/voc2012_100/dinov2_vitl14/blk15
+  开始 slide inference...
+Seg eval:   0%|          | 0/100 [00:00<?, ?it/s]Seg eval:   2%|▏         | 2/100 [00:00<00:06, 14.80it/s]Seg eval:   4%|▍         | 4/100 [00:00<00:06, 14.79it/s]Seg eval:   6%|▌         | 6/100 [00:00<00:06, 14.86it/s]Seg eval:   8%|▊         | 8/100 [00:00<00:06, 14.89it/s]Seg eval:  10%|█         | 10/100 [00:00<00:06, 14.90it/s]Seg eval:  12%|█▏        | 12/100 [00:00<00:05, 14.90it/s]Seg eval:  14%|█▍        | 14/100 [00:00<00:05, 14.90it/s]Seg eval:  16%|█▌        | 16/100 [00:01<00:05, 14.57it/s]Seg eval:  18%|█▊        | 18/100 [00:01<00:05, 14.57it/s]Seg eval:  20%|██        | 20/100 [00:01<00:05, 14.68it/s]Seg eval:  22%|██▏       | 22/100 [00:01<00:05, 14.70it/s]Seg eval:  24%|██▍       | 24/100 [00:01<00:05, 14.73it/s]Seg eval:  26%|██▌       | 26/100 [00:01<00:04, 14.85it/s]Seg eval:  28%|██▊       | 28/100 [00:01<00:04, 14.78it/s]Seg eval:  30%|███       | 30/100 [00:02<00:04, 14.58it/s]Seg eval:  32%|███▏      | 32/100 [00:02<00:04, 14.57it/s]Seg eval:  34%|███▍      | 34/100 [00:02<00:04, 14.64it/s]Seg eval:  36%|███▌      | 36/100 [00:02<00:04, 14.68it/s]Seg eval:  38%|███▊      | 38/100 [00:02<00:04, 14.70it/s]Seg eval:  40%|████      | 40/100 [00:02<00:04, 14.65it/s]Seg eval:  42%|████▏     | 42/100 [00:02<00:03, 14.59it/s]Seg eval:  44%|████▍     | 44/100 [00:02<00:03, 14.70it/s]Seg eval:  46%|████▌     | 46/100 [00:03<00:03, 14.67it/s]Seg eval:  48%|████▊     | 48/100 [00:03<00:03, 14.70it/s]Seg eval:  50%|█████     | 50/100 [00:03<00:03, 14.66it/s]Seg eval:  52%|█████▏    | 52/100 [00:03<00:03, 14.73it/s]Seg eval:  54%|█████▍    | 54/100 [00:03<00:03, 14.70it/s]Seg eval:  56%|█████▌    | 56/100 [00:03<00:02, 14.71it/s]Seg eval:  58%|█████▊    | 58/100 [00:03<00:02, 14.67it/s]Seg eval:  60%|██████    | 60/100 [00:04<00:02, 14.82it/s]Seg eval:  62%|██████▏   | 62/100 [00:04<00:02, 14.88it/s]Seg eval:  64%|██████▍   | 64/100 [00:04<00:02, 14.85it/s]Seg eval:  66%|██████▌   | 66/100 [00:04<00:02, 14.77it/s]Seg eval:  68%|██████▊   | 68/100 [00:04<00:02, 14.76it/s]Seg eval:  70%|███████   | 70/100 [00:04<00:02, 14.74it/s]Seg eval:  72%|███████▏  | 72/100 [00:04<00:01, 14.66it/s]Seg eval:  74%|███████▍  | 74/100 [00:05<00:01, 14.66it/s]Seg eval:  76%|███████▌  | 76/100 [00:05<00:01, 14.63it/s]Seg eval:  78%|███████▊  | 78/100 [00:05<00:01, 14.69it/s]Seg eval:  80%|████████  | 80/100 [00:05<00:01, 14.66it/s]Seg eval:  82%|████████▏ | 82/100 [00:05<00:01, 14.77it/s]Seg eval:  84%|████████▍ | 84/100 [00:05<00:01, 14.76it/s]Seg eval:  86%|████████▌ | 86/100 [00:05<00:00, 14.71it/s]Seg eval:  88%|████████▊ | 88/100 [00:05<00:00, 14.80it/s]Seg eval:  90%|█████████ | 90/100 [00:06<00:00, 14.83it/s]Seg eval:  92%|█████████▏| 92/100 [00:06<00:00, 14.90it/s]Seg eval:  94%|█████████▍| 94/100 [00:06<00:00, 14.89it/s]Seg eval:  96%|█████████▌| 96/100 [00:06<00:00, 14.91it/s]Seg eval:  98%|█████████▊| 98/100 [00:06<00:00, 14.97it/s]Seg eval: 100%|██████████| 100/100 [00:06<00:00, 15.00it/s]Seg eval: 100%|██████████| 100/100 [00:06<00:00, 14.76it/s]
+  * VAQ-Soft   mIoU = 0.8083
+  * Δ(mIoU) = +0.2317
+  Computing VOC seg rate...
+  * VAQ      VOC Rate: xent=191.33  H_emp=185.62  max=192 bits/token
+  * VAQ      VOC rANS=191.52  rANS_train=191.52
+  * VAQ-Soft VOC Rate: xent=189.98  H_emp=184.85  max=192 bits/token
+  * VAQ-Soft VOC rANS=190.06  rANS_train=190.06
+
+============================================================
+  Summary  (layer=blk15  bit_budget=192)
+  Stage1 VAQ      Acc=0.7600
+  Stage2 VAQ-Soft Acc=0.9520  (delta=+0.1920)
+  Stage1 ΔL_ref=396219.0  Stage2 ΔL_ref=144773.1  (delta=-251445.9)
+  Stage1 VAQ      mIoU=0.5766
+  Stage2 VAQ-Soft mIoU=0.8083  (delta=+0.2317)
+  Train time=4637.6s  (100 epochs)
+============================================================
+
+Results saved: /data4/workspace/zlt/featcodec/ORFC/coding/vaq/results/vaq_soft/dinov2_vitl14/blk15_vaqsoft_B192_m32_min1_max10_objlinear_lref_ep100_lr0.001_tau1.0-1.0_fzR1_fzC0_n5000_s42_grid_lref_mid2_blk15_K64_e32.json

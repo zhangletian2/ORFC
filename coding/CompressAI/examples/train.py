@@ -60,7 +60,7 @@ import sys
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.normpath(os.path.join(_SCRIPT_DIR, "..", "..", ".."))
 sys.path.append(os.path.join(_PROJECT_ROOT, 'coding', 'vq'))
-from backbone.wrapper import Dinov2Wrapper, ClipWrapper
+from backbone.wrapper import Dinov2Wrapper, ClipWrapper, Siglip2Wrapper
 import warnings
 warnings.filterwarnings("ignore", message="xFormers is available")
 warnings.filterwarnings("ignore", message="TypedStorage is deprecated")
@@ -945,22 +945,25 @@ def main(argv):
 
     device = "cuda" if args.cuda and torch.cuda.is_available() else "cpu"
 
+    use_persistent = args.num_workers > 0
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         shuffle=True,
-        persistent_workers=True if args.task == "seg" else False,
-        prefetch_factor=8 if args.task == "seg" else 2,
+        persistent_workers=use_persistent,
+        prefetch_factor=2 if args.num_workers > 0 else None,
         pin_memory=(device == "cuda"),
     )
 
     test_batch_size = 1 if args.task == "seg" else min(8, args.batch_size)
+    test_nw = min(args.num_workers, test_batch_size)
     test_dataloader = DataLoader(
         test_dataset,
         batch_size=test_batch_size,
-        num_workers=min(args.num_workers, test_batch_size),
+        num_workers=test_nw,
         shuffle=False,
+        persistent_workers=test_nw > 0,
         pin_memory=(device == "cuda"),
     )
 
@@ -970,11 +973,15 @@ def main(argv):
     
     is_clip = args.model_type.startswith("clip")
     is_dinov2 = args.model_type.startswith("dinov2")
+    is_siglip2 = args.model_type.startswith("siglip2")
     if args.task == "seg":
         dinowrapper = Dinov2Wrapper(head_layers=1, model_name=args.model_type, device=device)
         seg_head_path = args.seg_head_path
         dinowrapper.load_segmentation_head(seg_head_path)
         seg_head = dinowrapper.seg_head
+    elif is_siglip2:
+        dinowrapper = None
+        seg_head = None
     elif is_clip:
         dinowrapper = ClipWrapper(args.classnames, device=device)
         seg_head = None
@@ -1021,6 +1028,8 @@ def main(argv):
             writer,
         )
         run_downstream_eval = (epoch % 50 == 0) or (epoch == args.epochs - 1)
+        if is_siglip2:
+            run_downstream_eval = False
         if args.task == "seg":
             loss = test_epoch_seg(epoch, test_dataloader, net, dinowrapper, seg_head, layer_idx, criterion, args.model_type, args.bit_depth, writer, run_seg_eval=run_downstream_eval)
         else:
@@ -1086,7 +1095,10 @@ def main(argv):
             net_eval.eval()
             
             # 进行最终评估（final_eval 内部会调用 model.update）
-            if args.task == "seg":
+            if is_siglip2:
+                print("SigLIP2: skipping classification final_eval.")
+                print("Use eval_ret_hyperprior.py for COCO retrieval evaluation.")
+            elif args.task == "seg":
                 final_eval_seg(
                     net_eval, 
                     test_dataloader, 

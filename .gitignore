@@ -65,3 +65,12 @@ coding/dtufc/.git/
 coding/dtufc/__pycache__/
 coding/dtufc/docker/
 coding/dtufc/job/
+
+# Large weights & extracted features (dev branch)
+coding/checkpoints/
+coding/orfc/opq_cache/
+tools/coco_ret_features/
+results/qwen3vl_8b_instruct_feat/
+coding/vtm_baseline/_qwen3vl_verify/
+coding/vtm_baseline/_vtm_tmp_depth/
+coding/vtm_baseline/_vtm_tmp_siglip2/

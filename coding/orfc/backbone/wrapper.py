@@ -178,6 +178,110 @@ class ClipWrapper:
         return logit_scale * img_feat @ self.text_emb.t()
 
 
+try:
+    from transformers import AutoModel as _AutoModel, AutoProcessor as _AutoProcessor
+    _HAS_TRANSFORMERS = True
+except ImportError:
+    _HAS_TRANSFORMERS = False
+
+
+class Siglip2Wrapper:
+    """
+    SigLIP2 So400m-patch14-224 wrapper (same interface as ClipWrapper / Dinov2Wrapper).
+
+    Key differences from CLIP:
+      - No CLS token; 256 pure patch tokens, D=1152
+      - MultiheadAttentionPoolingHead (MAP) instead of CLS→proj
+      - logits = scale * cos + bias
+      - encoder.layers output is (hidden_states, ...) tuple
+    """
+
+    def __init__(self, classnames_path, device="cuda",
+                 model_id="google/siglip2-so400m-patch14-224",
+                 template="This is a photo of {}."):
+        assert _HAS_TRANSFORMERS, "pip install transformers>=4.49 sentencepiece"
+        import os as _os
+        hf_mirror = _os.environ.get("HF_ENDPOINT", "")
+        model = _AutoModel.from_pretrained(model_id).eval().float().to(device)
+        processor = _AutoProcessor.from_pretrained(model_id)
+        for p in model.parameters():
+            p.requires_grad_(False)
+
+        self.model = model
+        self.processor = processor
+        self.device = device
+        self.weights_root = None
+        self.head = None
+
+        vm = model.vision_model
+        self._layers = list(vm.encoder.layers)
+        self._post_ln = vm.post_layernorm
+        self._map_head = vm.head if hasattr(vm, 'head') else None
+        self._logit_scale = model.logit_scale
+        self._logit_bias = model.logit_bias
+
+        self.text_emb = self._build_text_emb(classnames_path, template)
+        model.text_model.cpu()
+        torch.cuda.empty_cache()
+
+    class _BackboneView:
+        """Proxy so that wrapper.backbone.blocks / .norm work."""
+        def __init__(self, layers, post_ln):
+            self.blocks = layers
+            self.norm = post_ln
+        def to(self, device):
+            for b in self.blocks:
+                b.to(device)
+            self.norm.to(device)
+            return self
+        def cpu(self):
+            return self.to('cpu')
+        def parameters(self):
+            for b in self.blocks:
+                yield from b.parameters()
+            yield from self.norm.parameters()
+
+    @property
+    def backbone(self):
+        return self._BackboneView(self._layers, self._post_ln)
+
+    @torch.no_grad()
+    def _build_text_emb(self, classnames_path, template):
+        names = []
+        with open(classnames_path, 'r') as f:
+            for ln in f:
+                ln = ln.strip()
+                if not ln:
+                    continue
+                parts = ln.split()
+                names.append(" ".join(parts[1:]))
+        prompts = [template.format(n) for n in names]
+        text_inputs = self.processor(
+            text=prompts, padding="max_length", max_length=64,
+            truncation=True, return_tensors="pt",
+        ).to(self.device)
+        text_out = self.model.get_text_features(**text_inputs)
+        text_emb = text_out.pooler_output if hasattr(text_out, 'pooler_output') else text_out
+        text_emb = text_emb / text_emb.norm(dim=-1, keepdim=True).clamp(min=1e-12)
+        return text_emb.float()
+
+    @torch.no_grad()
+    def forward_from_tokens(self, tokens, start_block_idx):
+        """tokens: [B, N, D] (N=256 patches, no CLS) -> logits [B, C]"""
+        x = tokens
+        for i in range(start_block_idx + 1, len(self._layers)):
+            layer_out = self._layers[i](x, attention_mask=None)
+            x = layer_out[0] if isinstance(layer_out, tuple) else layer_out
+        x = self._post_ln(x)
+        if self._map_head is not None:
+            pooled = self._map_head(x)
+        else:
+            pooled = x.mean(dim=1)
+        pooled = pooled / pooled.norm(dim=-1, keepdim=True).clamp(min=1e-12)
+        logit_scale = self._logit_scale.exp()
+        return logit_scale * pooled @ self.text_emb.t() + self._logit_bias
+
+
 class Dinov2Wrapper:
     """
     Forward tokens from current ViT block output -> target block output.

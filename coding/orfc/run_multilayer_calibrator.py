@@ -29,10 +29,12 @@ warnings.filterwarnings("ignore", message="xFormers is available")
 warnings.filterwarnings("ignore", message="TypedStorage is deprecated")
 warnings.filterwarnings("ignore", message="numpy.ndarray size changed")
 import logging
-from mmcv.utils import get_logger
-
-logger = get_logger('mmcv')
-logger.setLevel(logging.WARNING)    # Disable mmcv info print
+try:
+    from mmcv.utils import get_logger
+    logger = get_logger('mmcv')
+except ImportError:
+    logger = logging.getLogger('mmcv')
+logger.setLevel(logging.WARNING)
 
 # ============== 随机种子 ==============
 

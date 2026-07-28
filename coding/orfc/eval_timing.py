@@ -1,11 +1,11 @@
 #!/usr/bin/env python
-"""Measure per-feature encode/decode time for dinov2_vitl14 blk20 best configs.
+"""Measure per-feature encode/decode time and GPU memory for Soft-PQ codec.
 
 Full pipeline timed:
   Encode: normalize → rotate → PQ quantize → rANS entropy encode
   Decode: rANS entropy decode → codebook lookup → inverse rotate → denormalize
 
-Reports average time (ms) per feature on ImageNet-cls and VOC-seg test sets.
+Reports average time (ms) and peak GPU memory (MB) per feature.
 
 Usage:
   python eval_timing.py --gpu 0
@@ -27,6 +27,26 @@ from soft_pq import load_codec
 from compressai._CXX import pmf_to_quantized_cdf
 from compressai import ans
 
+FEAT_ROOT = os.path.join(PROJECT_ROOT, "features")
+
+# (backbone, layer, D, configs)
+# configs: list of (K, emb, lmbda, lr, epochs, desc)
+MODEL_SPECS = [
+    ("dinov2_vitl14", "blk05", 1024, [
+        (4,   32, 0.5, 3e-4, 100, "K=4,e32"),
+        (16,  32, 0.5, 3e-4, 100, "K=16,e32"),
+        (64,  32, 0.5, 5e-4, 100, "K=64,e32"),
+        (256, 32, 0.5, 3e-4, 100, "K=256,e32"),
+    ]),
+    ("dinov2_vitg14", "blk09", 1536, [
+        (4,   32, 0.5, 3e-4, 100, "K=4,e32"),
+        (16,  32, 0.5, 3e-4, 100, "K=16,e32"),
+        (64,  32, 0.5, 3e-4, 100, "K=64,e32"),
+        (256, 32, 0.5, 3e-4, 100, "K=256,e32"),
+    ]),
+]
+
+
 def preload_features(feat_files, num_workers=1):
     from concurrent.futures import ThreadPoolExecutor
     feat_files = list(feat_files)
@@ -40,43 +60,11 @@ def preload_features(feat_files, num_workers=1):
     return [r[0] for r in results], [r[1] for r in results]
 
 
-D = 1024
-LAYER = "blk20"
-FEAT_ROOT = os.path.join(PROJECT_ROOT, "features")
-SEG_ROOT  = os.path.join(PROJECT_ROOT, "features", "voc2012_100")
-IMG_LIST  = os.path.join(PROJECT_ROOT, "utils", "voc2012_val_100.txt")
-
-CONFIGS = [
-    # (K, emb, lmbda, lr, epochs, desc)
-    (4,   32, 0.0, 1e-3, 300, "K=4,e32,lm0,ep300"),
-    (8,   32, 0.5, 3e-4, 100, "K=8,e32"),
-    (16,  32, 0.5, 5e-4, 100, "K=16,e32,lr5e4"),
-    (32,  32, 0.5, 3e-4, 100, "K=32,e32"),
-    (64,  32, 0.0, 3e-4, 100, "K=64,e32,lm0"),
-    (256, 32, 0.0, 5e-4, 100, "K=256,e32,lm0,lr5e4"),
-    (256, 16, 0.2, 3e-4, 100, "K=256,e16,lm0.2"),
-    (256, 16, 0.5, 3e-4, 100, "K=256,e16"),
-]
-
-
-def get_ckpt(K, emb, lmbda, lr, epochs):
+def get_ckpt(backbone, layer, D, K, emb, lmbda, lr, epochs):
     rt = f"_lmbda{lmbda}" if lmbda > 0 else ""
-    return os.path.join(ORFC_ROOT, "checkpoints", "dinov2_vitl14",
-        f"{LAYER}_K{K}_emb{emb}_bt1024_ws{rt}_tau0.5_lr{lr}_ep{epochs}_n5000_s42.pt")
-
-
-def load_voc_features():
-    feat_dir = os.path.join(SEG_ROOT, "dinov2_vitl14", LAYER)
-    with open(IMG_LIST) as f:
-        names = [l.strip() for l in f if l.strip()]
-    out = []
-    for n in names:
-        fp = os.path.join(feat_dir, f"{n}.npy")
-        if os.path.exists(fp):
-            d = np.load(fp)
-            for s in range(d.shape[0]):
-                out.append(d[s])
-    return out
+    return os.path.join(
+        ORFC_ROOT, "checkpoints", backbone,
+        f"{layer}_K{K}_emb{emb}_bt{D}_ws{rt}_tau0.5_lr{lr}_ep{epochs}_n5000_s42.pt")
 
 
 def hist_pmf(labels, G, K):
@@ -114,14 +102,16 @@ def get_all_labels_concat(feats, codec, device):
     return torch.cat(all_lab, dim=1).numpy()
 
 
-def measure_timing(feats, codec, device, cdfs, sizes, G, K, d, n_warmup=10):
-    """Measure per-feature encode and decode time.
+def measure_timing(feats, codec, device, cdfs, sizes, G, K, d, D,
+                   n_warmup=10):
+    """Measure per-feature encode/decode time and peak GPU memory.
 
     Encode = normalize + rotate + PQ-quantize + rANS-encode
     Decode = rANS-decode + codebook-lookup + inv-rotate + denormalize
 
     First n_warmup features are discarded from timing statistics.
-    Returns (enc_times, dec_times, token_counts) — times in seconds.
+    Returns (enc_times, dec_times, token_counts,
+             enc_mem_peaks, dec_mem_peaks) — times in seconds, mem in bytes.
     """
     codec.eval()
     pq = codec.pq
@@ -146,11 +136,13 @@ def measure_timing(feats, codec, device, cdfs, sizes, G, K, d, n_warmup=10):
                 log2_pmf_cost = -log_p / math.log(2)
 
     enc_times, dec_times, token_counts = [], [], []
+    enc_mem_peaks, dec_mem_peaks = [], []
 
     for i, feat in enumerate(feats):
         N = feat.shape[0]                                 # tokens
 
         # ==================== ENCODE ====================
+        torch.cuda.reset_peak_memory_stats(device)
         torch.cuda.synchronize()
         t0 = time.perf_counter()
 
@@ -177,8 +169,10 @@ def measure_timing(feats, codec, device, cdfs, sizes, G, K, d, n_warmup=10):
             sym, idx_list, cdfs, sizes, offsets)
 
         t_enc = time.perf_counter() - t0
+        enc_peak = torch.cuda.max_memory_allocated(device)
 
         # ==================== DECODE ====================
+        torch.cuda.reset_peak_memory_stats(device)
         torch.cuda.synchronize()
         t0 = time.perf_counter()
 
@@ -201,8 +195,8 @@ def measure_timing(feats, codec, device, cdfs, sizes, G, K, d, n_warmup=10):
 
         torch.cuda.synchronize()
         t_dec = time.perf_counter() - t0
+        dec_peak = torch.cuda.max_memory_allocated(device)
 
-        # verify first feature
         if i == 0:
             assert np.array_equal(labels_np, dec_np), \
                 "rANS encode/decode mismatch!"
@@ -211,62 +205,67 @@ def measure_timing(feats, codec, device, cdfs, sizes, G, K, d, n_warmup=10):
             enc_times.append(t_enc)
             dec_times.append(t_dec)
             token_counts.append(N)
+            enc_mem_peaks.append(enc_peak)
+            dec_mem_peaks.append(dec_peak)
 
         del X, Y, Mu, Std, X_hat
 
-    return enc_times, dec_times, token_counts
+    return enc_times, dec_times, token_counts, enc_mem_peaks, dec_mem_peaks
 
 
 def main():
     import argparse
     p = argparse.ArgumentParser(
-        description="Per-feature encode/decode timing for blk20 best configs")
+        description="Per-feature encode/decode timing & memory for Soft-PQ codec")
     p.add_argument("--gpu", type=int, default=0)
     p.add_argument("--n_warmup", type=int, default=10,
                    help="Warmup features excluded from timing")
     args = p.parse_args()
     device = torch.device(f"cuda:{args.gpu}")
 
-    # ---- Load features ----
-    print(f"Loading ImageNet test features for {LAYER}...")
-    test_dir = Path(FEAT_ROOT) / "test" / "dinov2_vitl14" / LAYER
-    files = sorted(test_dir.glob("*.npy"))
-    cls_feats, _ = preload_features(files, num_workers=8)
-    print(f"  {len(cls_feats)} images, T={cls_feats[0].shape[0]}")
-
-    print(f"Loading VOC seg features for {LAYER}...")
-    seg_feats = load_voc_features()
-    seg_tok = sum(f.shape[0] for f in seg_feats)
-    print(f"  {len(seg_feats)} slides, {seg_tok} tokens total")
-
     all_results = []
 
-    for K, emb, lmbda, lr, epochs, desc in CONFIGS:
-        G = D // emb
-        cp = get_ckpt(K, emb, lmbda, lr, epochs)
-        if not os.path.exists(cp):
-            print(f"\n  SKIP {desc}: checkpoint missing")
+    for backbone, layer, D, configs in MODEL_SPECS:
+        print(f"\n{'#'*70}")
+        print(f"# {backbone}  layer={layer}  D={D}")
+        print(f"{'#'*70}")
+
+        # ---- Load cls features ----
+        test_dir = Path(FEAT_ROOT) / "test" / backbone / layer
+        files = sorted(test_dir.glob("*.npy"))
+        if not files:
+            print(f"  SKIP: no features in {test_dir}")
             continue
+        cls_feats, _ = preload_features(files, num_workers=8)
+        print(f"  {len(cls_feats)} test images, "
+              f"shape={cls_feats[0].shape}")
 
-        print(f"\n{'='*70}")
-        print(f"  {desc}  (K={K}, G={G}, d={emb}, lmbda={lmbda})")
-        codec = load_codec(cp, device=device)
+        for K, emb, lmbda, lr, epochs, desc in configs:
+            G = D // emb
+            cp = get_ckpt(backbone, layer, D, K, emb, lmbda, lr, epochs)
+            if not os.path.exists(cp):
+                print(f"\n  SKIP {desc}: checkpoint missing ({os.path.basename(cp)})")
+                continue
 
-        for task, feats in [("cls", cls_feats), ("seg", seg_feats)]:
+            print(f"\n{'='*70}")
+            print(f"  [{backbone}/{layer}] {desc}  "
+                  f"(K={K}, G={G}, d={emb}, lmbda={lmbda})")
+            codec = load_codec(cp, device=device)
+
             # PMF / CDF
-            print(f"    [{task}] computing labels for PMF...")
-            all_labels = get_all_labels_concat(feats, codec, device)
+            print(f"    computing labels for PMF...")
+            all_labels = get_all_labels_concat(cls_feats, codec, device)
             if codec.pq.use_rate:
                 pmf = [codec.pq.get_prior_pmf()[g] for g in range(G)]
             else:
                 pmf = hist_pmf(all_labels, G, K)
             cdfs, sizes = prepare_cdfs(pmf, G, K)
 
-            # Timing
-            print(f"    [{task}] timing {len(feats)} features "
+            # Timing + Memory
+            print(f"    timing {len(cls_feats)} features "
                   f"(warmup={args.n_warmup})...")
-            enc_t, dec_t, tok_n = measure_timing(
-                feats, codec, device, cdfs, sizes, G, K, emb,
+            enc_t, dec_t, tok_n, enc_mem, dec_mem = measure_timing(
+                cls_feats, codec, device, cdfs, sizes, G, K, emb, D,
                 n_warmup=args.n_warmup)
 
             enc_avg = np.mean(enc_t) * 1000
@@ -274,38 +273,50 @@ def main():
             enc_std = np.std(enc_t)  * 1000
             dec_std = np.std(dec_t)  * 1000
             tok_avg = np.mean(tok_n)
+            enc_mem_avg = np.mean(enc_mem) / (1024 ** 2)
+            dec_mem_avg = np.mean(dec_mem) / (1024 ** 2)
+            enc_mem_max = np.max(enc_mem) / (1024 ** 2)
+            dec_mem_max = np.max(dec_mem) / (1024 ** 2)
 
-            print(f"    [{task}] enc {enc_avg:.3f}±{enc_std:.3f} ms  "
+            print(f"    enc {enc_avg:.3f}±{enc_std:.3f} ms  "
                   f"dec {dec_avg:.3f}±{dec_std:.3f} ms  "
                   f"(avg {tok_avg:.0f} tok, n={len(enc_t)})")
+            print(f"    enc_mem {enc_mem_avg:.1f} MB (peak {enc_mem_max:.1f})  "
+                  f"dec_mem {dec_mem_avg:.1f} MB (peak {dec_mem_max:.1f})")
 
             all_results.append({
+                'backbone': backbone, 'layer': layer, 'D': D,
                 'desc': desc, 'K': K, 'emb': emb, 'G': G, 'lmbda': lmbda,
-                'task': task,
                 'enc_ms_mean': round(enc_avg, 4),
                 'enc_ms_std':  round(enc_std, 4),
                 'dec_ms_mean': round(dec_avg, 4),
                 'dec_ms_std':  round(dec_std, 4),
                 'avg_tokens':  round(float(tok_avg), 1),
                 'n_measured':  len(enc_t),
+                'enc_mem_avg_MB': round(float(enc_mem_avg), 2),
+                'enc_mem_peak_MB': round(float(enc_mem_max), 2),
+                'dec_mem_avg_MB': round(float(dec_mem_avg), 2),
+                'dec_mem_peak_MB': round(float(dec_mem_max), 2),
             })
 
-        del codec
-        torch.cuda.empty_cache()
+            del codec
+            torch.cuda.empty_cache()
 
     # ---- Summary ----
-    print(f"\n{'='*100}")
-    print(f"{'Config':>25} {'Task':>4} | "
-          f"{'Enc(ms)':>12} {'Dec(ms)':>12} | "
+    print(f"\n{'='*120}")
+    print(f"{'Model':>16} {'Layer':>6} {'Config':>10} | "
+          f"{'Enc(ms)':>14} {'Dec(ms)':>14} | "
+          f"{'EncMem(MB)':>11} {'DecMem(MB)':>11} | "
           f"{'Tokens':>7} {'N':>5}")
-    print(f"{'-'*100}")
+    print(f"{'-'*120}")
     for r in all_results:
-        print(f"{r['desc']:>25} {r['task']:>4} | "
-              f"{r['enc_ms_mean']:>7.3f}±{r['enc_ms_std']:<4.3f}"
-              f"{r['dec_ms_mean']:>7.3f}±{r['dec_ms_std']:<4.3f} | "
+        print(f"{r['backbone']:>16} {r['layer']:>6} {r['desc']:>10} | "
+              f"{r['enc_ms_mean']:>7.3f}±{r['enc_ms_std']:<5.3f}"
+              f"{r['dec_ms_mean']:>7.3f}±{r['dec_ms_std']:<5.3f} | "
+              f"{r['enc_mem_peak_MB']:>11.1f} {r['dec_mem_peak_MB']:>11.1f} | "
               f"{r['avg_tokens']:>7.0f} {r['n_measured']:>5}")
 
-    out_path = os.path.join(ORFC_ROOT, "timing_blk20_results.json")
+    out_path = os.path.join(ORFC_ROOT, "timing_multilayer_results.json")
     with open(out_path, "w") as f:
         json.dump(all_results, f, indent=2)
     print(f"\nSaved: {out_path}")

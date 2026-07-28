@@ -60,19 +60,16 @@ class FeatureFolder(Dataset):
         split (string): split mode ('train' or 'val')
     """
 
-    def __init__(self, root, transform=None, split="train", model_type="sd3", layer="blk05", task="tti", trun_flag=False, trun_low=-20, trun_high=20, quant_type="uniform", qsamples=0, bit_depth=1, patch_size=(512, 512), gt_path=None):
+    def __init__(self, root, transform=None, split="train", model_type="sd3", layer="blk05", task="tti", trun_flag=False, trun_low=-20, trun_high=20, quant_type="uniform", qsamples=0, bit_depth=1, patch_size=(512, 512), gt_path=None, preload=True):
         splitdir = Path(root) / split / model_type / layer
 
         if not splitdir.is_dir():
             raise RuntimeError(f'Missing directory "{splitdir}"')
 
         self.samples = sorted(f for f in splitdir.iterdir() if f.is_file())
-        #gcs
-        # self.samples = self.samples[:100]
 
         self.transform = transform
 
-        # gcs: optional labels for test split
         self.gt = {}
         if gt_path is not None:
             with open(gt_path, "r") as f:
@@ -83,7 +80,6 @@ class FeatureFolder(Dataset):
                     base, idx = ln.split()
                     self.gt[base] = int(idx)
 
-        #gcs
         self.model_type = model_type
         self.task = task
         self.trun_flag = trun_flag
@@ -94,6 +90,13 @@ class FeatureFolder(Dataset):
         self.bit_depth = bit_depth
         self.patch_size = patch_size    #(height, width), must be the multiple of 64
 
+        self._cache = None
+        if preload:
+            print(f"  Preloading {len(self.samples)} features into RAM ...")
+            self._cache = [np.load(f).astype(np.float32) for f in self.samples]
+            mem_mb = sum(a.nbytes for a in self._cache) / 1024**2
+            print(f"  Preloaded: {mem_mb:.0f} MB")
+
     def __getitem__(self, index):
         """
         Args:
@@ -102,8 +105,10 @@ class FeatureFolder(Dataset):
         Returns:
             img: `PIL.Image.Image` or transformed `PIL.Image.Image`.
         """
-        # Load feature, use float32 for training
-        feat = np.load(self.samples[index]).astype(np.float32)
+        if self._cache is not None:
+            feat = self._cache[index].copy()
+        else:
+            feat = np.load(self.samples[index]).astype(np.float32)
         orig_shape = np.array(feat.shape, dtype=np.int64)
         if self.gt:
             org_feat = feat.copy()

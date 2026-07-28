@@ -29,9 +29,14 @@ from opq import (
     learn_opq_rotation,
 )
 from backbone.wrapper import Dinov2Wrapper, ClipWrapper, SegmentationEvaluator
+try:
+    from backbone.wrapper import Siglip2Wrapper
+except ImportError:
+    Siglip2Wrapper = None
 from soft_pq import (
     SoftPQ, FeatureTransform, OrthogonalTransform, FeatureCodec,
-    FrozenTail, CLIPFrozenTail, train_soft_pq, soft_pq_encode_decode,
+    FrozenTail, CLIPFrozenTail, Siglip2FrozenTail,
+    train_soft_pq, soft_pq_encode_decode,
     save_codec, load_codec,
 )
 
@@ -40,8 +45,11 @@ warnings.filterwarnings("ignore", message="xFormers is available")
 warnings.filterwarnings("ignore", message="TypedStorage is deprecated")
 warnings.filterwarnings("ignore", message="numpy.ndarray size changed")
 import logging
-from mmcv.utils import get_logger
-logger = get_logger('mmcv')
+try:
+    from mmcv.utils import get_logger
+    logger = get_logger('mmcv')
+except ImportError:
+    logger = logging.getLogger('mmcv')
 logger.setLevel(logging.WARNING)
 
 
@@ -403,8 +411,8 @@ def run_experiment(args):
         raise FileNotFoundError(f"No train features found in {train_dir}")
     if not test_files:
         raise FileNotFoundError(f"No test features found in {test_dir}")
-    features_train, _ = preload_features(train_files, num_workers=8)
-    features_test, basenames_test = preload_features(test_files, num_workers=8)
+    features_train, _ = preload_features(train_files, num_workers=4)
+    features_test, basenames_test = preload_features(test_files, num_workers=4)
     gt_test = load_gt(args.gt_path)
 
     D = features_train[0].shape[1]
@@ -433,7 +441,12 @@ def run_experiment(args):
 
     # ---- Load backbone ----
     is_clip = args.backbone.startswith("clip")
-    if is_clip:
+    is_siglip2 = args.backbone.startswith("siglip2")
+    if is_siglip2:
+        assert Siglip2Wrapper is not None, "需要 transformers>=4.49：pip install transformers sentencepiece"
+        print(f"\nLoading SigLIP2 So400m (classnames={args.classnames})...")
+        wrapper = Siglip2Wrapper(args.classnames, device=device)
+    elif is_clip:
         print(f"\nLoading CLIP ViT-L/14 (classnames={args.classnames})...")
         wrapper = ClipWrapper(args.classnames, device=device)
     else:
@@ -556,7 +569,9 @@ def run_experiment(args):
     # Standard OPQ ΔL_ref
     tail_blocks_ref = list(wrapper.backbone.blocks[layer_idx + 1:])
     norm_ref = wrapper.backbone.norm
-    if is_clip:
+    if is_siglip2:
+        tail = Siglip2FrozenTail(tail_blocks_ref, norm_ref, device=device)
+    elif is_clip:
         tail = CLIPFrozenTail(tail_blocks_ref, norm_ref, device=device)
     else:
         tail = FrozenTail(tail_blocks_ref, norm_ref, device=device)
@@ -668,7 +683,7 @@ def run_experiment(args):
         bt_tag = f"bt{bt_dim}" if bt_dim > 0 else "noBt"
         ws_tag = "ws" if args.warm_start_opq else "km"
         mse_tag = "_mse" if args.mse_loss else ""
-        rate_tag = f"_lmbda{args.lmbda}" if args.lmbda > 0 else ""
+        rate_tag = f"_lmbda{args.lmbda}"
         fz_tag_ck = ""
         if args.freeze_transform:
             fz_tag_ck += "_fzR"
@@ -714,7 +729,9 @@ def run_experiment(args):
     # Codec ΔL_ref
     tail_blocks_ref2 = list(wrapper.backbone.blocks[layer_idx + 1:])
     norm_ref2 = wrapper.backbone.norm
-    if is_clip:
+    if is_siglip2:
+        tail2 = Siglip2FrozenTail(tail_blocks_ref2, norm_ref2, device=device)
+    elif is_clip:
         tail2 = CLIPFrozenTail(tail_blocks_ref2, norm_ref2, device=device)
     else:
         tail2 = FrozenTail(tail_blocks_ref2, norm_ref2, device=device)
@@ -762,8 +779,8 @@ def run_experiment(args):
     #   (C) Segmentation evaluation (optional)
     # ================================================================
     if args.eval_seg:
-        if is_clip:
-            print(f"\n  [Segmentation] Skipped (no segmentation head for CLIP)")
+        if is_clip or is_siglip2:
+            print(f"\n  [Segmentation] Skipped (no segmentation head for {args.backbone})")
         else:
             seg_feat_dir = Path(args.seg_feat_root) / args.backbone / args.layer
 
@@ -879,7 +896,7 @@ def run_experiment(args):
     bt_tag = f"bt{bt_dim}" if bt_dim > 0 else "noBt"
     ws_tag = "ws" if args.warm_start_opq else "km"
     mse_tag = "_mse" if args.mse_loss else ""
-    rate_tag = f"_lmbda{args.lmbda}" if args.lmbda > 0 else ""
+    rate_tag = f"_lmbda{args.lmbda}"
     fz_tag = ""
     if args.freeze_transform:
         fz_tag += "_fzR"

@@ -29,26 +29,46 @@ def _to_gpu(x, device):
 #                    GPU 批量归一化
 # ================================================================
 
-def batch_normalize_gpu(X, mode='per_image', eps=1e-5):
+def batch_normalize_gpu(X, mode='per_image', eps=1e-5, n_prefix=0):
     """
     GPU 批量归一化
 
     Args:
         X:    [N_img, T, C] GPU tensor
-        mode: 'per_image' | 'per_token_ln'
+        mode: 'per_image' | 'per_token_ln' | 'split_cls_patch'
+        n_prefix: number of CLS+register prefix tokens (used by split_cls_patch)
 
     Returns:
         Y:   [N_img, T, C] 归一化后
-        mu:  均值 (per_image: [N_img, 1, 1]; per_token_ln: [N_img, T, 1])
+        mu:  均值 (per_image: [N_img, 1, 1]; split_cls_patch/per_token_ln: [N_img, T, 1])
         std: 标准差 (同 mu 形状)
     """
-    if mode == 'per_image':
-        # 整张图片共享一个标量 mu/std
+    if mode == 'split_cls_patch':
+        N, T, C = X.shape
+        mu = torch.empty(N, T, 1, device=X.device, dtype=X.dtype)
+        std = torch.empty(N, T, 1, device=X.device, dtype=X.dtype)
+        if 0 < n_prefix < T:
+            X_cr = X[:, :n_prefix, :]
+            mu_cr = X_cr.mean(dim=(1, 2), keepdim=True)
+            std_cr = (((X_cr - mu_cr) ** 2).mean(dim=(1, 2), keepdim=True) + eps).sqrt()
+            mu[:, :n_prefix, :] = mu_cr
+            std[:, :n_prefix, :] = std_cr
+
+            X_p = X[:, n_prefix:, :]
+            mu_p = X_p.mean(dim=(1, 2), keepdim=True)
+            std_p = (((X_p - mu_p) ** 2).mean(dim=(1, 2), keepdim=True) + eps).sqrt()
+            mu[:, n_prefix:, :] = mu_p
+            std[:, n_prefix:, :] = std_p
+        else:
+            mu_all = X.mean(dim=(1, 2), keepdim=True)
+            std_all = (((X - mu_all) ** 2).mean(dim=(1, 2), keepdim=True) + eps).sqrt()
+            mu[:] = mu_all
+            std[:] = std_all
+    elif mode == 'per_image':
         mu = X.mean(dim=(1, 2), keepdim=True)       # [N, 1, 1]
         var = ((X - mu) ** 2).mean(dim=(1, 2), keepdim=True)
         std = (var + eps).sqrt()
     elif mode == 'per_token_ln':
-        # 每个 token 独立 mu/std
         mu = X.mean(dim=2, keepdim=True)             # [N, T, 1]
         var = ((X - mu) ** 2).mean(dim=2, keepdim=True)
         std = (var + eps).sqrt()
@@ -87,9 +107,10 @@ def batched_kmeans(sub_vectors_3d, K, max_iter=100, device='cuda',
     X = _to_gpu(sub_vectors_3d, device)
     G, N, dim = X.shape
 
-    # 动态 chunk_size: 控制 dists [G, chunk, K] ≤ 1 GB
+    # 动态 chunk_size: 同时考虑 cdist 输出 [G,chunk,K] 和内部缓冲 [G,chunk,dim]
     max_mem_bytes = 1 * 1024**3
-    chunk_size = max(1, min(N, max_mem_bytes // (G * K * 4)))
+    mem_per_sample = G * max(K, dim) * 4
+    chunk_size = max(1, min(N, max_mem_bytes // mem_per_sample))
 
     # 随机初始化: 每组选 K 个点
     init_indices = torch.stack([
