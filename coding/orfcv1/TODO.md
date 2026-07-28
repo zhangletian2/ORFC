@@ -15,16 +15,16 @@
   \(c_g2^{-2r_g/d}\) as a common ideal curve.
 - Compute the ideal allocation and its exact global finite-menu gap with
   Top-2 dynamic programming.
-- Keep \(c_g\), the ideal target and this gap fixed during one training run.
-  Full nonlinear tail distortion must only enter \(E=D-\Phi\); it must not be
-  used to refit the ideal model.
+- Keep the discrete ideal table and target fixed inside each inner block.
+  At outer boundaries, recompute them from reserved calibration images without
+  fitting full nonlinear distortion.
 - Audit Cayley-SGD against the former skew-Cayley/Adam path: require finite
   gradients, stable orthogonality, lower rotation-step time and no regression
   in the exact initial distortion before short training is accepted.
 - Compare candidate-only and candidate-plus-remainder from the same repaired
   checkpoint, seed and train/validation split.
-- Jointly update \(U\) and all mode codebooks for reconstruction; route the
-  remainder gradient to \(U\) so its contribution can be identified.
+- Jointly update \(U\) and all mode codebooks. Protect the primary distortion
+  gradient when adding the empirical recovery gradient for every parameter.
 - Refresh the hard candidate set around the fixed ideal solution; retain
   difficult allocations with extreme measured remainder.
 - Bind the loss to the complete minimizer set, candidate Top-K distortion,
@@ -34,8 +34,9 @@
 - Before claiming recovery, derive or validate an upper bound for the
   remainder range over all feasible allocations. A sampled range alone cannot
   certify the theorem.
-- Connect `discrete_jvp` calibration to training only after defining how its
-  fixed per-mode ideal table is updated when \(U\) and the codebooks move.
+- Run the paired `primary_only` versus `primary_recovery` short experiment from
+  `run_outer_inner_short.sh`. Do not start full optimisation until held-out
+  target distortion is non-inferior and the empirical recovery margin improves.
 
 ## Full optimisation
 

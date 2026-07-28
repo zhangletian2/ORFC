@@ -17,14 +17,16 @@ Current pipeline:
    \(\Phi\).
 3. `allocation_train.py warmup` freezes the clean OPQ/identity rotation and
    task-aligns every independently initialized mode codebook.
-4. `allocation_train.py short` jointly updates the rotation and all codebooks
-   using exact tail distortion at the fixed independently calibrated ideal
-   target. Codebooks use
+4. `allocation_train.py short` jointly updates the rotation and all codebooks.
+   With `--outer-refresh`, each outer block recomputes the discrete JVP table,
+   exact ideal allocation and hard fixed-rate competitors on reserved training
+   images.  The inner block minimizes ideal-target distortion and a smooth
+   empirical recovery violation. Codebooks use
    Adam; the rotation uses Cayley-SGD directly on the orthogonal manifold.
-   The recovery auxiliary acts only on the rotation, and conflicts are removed
-   after both rotation gradients are projected to the tangent space.
-   Full tail distortion never refits \(c_g\), the ideal target or its exact
-   finite-menu gap.
+   The recovery auxiliary updates both the rotation and every active codebook;
+   conflicting gradients are projected against the primary distortion
+   gradient, with the rotation gradients first mapped to the tangent space.
+   Full tail distortion never refits the ideal table inside an inner block.
 5. `run_allocation_full.sh` extends the accepted short configuration to the
    original 5k-scale protocol (4.5k optimisation plus 500 held-out validation)
    with 100 epochs, temperature annealing and a fixed hard-validation trace.
@@ -57,3 +59,11 @@ Measurement contract:
   the global remainder range is available.
 - The exact ideal runner-up is always included in the measured allocation
   pool, so the sampled and exact ideal gaps agree.
+
+Outer/inner smoke:
+
+- zero-step refresh preserved every codec parameter exactly;
+- two update steps produced non-zero gradients and updates for the rotation
+  and all six mode codebooks while preserving menu monotonicity;
+- the 4-image held-out empirical margin moved from -12426.8 to -12409.2.
+  This is a gradient-path smoke only, not an effectiveness result.

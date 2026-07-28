@@ -9,7 +9,7 @@ import torch
 
 from cayley import CayleySGD, DirectOrthogonalTransform
 from allocation_train import (
-    _allocation_source, _curve_report, _dynamic_source,
+    _allocation_source, _backward, _curve_report, _dynamic_source,
     _objective_terms, _protect_primary, _select_state,
     _tangent_gradient,
 )
@@ -39,7 +39,7 @@ def test_fixed_ideal_candidate_binding():
         tie_atol=1e-8, tie_rtol=1e-8)
     state = _select_state(source, distortion, calibration, args)
     assert state["target"] == 0
-    assert np.array_equal(state["c"], expected)
+    assert state["full_phi"][0] < state["full_phi"][2]
     assert state["allocations"][state["minimizer_local"][0]].tolist() == (
         source["allocations"][state["minimizers"][0]].tolist())
     assert state["reference"] == 1
@@ -108,12 +108,19 @@ def test_dynamic_pool_and_selection_objective():
     select_args = Namespace(
         allocations=3, seed=42, reference_bit=2,
         tie_atol=1e-8, tie_rtol=1e-8, lse_temperature=0.1,
-        recovery_fraction=1.0)
+        recovery_margin=0.0, candidate_mean_weight=0.0)
     distortion = np.asarray([5.0, 3.0, 4.0])
     state = _select_state(audit, distortion, calibration, select_args)
     terms = _objective_terms(
         distortion[state["selected"]], state, select_args, 0.5)
     assert terms["score"] >= terms["base"] and terms["omega"] >= 0
+    assert terms["empirical_margin"] == 1.0
+
+    discrete = dict(calibration)
+    discrete["ideal_cost_table"] = np.asarray([[3, 2, 1], [1, 2, 4]])
+    discrete["ideal_bits"] = np.asarray([3, 1])
+    state = _select_state(audit, distortion, discrete, select_args)
+    assert state["target"] == 2 and state["full_phi"].tolist() == [7, 4, 2]
 
 
 def test_primary_gradient_protection():
@@ -122,6 +129,21 @@ def test_primary_gradient_protection():
     protected, cosine, projected = _protect_primary(auxiliary, primary)
     assert projected and cosine < 0
     assert torch.dot(primary, protected).abs() < 1e-7
+
+
+def test_joint_recovery_gradients():
+    rotation = torch.nn.Parameter(torch.eye(2))
+    codebook = torch.nn.Parameter(torch.ones(2))
+    base = ((rotation - torch.tensor([[1., 1.], [0., 1.]])) ** 2).sum()
+    base = base + codebook.square().sum()
+    recovery = -rotation[0, 1] - codebook.sum()
+    _backward(
+        {"base": base, "recovery": recovery},
+        [rotation, codebook], rotation, 0.5)
+    assert rotation.grad is not None and codebook.grad is not None
+    assert torch.allclose(
+        rotation.t() @ rotation.grad + rotation.grad.t() @ rotation,
+        torch.zeros(2), atol=1e-6)
 
 
 def test_direct_cayley_descent_and_orthogonality():
@@ -166,6 +188,7 @@ if __name__ == "__main__":
     test_fixed_rate_and_curve_contracts()
     test_dynamic_pool_and_selection_objective()
     test_primary_gradient_protection()
+    test_joint_recovery_gradients()
     test_direct_cayley_descent_and_orthogonality()
     test_rotation_gradient_is_tangent()
     test_remainder_decomposition()
