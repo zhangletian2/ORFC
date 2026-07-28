@@ -34,6 +34,8 @@
 - Before claiming recovery, derive or validate an upper bound for the
   remainder range over all feasible allocations. A sampled range alone cannot
   certify the theorem.
+- Connect `discrete_jvp` calibration to training only after defining how its
+  fixed per-mode ideal table is updated when \(U\) and the codebooks move.
 
 ## Full optimisation
 

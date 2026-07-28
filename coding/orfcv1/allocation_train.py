@@ -463,6 +463,12 @@ def _state_report(state):
 def command_short(args):
     device, codec, tail, train_x, train_y, val_x, val_y = _base(args)
     calibration = np.load(args.calibration, allow_pickle=False)
+    if (
+        "ideal_model" in calibration.files
+        and str(calibration["ideal_model"]) != "common_exponential"
+    ):
+        raise ValueError(
+            "allocation training does not yet support discrete_jvp calibration")
     audit = _allocation_source(calibration["allocations"], calibration)
     bits = np.log2(codec.pq.mode_sizes).astype(int)
     rotation, codebooks = _joint_parameters(codec)

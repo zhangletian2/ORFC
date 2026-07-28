@@ -12,6 +12,9 @@ Current pipeline:
    calibrated independently with a central JVP along each realised group
    quantisation error.  The 6/7/8-bit normalized coefficients are retained to
    test the common-shape assumption instead of fitting it from \(D\).
+   When that assumption fails, calibration stores the directly measured
+   per-group/per-mode JVP table and the evaluator uses its separable sum as
+   \(\Phi\).
 3. `allocation_train.py warmup` freezes the clean OPQ/identity rotation and
    task-aligns every independently initialized mode codebook.
 4. `allocation_train.py short` jointly updates the rotation and all codebooks
@@ -52,3 +55,5 @@ Measurement contract:
   range.
 - The recovery condition can only be certified after a valid upper bound on
   the global remainder range is available.
+- The exact ideal runner-up is always included in the measured allocation
+  pool, so the sampled and exact ideal gaps agree.

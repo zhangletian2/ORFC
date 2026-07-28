@@ -208,6 +208,7 @@ def evaluate_fixed_rate_remainder(
     batch_size=8,
     allocation_chunk=4,
     rate_tolerance=1e-8,
+    ideal_cost_table=None,
 ):
     """Measure ``D``, ``Phi`` and ``E=D-Phi`` on fixed-rate allocations.
 
@@ -218,7 +219,14 @@ def evaluate_fixed_rate_remainder(
     allocations = np.asarray(allocations, dtype=np.int64)
     rates, totals, target = validate_fixed_total_rate(
         allocations, cost_table, tolerance=rate_tolerance)
-    phi = ideal_phi(c_g, rates, rate_dimension=codec.pq.d)
+    if ideal_cost_table is None:
+        phi = ideal_phi(c_g, rates, rate_dimension=codec.pq.d)
+    else:
+        table = np.asarray(ideal_cost_table, dtype=np.float64)
+        if table.shape != cost_table.shape:
+            raise ValueError("ideal_cost_table must match cost_table")
+        groups = np.arange(table.shape[0])[None, :]
+        phi = table[groups, allocations].sum(axis=1)
     n_alloc, n_images = allocations.shape[0], len(features_array)
     distortion = np.empty((n_alloc, n_images), dtype=np.float64)
 

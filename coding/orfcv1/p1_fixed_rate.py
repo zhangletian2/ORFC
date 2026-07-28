@@ -160,20 +160,21 @@ def estimate_c(codec, tail, features, mode, bit, args, device):
     return np.exp2(2.0 * bit / codec.pq.d) * q.mean(0), q
 
 
-def top2_allocate(c_g, mode_bits, budget, dimension):
-    """Exact best and runner-up allocations for the separable ideal model."""
+def top2_cost_allocate(ideal_cost_table, mode_bits, budget):
+    """Exact best and runner-up allocations for any separable mode table."""
+    ideal_cost_table = np.asarray(ideal_cost_table, dtype=np.float64)
+    if ideal_cost_table.ndim != 2 or ideal_cost_table.shape[1] != len(mode_bits):
+        raise ValueError("ideal cost table must have shape [groups, modes]")
     states = {0: [(0.0, ())]}
-    for group, coefficient in enumerate(c_g):
+    for costs in ideal_cost_table:
         next_states = {}
         for used, rows in states.items():
             for value, path in rows:
-                for bit in mode_bits:
+                for mode, bit in enumerate(mode_bits):
                     total = used + bit
                     if total <= budget:
                         next_states.setdefault(total, []).append((
-                            value + coefficient * np.exp2(
-                                -2.0 * bit / dimension),
-                            path + (bit,)))
+                            value + costs[mode], path + (bit,)))
         states = {}
         for used, rows in next_states.items():
             unique = []
@@ -196,13 +197,26 @@ def top2_allocate(c_g, mode_bits, budget, dimension):
     }
 
 
+def top2_allocate(c_g, mode_bits, budget, dimension):
+    table = np.stack([
+        np.asarray(c_g) * np.exp2(-2.0 * bit / dimension)
+        for bit in mode_bits], axis=1)
+    return top2_cost_allocate(table, mode_bits, budget)
+
+
 def make_allocations(
     c_g, mode_bits, budget, n_single, n_random, seed, dimension,
+    ideal_cost_table=None,
 ):
-    ideal_bits = top2_allocate(
-        c_g, mode_bits, budget, dimension)["ideal_bits"]
+    optimum = (
+        top2_allocate(c_g, mode_bits, budget, dimension)
+        if ideal_cost_table is None else
+        top2_cost_allocate(ideal_cost_table, mode_bits, budget))
+    ideal_bits = optimum["ideal_bits"]
     index = {bits: i for i, bits in enumerate(mode_bits)}
     base = np.asarray([index[b] for b in ideal_bits], dtype=np.int64)
+    second = np.asarray(
+        [index[b] for b in optimum["second_bits"]], dtype=np.int64)
     costs = np.broadcast_to(
         np.asarray(mode_bits, dtype=np.float64)[None],
         (len(c_g), len(mode_bits))).copy()
@@ -214,6 +228,8 @@ def make_allocations(
     randoms = random_exchange_walk(
         base, costs, n_random + 1, seed=seed)
     rows = {tuple(base)}
+    if second.size == base.size:
+        rows.add(tuple(second))
     rows.update(map(tuple, others))
     rows.update(map(tuple, randoms))
     if budget % len(c_g) == 0 and budget // len(c_g) in index:
@@ -262,10 +278,21 @@ def command_calibrate(args):
     out.mkdir(parents=True, exist_ok=True)
     for budget, ref in zip(budgets, refs):
         c_g, q = estimates[ref]
+        if args.ideal_model == "discrete_jvp":
+            if set(probe_bits) != set(mode_bits):
+                raise ValueError(
+                    "discrete_jvp requires every mode in coefficient-bits")
+            ideal_cost_table = np.stack([
+                estimates[bit][1].mean(0) for bit in mode_bits], axis=1)
+        else:
+            ideal_cost_table = np.stack([
+                c_g * np.exp2(-2.0 * bit / codec.pq.d)
+                for bit in mode_bits], axis=1)
         allocations, ideal_bits, costs = make_allocations(
             c_g, mode_bits, budget, args.single, args.random, args.seed,
-            codec.pq.d)
-        optimum = top2_allocate(c_g, mode_bits, budget, codec.pq.d)
+            codec.pq.d, ideal_cost_table)
+        optimum = top2_cost_allocate(
+            ideal_cost_table, mode_bits, budget)
         if not np.array_equal(ideal_bits, optimum["ideal_bits"]):
             raise RuntimeError("allocation generator and exact DP disagree")
         np.savez_compressed(
@@ -275,6 +302,8 @@ def command_calibrate(args):
             second_bits=optimum["second_bits"],
             second_value=optimum["second_value"],
             ideal_gap=optimum["ideal_gap"],
+            ideal_cost_table=ideal_cost_table,
+            ideal_model=args.ideal_model,
             coefficient_bits=probe_bits, c_by_bit=c_by_bit,
             q_per_image_by_bit=q_by_bit,
             cost_table=costs, mode_bits=mode_bits,
@@ -291,6 +320,7 @@ def command_calibrate(args):
             "second_value": optimum["second_value"],
             "ideal_gap": optimum["ideal_gap"],
             "coefficient_bits": list(probe_bits), **stability,
+            "ideal_model": args.ideal_model,
             "rate_dimension": codec.pq.d,
             "coefficient_kind": "central_jvp_actual_residual",
             "image_offset": args.image_offset, "codec": args.codec,
@@ -366,7 +396,10 @@ def command_measure(args):
             features, teachers, codec, tail, calibration["allocations"],
             calibration["cost_table"], calibration["c_g"], args.norm_mode,
             device, batch_size=args.batch_size,
-            allocation_chunk=args.allocation_chunk)
+            allocation_chunk=args.allocation_chunk,
+            ideal_cost_table=(
+                calibration["ideal_cost_table"]
+                if "ideal_cost_table" in calibration.files else None))
         sampled_gap = summary["phi_gap"]
         exact_gap = float(calibration["ideal_gap"])
         summary.update({
@@ -378,6 +411,10 @@ def command_measure(args):
                 if np.isfinite(exact_gap) and exact_gap > 0 else None),
             "omega_scope": "sampled_allocation_lower_bound",
             "ideal_model_fixed_from_independent_calibration": True,
+            "ideal_model": (
+                str(calibration["ideal_model"])
+                if "ideal_model" in calibration.files
+                else "common_exponential"),
         })
         summary.update({
             "arm": args.arm, "budget": budget,
@@ -477,6 +514,9 @@ def parser():
     p.add_argument("--budgets", required=True)
     p.add_argument("--reference-bits", required=True)
     p.add_argument("--coefficient-bits")
+    p.add_argument(
+        "--ideal-model", choices=("common_exponential", "discrete_jvp"),
+        default="common_exponential")
     p.add_argument("--images", type=int, default=64)
     p.add_argument("--image-offset", type=int, default=0)
     p.add_argument("--group-chunk", type=int, default=8)

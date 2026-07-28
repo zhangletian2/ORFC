@@ -16,7 +16,7 @@ from allocation_train import (
 from fixed_rate_remainder import (
     decompose_output_vectors, validate_fixed_total_rate,
 )
-from p1_fixed_rate import top2_allocate
+from p1_fixed_rate import make_allocations, top2_allocate, top2_cost_allocate
 
 
 def test_fixed_ideal_candidate_binding():
@@ -65,6 +65,17 @@ def test_top2_matches_brute_force():
     assert tuple(exact["ideal_bits"]) == rows[0][1]
     assert tuple(exact["second_bits"]) == rows[1][1]
     assert np.isclose(exact["ideal_gap"], rows[1][0] - rows[0][0])
+    table = np.asarray([[3, 2, 1], [1, 2, 4]], dtype=float)
+    discrete = top2_cost_allocate(table, bits, 4)
+    brute = sorted(
+        (sum(table[g, bits.index(choice[g])] for g in range(2)), choice)
+        for choice in product(bits, repeat=2) if sum(choice) == 4)
+    assert tuple(discrete["ideal_bits"]) == brute[0][1]
+    assert tuple(discrete["second_bits"]) == brute[1][1]
+    allocations, _, _ = make_allocations(
+        c, bits, budget, 0, 0, 42, 2)
+    realised = {tuple(np.asarray(bits)[row]) for row in allocations}
+    assert rows[0][1] in realised and rows[1][1] in realised
 
 
 def test_fixed_rate_and_curve_contracts():
