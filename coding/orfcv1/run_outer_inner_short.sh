@@ -11,7 +11,8 @@ CACHE=artifacts/dinov2_vitl14/cache
 STEPS=${STEPS:-10}
 OUTER_CALIBRATION_IMAGES=${OUTER_CALIBRATION_IMAGES:-300}
 OUTER_MINING_OFFSET=${OUTER_MINING_OFFSET:-300}
-TRAIN_IMAGE_OFFSET=${TRAIN_IMAGE_OFFSET:-364}
+OUTER_MINING_IMAGES=${OUTER_MINING_IMAGES:-300}
+TRAIN_IMAGE_OFFSET=${TRAIN_IMAGE_OFFSET:-$((OUTER_MINING_OFFSET + OUTER_MINING_IMAGES))}
 
 mkdir -p "$OUT/logs"
 run_one() {
@@ -30,7 +31,7 @@ run_one() {
     --refresh-steps 5 --select-steps 5 --log-steps 1 \
     --outer-refresh --outer-calibration-images "$OUTER_CALIBRATION_IMAGES" \
     --minimum-saved-calibration-images 300 \
-    --outer-calibration-offset 0 --outer-mining-images 64 \
+    --outer-calibration-offset 0 --outer-mining-images "$OUTER_MINING_IMAGES" \
     --outer-mining-offset "$OUTER_MINING_OFFSET" --outer-batch-size 8 \
     --outer-group-chunk 8 --outer-eps 0.01 \
     --dynamic-allocations --dynamic-single 32 --dynamic-random 32 \
