@@ -43,8 +43,10 @@ def _positive_fit(A, y, c0, ridge=1e-3):
     return float(fit.x[0]), fit.x[1:]
 
 
-def _sample(features, teachers, count, rng, device, norm_mode):
-    ids = rng.choice(len(features), min(count, len(features)), replace=False)
+def _sample(features, teachers, count, rng, device, norm_mode, ids=None):
+    if ids is None:
+        ids = rng.choice(
+            len(features), min(count, len(features)), replace=False)
     x = torch.from_numpy(np.array(features[ids], copy=True)).float().to(device)
     teacher = torch.from_numpy(
         np.array(teachers[ids], copy=True)).float().to(device)
@@ -144,8 +146,8 @@ def _curve_report(bits, distortion, tolerance):
 
 
 @torch.no_grad()
-def _seed_from_anchor(codec, anchor):
-    """Make lower modes nested subsets and higher modes exact refinements."""
+def _seed_from_anchor(codec, anchor, split_scale=0.001):
+    """Build a nested menu around the anchor using data-driven mode centres."""
     base = codec.pq.quantizers[anchor].codebooks
     groups, size, dimension = base.shape
     order = torch.empty(groups, size, dtype=torch.long, device=base.device)
@@ -161,17 +163,34 @@ def _seed_from_anchor(codec, anchor):
             distance = torch.minimum(
                 distance, (points - points[current]).square().sum(1))
             distance[chosen] = -1
-    for mode, quantizer in enumerate(codec.pq.quantizers):
-        if mode == anchor:
-            continue
+    for mode, quantizer in enumerate(codec.pq.quantizers[:anchor]):
         target = quantizer.codebooks
-        if target.shape[1] < size:
-            indices = order[:, :target.shape[1], None].expand(
-                -1, -1, dimension)
-            target.copy_(torch.gather(base, 1, indices))
-        else:
-            repeat = math.ceil(target.shape[1] / size)
-            target.copy_(base.repeat(1, repeat, 1)[:, :target.shape[1]])
+        indices = order[:, :target.shape[1], None].expand(
+            -1, -1, dimension)
+        target.copy_(torch.gather(base, 1, indices))
+    previous = base.detach().clone()
+    for quantizer in codec.pq.quantizers[anchor + 1:]:
+        target, candidates = quantizer.codebooks, quantizer.codebooks.clone()
+        for group in range(groups):
+            centres, pool = previous[group], candidates[group]
+            used = torch.zeros(
+                len(pool), dtype=torch.bool, device=pool.device)
+            additions = []
+            distance = torch.cdist(pool, centres).square().amin(1)
+            for _ in range(target.shape[1] - centres.shape[0]):
+                index = distance.argmax()
+                candidate = pool[index]
+                nearest = torch.cdist(
+                    candidate[None], centres).argmin()
+                point = centres[nearest] + split_scale * (
+                    candidate - centres[nearest])
+                additions.append(point)
+                used[index] = True
+                distance = torch.minimum(
+                    distance, (pool - point).square().sum(1))
+                distance[used] = -1
+            target[group].copy_(torch.cat([centres, torch.stack(additions)]))
+        previous = target.detach().clone()
 
 
 def _base(args):
@@ -195,7 +214,7 @@ def command_repair(args):
     original = _hard_eval(
         codec, tail, val_x, val_y, allocations, args)
     anchor_codebook = codec.pq.quantizers[anchor].codebooks.detach().clone()
-    _seed_from_anchor(codec, anchor)
+    _seed_from_anchor(codec, anchor, args.split_scale)
     seeded = _hard_eval(
         codec, tail, val_x, val_y, allocations, args)
     scale = max(float(seeded.mean()), 1.0)
@@ -287,10 +306,21 @@ def _select_state(source, distortion, calibration, args):
         A, distortion, calibration["c_g"], args.ridge)
     phi = intercept + A @ c
     remainder = distortion - phi
-    ideal = int(phi.argmin())
+    tolerance = max(
+        args.tie_atol, args.tie_rtol * max(abs(float(phi.min())), 1.0))
+    minimizers = np.flatnonzero(phi <= phi.min() + tolerance)
+    outside = np.setdiff1d(
+        np.arange(len(phi)), minimizers, assume_unique=True)
+    gap = (
+        float(phi[outside].min() - phi.min()) if len(outside)
+        else float("inf"))
+    target = int(minimizers[np.argmin(distortion[minimizers])])
     order = np.argsort(remainder)
     edge = max(2, args.allocations // 4)
-    selected = set(order[:edge]) | set(order[-edge:]) | {ideal}
+    selected = (
+        set(order[:edge]) | set(order[-edge:])
+        | set(map(int, minimizers)) | {target})
+    selected.update(map(int, outside[np.argsort(distortion[outside])[:edge]]))
     reference = None
     bits = calibration["mode_bits"][source["allocations"]]
     hits = np.flatnonzero(np.all(bits == args.reference_bit, axis=1))
@@ -307,11 +337,14 @@ def _select_state(source, distortion, calibration, args):
     return {
         "selected": selected, "allocations": source["allocations"][selected],
         "A": A[selected], "intercept": intercept, "c": c,
-        "ideal": ideal, "ideal_local": local[ideal],
+        "target": target, "minimizers": minimizers,
+        "minimizer_local": np.asarray(
+            [local[int(index)] for index in minimizers]),
+        "gap": gap,
         "reference": reference,
         "reference_local": local.get(reference),
         "omega_scale": max(float(np.ptp(remainder[selected])), 1.0),
-        "distortion_scale": max(float(distortion[ideal]), 1.0),
+        "distortion_scale": max(float(distortion[target]), 1.0),
     }
 
 
@@ -321,14 +354,18 @@ def _loss(codec, tail, batch, state, args, remainder_weight):
         args.pq_temperature, True)
     A = torch.as_tensor(state["A"], device=D.device)
     c = torch.as_tensor(state["c"], device=D.device)
-    e = (D.double() - state["intercept"] - A.double() @ c)
-    e = e / state["omega_scale"]
+    e = D.double() - state["intercept"] - A.double() @ c
     tau = args.lse_temperature
-    omega = (
-        tau * torch.logsumexp(e / tau, 0)
-        + tau * torch.logsumexp(-e / tau, 0)
-        - 2 * tau * math.log(len(e)))
-    candidate = D[state["ideal_local"]] / state["distortion_scale"]
+    scaled_tau = tau * state["omega_scale"]
+    omega_raw = (
+        scaled_tau * torch.logsumexp(e / scaled_tau, 0)
+        + scaled_tau * torch.logsumexp(-e / scaled_tau, 0)
+        - 2 * scaled_tau * math.log(len(e)))
+    omega = omega_raw / state["omega_scale"]
+    recovery = torch.relu(
+        omega_raw - args.recovery_fraction * state["gap"]
+    ) / state["omega_scale"]
+    candidate = D[state["minimizer_local"]].mean() / state["distortion_scale"]
     topk = torch.topk(
         D, min(args.topk, len(D))).values.mean() / state["distortion_scale"]
     reference = (
@@ -337,40 +374,73 @@ def _loss(codec, tail, batch, state, args, remainder_weight):
     base = (
         args.candidate_weight * candidate + args.topk_weight * topk
         + args.reference_weight * reference)
-    return base + remainder_weight * omega, {
-        "base": base, "omega": omega, "candidate": candidate,
+    return base + remainder_weight * recovery, {
+        "base": base, "omega": omega, "recovery": recovery,
+        "candidate": candidate,
         "topk": topk, "reference": reference,
     }
 
 
-def _joint_parameters(codec, anchor):
+def _joint_parameters(codec):
     codec.requires_grad_(False)
     codec.transform.triu_params.requires_grad_(True)
     params = [codec.transform.triu_params]
-    for mode, quantizer in enumerate(codec.pq.quantizers):
-        if mode != anchor:
-            quantizer.codebooks.requires_grad_(True)
-            params.append(quantizer.codebooks)
+    for quantizer in codec.pq.quantizers:
+        quantizer.codebooks.requires_grad_(True)
+        params.append(quantizer.codebooks)
     return params
 
 
 def _report(source, distortion, state, dimension):
     phi = state["intercept"] + _design(source["rates"], dimension) @ state["c"]
     remainder = distortion - phi
-    gap = np.sort(phi)[1] - phi.min()
+    minimizers = np.asarray(state["minimizers"])
+    gap = state["gap"]
     return {
         "mean_distortion": float(distortion.mean()),
-        "ideal_index": int(state["ideal"]),
-        "ideal_bits": source["rates"][state["ideal"]].tolist(),
-        "ideal_distortion": float(distortion[state["ideal"]]),
+        "target_index": int(state["target"]),
+        "target_bits": source["rates"][state["target"]].tolist(),
+        "target_distortion": float(distortion[state["target"]]),
+        "minimizer_indices": minimizers.tolist(),
+        "minimizer_count": int(len(minimizers)),
+        "best_minimizer_index": int(
+            minimizers[np.argmin(distortion[minimizers])]),
+        "best_minimizer_distortion": float(distortion[minimizers].min()),
         "numeric_best_index": int(distortion.argmin()),
         "numeric_best_distortion": float(distortion.min()),
         "reference_distortion": (
             float(distortion[state["reference"]])
             if state["reference"] is not None else None),
-        "omega": float(np.ptp(remainder)), "phi_gap": float(gap),
+        "omega": float(np.ptp(remainder)),
+        "set_external_gap": float(gap),
+        "recovery_ratio": float(np.ptp(remainder) / max(gap, 1e-12)),
+        "zero_coefficients": int(np.count_nonzero(state["c"] < 1e-8)),
         "candidate_count": int(np.count_nonzero(
             phi - phi.min() <= np.ptp(remainder) + 1e-12)),
+    }
+
+
+def _training_batches(args, count, rng):
+    if args.epochs <= 0:
+        for step in range(args.steps):
+            yield step, None, None
+        return
+    count = min(args.train_images, count)
+    step = 0
+    for epoch in range(args.epochs):
+        order = rng.permutation(count)
+        for start in range(0, count, args.images):
+            yield step, epoch, order[start:start + args.images]
+            step += 1
+
+
+def _state_report(state):
+    return {
+        "target": int(state["target"]),
+        "minimizers": state["minimizers"].tolist(),
+        "gap": float(state["gap"]),
+        "selected": state["selected"].tolist(),
+        "c": state["c"].tolist(),
     }
 
 
@@ -379,8 +449,7 @@ def command_short(args):
     source = np.load(args.allocation_file, allow_pickle=False)
     calibration = np.load(args.calibration, allow_pickle=False)
     bits = np.log2(codec.pq.mode_sizes).astype(int)
-    anchor = int(np.flatnonzero(bits == args.anchor_bit)[0])
-    params = _joint_parameters(codec, anchor)
+    params = _joint_parameters(codec)
     optimizer = torch.optim.Adam(params, lr=args.lr)
     rng = np.random.default_rng(args.seed)
     refresh_x = train_x[:args.refresh_images]
@@ -398,17 +467,29 @@ def command_short(args):
     before_val_D = before_matrix.mean(1)
     before = _report(
         source, before_val_D, state, int(calibration["rate_dimension"]))
+    total_steps = (
+        args.epochs * math.ceil(
+            min(args.train_images, len(train_x)) / args.images)
+        if args.epochs > 0 else args.steps)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=max(total_steps, 1), eta_min=args.lr * 0.01)
     remainder_weight, history, active = args.remainder_weight, [], []
-    for step in range(args.steps):
+    selection, best_score, best_state = [], float("inf"), None
+    recalibrate = True
+    for step, epoch, ids in _training_batches(args, len(train_x), rng):
+        progress = step / max(total_steps - 1, 1)
+        temperature = args.tau_start * (
+            args.tau_end / args.tau_start) ** progress
+        args.pq_temperature = temperature
         batch = _sample(
-            train_x, train_y, args.images, rng, device, args.norm_mode)
+            train_x, train_y, args.images, rng, device, args.norm_mode, ids)
         optimizer.zero_grad(set_to_none=True)
         _, terms = _loss(codec, tail, batch, state, args, 0.0)
-        if step == 0 and args.remainder_grad_ratio >= 0:
+        if recalibrate and args.remainder_grad_ratio >= 0:
             base_grad = torch.autograd.grad(
                 terms["base"], params, retain_graph=True, allow_unused=True)
             omega_grad = torch.autograd.grad(
-                terms["omega"], params, retain_graph=True, allow_unused=True)
+                terms["recovery"], params, retain_graph=True, allow_unused=True)
             base_norm = torch.sqrt(sum(
                 value.square().sum() for value in base_grad
                 if value is not None))
@@ -417,30 +498,53 @@ def command_short(args):
                 if value is not None))
             remainder_weight = (
                 args.remainder_grad_ratio * float(base_norm)
-                / max(float(omega_norm), 1e-12))
+                / max(float(omega_norm), 1e-12)
+                if float(omega_norm) > 1e-12 else 0.0)
+            recalibrate = False
         loss, terms = _loss(
             codec, tail, batch, state, args, remainder_weight)
         loss.backward()
         grad = torch.nn.utils.clip_grad_norm_(params, args.grad_clip)
         optimizer.step()
-        history.append({
-            "step": step + 1, "loss": float(loss),
-            "base": float(terms["base"]), "omega": float(terms["omega"]),
-            "candidate": float(terms["candidate"]),
-            "reference": float(terms["reference"]),
-            "grad_norm": float(grad),
-            "remainder_weight": remainder_weight,
-            "ideal_index": int(state["ideal"]),
-        })
+        scheduler.step()
+        if step == 0 or (step + 1) % args.log_steps == 0:
+            history.append({
+                "step": step + 1, "loss": float(loss),
+                "base": float(terms["base"]), "omega": float(terms["omega"]),
+                "recovery": float(terms["recovery"]),
+                "candidate": float(terms["candidate"]),
+                "reference": float(terms["reference"]),
+                "grad_norm": float(grad),
+                "remainder_weight": remainder_weight,
+                "target_index": int(state["target"]),
+                "minimizer_count": int(len(state["minimizers"])),
+                "set_external_gap": float(state["gap"]),
+                "epoch": epoch, "temperature": temperature,
+            })
         if (
             args.refresh_steps > 0 and (step + 1) % args.refresh_steps == 0
-            and step + 1 < args.steps
         ):
             current_D = _hard_eval(
                 codec, tail, refresh_x, refresh_y,
                 all_allocations, refresh_args)
             state = _select_state(source, current_D, calibration, args)
-            active.append(int(state["ideal"]))
+            active.append(_state_report(state))
+            recalibrate = True
+        if args.select_steps > 0 and (step + 1) % args.select_steps == 0:
+            validation_D = _hard_eval(
+                codec, tail, val_x, val_y, state["allocations"], args)
+            score = float(validation_D[state["minimizer_local"]].mean())
+            if state["reference_local"] is not None:
+                score += args.reference_weight * float(
+                    validation_D[state["reference_local"]])
+            selection.append({"step": step + 1, "score": score})
+            if score < best_score:
+                best_score = score
+                best_state = {
+                    key: value.detach().cpu().clone()
+                    for key, value in codec.state_dict().items()}
+    if best_state is not None:
+        codec.load_state_dict(best_state)
     final_D = _hard_eval(
         codec, tail, refresh_x, refresh_y, all_allocations, refresh_args)
     state = _select_state(source, final_D, calibration, args)
@@ -455,21 +559,29 @@ def command_short(args):
     curve_report = _curve_report(
         bits, curve, args.monotonic_tolerance)
     save_codec_v1(codec, args.checkpoint)
-    target = int(state["ideal"])
+    target = int(state["target"])
     paired = after_matrix[target] - before_matrix[target]
     half = 1.96 * paired.std(ddof=1) / np.sqrt(len(paired))
     array_path = Path(args.output).with_suffix(".npz")
     np.savez_compressed(
         array_path, allocations=all_allocations,
         before_per_image=before_matrix, after_per_image=after_matrix,
-        final_ideal_index=target)
+        final_target_index=target,
+        final_minimizer_indices=state["minimizers"])
     _write(args.output, {
         "before": before, "after": after, "menu": curve_report,
-        "history": history, "active_ideal_indices": active,
+        "history": history, "active_states": active,
+        "validation_selection": selection,
+        "selected_validation_score": (
+            best_score if best_state is not None else None),
+        "final_state": _state_report(state),
+        "joint_codebooks": True,
+        "epochs": args.epochs, "train_images": args.train_images,
+        "total_steps": total_steps,
         "remainder_weight": remainder_weight,
         "remainder_grad_ratio": args.remainder_grad_ratio,
-        "final_candidate_paired_delta": float(paired.mean()),
-        "final_candidate_paired_delta_ci95": [
+        "final_target_paired_delta": float(paired.mean()),
+        "final_target_paired_delta_ci95": [
             float(paired.mean() - half), float(paired.mean() + half)],
         "checkpoint": args.checkpoint, "arrays": str(array_path),
     })
@@ -511,6 +623,7 @@ def parser():
     repair.add_argument("--margin", type=float, default=0.0)
     repair.add_argument("--eval-steps", type=int, default=5)
     repair.add_argument("--minimum-high-rate-gain", type=float, default=0.0)
+    repair.add_argument("--split-scale", type=float, default=0.001)
     short = sub.add_parser("short")
     _common(short)
     short.add_argument("--allocation-file", required=True)
@@ -518,7 +631,15 @@ def parser():
     short.add_argument("--refresh-images", type=int, default=8)
     short.add_argument("--refresh-steps", type=int, default=5)
     short.add_argument("--allocations", type=int, default=64)
+    short.add_argument("--epochs", type=int, default=0)
+    short.add_argument("--train-images", type=int, default=4500)
+    short.add_argument("--log-steps", type=int, default=1)
+    short.add_argument("--select-steps", type=int, default=0)
+    short.add_argument("--tau-start", type=float, default=0.01)
+    short.add_argument("--tau-end", type=float, default=0.01)
     short.add_argument("--ridge", type=float, default=1e-3)
+    short.add_argument("--tie-atol", type=float, default=1e-8)
+    short.add_argument("--tie-rtol", type=float, default=1e-8)
     short.add_argument("--lse-temperature", type=float, default=0.1)
     short.add_argument("--candidate-weight", type=float, default=1.0)
     short.add_argument("--topk-weight", type=float, default=0.25)
@@ -527,6 +648,7 @@ def parser():
     short.add_argument("--reference-weight", type=float, default=1.0)
     short.add_argument("--remainder-weight", type=float, default=0.0)
     short.add_argument("--remainder-grad-ratio", type=float, default=-1.0)
+    short.add_argument("--recovery-fraction", type=float, default=1.0)
     return main
 
 

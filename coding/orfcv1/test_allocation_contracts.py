@@ -34,12 +34,22 @@ def test_positive_projection_and_candidate_binding():
         "mode_bits": np.asarray([1, 2, 3]),
     }
     args = Namespace(
-        ridge=1e-8, allocations=3, seed=42, reference_bit=2)
+        ridge=1e-8, allocations=3, seed=42, reference_bit=2,
+        tie_atol=1e-8, tie_rtol=1e-8)
     state = _select_state(source, distortion, calibration, args)
-    assert state["ideal"] == int(distortion.argmin())
-    assert state["allocations"][state["ideal_local"]].tolist() == (
-        source["allocations"][state["ideal"]].tolist())
+    assert state["target"] == int(distortion.argmin())
+    assert state["allocations"][state["minimizer_local"][0]].tolist() == (
+        source["allocations"][state["minimizers"][0]].tolist())
     assert state["reference"] == 1
+
+    tied = _select_state(
+        source, np.ones(3), {
+            "rate_dimension": np.asarray(1),
+            "c_g": np.zeros(2),
+            "mode_bits": np.asarray([1, 2, 3]),
+        }, args)
+    assert len(tied["minimizers"]) == 3
+    assert np.isinf(tied["gap"])
 
 
 def test_fixed_rate_and_curve_contracts():
@@ -73,7 +83,7 @@ def test_nested_anchor_initialisation():
     middle = set(anchor.flatten().tolist())
     assert low < middle
     assert torch.equal(codec.pq.quantizers[1].codebooks, anchor)
-    assert set(codec.pq.quantizers[2].codebooks.flatten().tolist()) == middle
+    assert torch.equal(codec.pq.quantizers[2].codebooks[:, :4], anchor)
 
 
 def test_remainder_decomposition():
