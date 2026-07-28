@@ -36,7 +36,6 @@ train_one() {
     --reference-weight 2 --monotonic-tolerance 0.001 \
     --remainder-grad-ratio "$ratio" --remainder-parameters u \
     --dynamic-allocations --dynamic-single 32 --dynamic-random 32 \
-    --selection-base-tolerance 0 \
     >"$OUT/logs/$name.log" 2>&1
 }
 

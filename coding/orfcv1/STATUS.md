@@ -16,8 +16,9 @@ Current pipeline:
    minimizer set, its external gap and hard candidate set.
 5. `run_allocation_full.sh` extends the accepted short configuration to the
    original 5k-scale protocol (4.5k optimisation plus 500 held-out validation)
-   with 100 epochs, temperature annealing and validation-only checkpoint
-   selection.
+   with 100 epochs, temperature annealing and a fixed hard-validation trace.
+   It always returns the final training state instead of rolling back to an
+   earlier checkpoint.
 6. `eval_v1_1_all.py` evaluates a frozen non-uniform allocation on downstream
    classification and segmentation tasks.
 

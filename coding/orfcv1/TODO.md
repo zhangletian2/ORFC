@@ -30,13 +30,13 @@
   and epoch-wise `0.5 -> 0.005` PQ-temperature/LR schedules.
 - Keep the 261 allocations fixed as an audit set. Refresh a separate training
   allocation pool once per epoch.
-- Select checkpoints with the complete hard validation objective, include the
-  initial checkpoint, and reject every checkpoint whose base objective
-  regresses from initialization.
+- Record the complete hard validation objective once per epoch, but always
+  deliver the final training state. Accept the optimisation only when its
+  final candidate distortion and remainder range improve over initialization.
 
 ## Final acceptance
 
 - Select the non-uniform allocation using validation only.
-- Freeze checkpoint and allocation before test.
+- Freeze the final checkpoint and validation-selected allocation before test.
 - Report nominal/actual rate, tail distortion, classification accuracy and
   segmentation mIoU with paired confidence intervals.

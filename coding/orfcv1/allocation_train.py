@@ -616,12 +616,7 @@ def command_short(args):
     history, active, refresh = [], [], 0
     initial_terms = _objective_terms(
         before_val_D, audit_state, args, remainder_weight)
-    initial_base = initial_terms["base"]
-    selection = [{"step": 0, **initial_terms, "eligible": True}]
-    best_score, best_step = initial_terms["score"], 0
-    best_state = {
-        key: value.detach().cpu().clone()
-        for key, value in codec.state_dict().items()}
+    validation_trace = [{"step": 0, **initial_terms}]
     for step, epoch, ids in _training_batches(args, len(train_x), rng):
         progress = (
             epoch / max(args.epochs - 1, 1)
@@ -685,25 +680,13 @@ def command_short(args):
                 codec, tail, val_x, val_y, audit["allocations"], args)
             terms_val = _objective_terms(
                 validation_D, audit_state, args, remainder_weight)
-            eligible = (
-                terms_val["base"]
-                <= initial_base * (1 + args.selection_base_tolerance))
-            selection.append({
-                "step": step + 1, **terms_val, "eligible": eligible})
+            validation_trace.append({"step": step + 1, **terms_val})
             print(
                 f"step={step + 1}/{total_steps} epoch={epoch} "
                 f"score={terms_val['score']:.6g} "
                 f"base={terms_val['base']:.6g} "
                 f"omega={terms_val['omega']:.6g} "
-                f"pool={len(training_source['allocations'])} "
-                f"eligible={eligible}", flush=True)
-            if eligible and terms_val["score"] < best_score:
-                best_score, best_step = terms_val["score"], step + 1
-                best_state = {
-                    key: value.detach().cpu().clone()
-                    for key, value in codec.state_dict().items()}
-    if args.select_steps > 0:
-        codec.load_state_dict(best_state)
+                f"pool={len(training_source['allocations'])}", flush=True)
     final_D = _hard_eval(
         codec, tail, refresh_x, refresh_y,
         audit["allocations"], refresh_args)
@@ -731,12 +714,11 @@ def command_short(args):
     _write(args.output, {
         "before": before, "after": after, "menu": curve_report,
         "history": history, "active_states": active,
-        "validation_selection": selection,
+        "validation_trace": validation_trace,
         "initial_validation_score": initial_terms["score"],
-        "selected_validation_score": (
-            best_score if args.select_steps > 0 else None),
-        "selected_validation_step": (
-            best_step if args.select_steps > 0 else None),
+        "final_validation_score": (
+            validation_trace[-1]["score"]
+            if validation_trace[-1]["step"] == total_steps else None),
         "final_state": _state_report(state),
         "joint_codebooks": True,
         "remainder_parameters": args.remainder_parameters,
@@ -825,7 +807,6 @@ def parser():
     short.add_argument("--dynamic-allocations", action="store_true")
     short.add_argument("--dynamic-single", type=int, default=32)
     short.add_argument("--dynamic-random", type=int, default=32)
-    short.add_argument("--selection-base-tolerance", type=float, default=0.0)
     return main
 
 
