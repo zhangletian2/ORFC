@@ -364,10 +364,10 @@ def _select_state(source, distortion, calibration, args):
     target_local = local[target]
     target_set_local = np.asarray([
         local[int(index)] for index in active_targets], dtype=int)
-    target_local_set = set(map(int, target_set_local))
+    full_target_set = set(map(int, target_set))
     competitor_local = np.asarray([
-        position for position in range(len(selected))
-        if position not in target_local_set], dtype=int)
+        position for position, index in enumerate(selected)
+        if int(index) not in full_target_set], dtype=int)
     empirical_margin = (
         float(distortion[outside].min() - distortion[target_set].min())
         if len(outside) else float("inf"))
@@ -473,17 +473,20 @@ def _loss(codec, tail, batch, state, args, remainder_weight):
     candidate = normalized[targets].min()
     if len(competitors):
         outside = normalized[competitors].min()
-        recovery = torch.relu(
+        recovery_constraint = (
             candidate - outside
             + args.recovery_margin / state["distortion_scale"])
+        recovery = torch.relu(recovery_constraint)
         empirical_margin = D[competitors].min() - D[targets].min()
     else:
         recovery = candidate.new_zeros(())
+        recovery_constraint = candidate.new_zeros(())
         empirical_margin = candidate.new_tensor(float("inf"))
     base = candidate + (
         args.candidate_mean_weight * D.mean() / state["distortion_scale"])
     return base + remainder_weight * recovery, {
         "base": base, "omega": omega, "recovery": recovery,
+        "recovery_constraint": recovery_constraint,
         "candidate": candidate,
         "empirical_margin": empirical_margin,
     }
@@ -517,8 +520,10 @@ def _calibrate_remainder(codec, tail, batch, state, args, parameters, rotation):
     _, terms = _loss(codec, tail, batch, state, args, 0.0)
     base = list(torch.autograd.grad(
         terms["base"], parameters, retain_graph=True, allow_unused=True))
+    # Calibrate with the unhinged constraint.  An already satisfied first
+    # minibatch must not silently disable the auxiliary for the whole run.
     recovery = list(torch.autograd.grad(
-        terms["recovery"], parameters, allow_unused=True))
+        terms["recovery_constraint"], parameters, allow_unused=True))
     base[0] = _tangent_gradient(rotation, base[0])
     recovery[0] = _tangent_gradient(rotation, recovery[0])
     def norm(values):
@@ -529,6 +534,9 @@ def _calibrate_remainder(codec, tail, batch, state, args, parameters, rotation):
             else torch.zeros((), device=rotation.device))
     base_norm, remainder_norm = norm(base), norm(recovery)
     codec.zero_grad(set_to_none=True)
+    if args.remainder_grad_ratio > 0 and float(remainder_norm) <= 1e-12:
+        raise RuntimeError(
+            "recovery constraint has zero calibration gradient")
     return (
         args.remainder_grad_ratio * float(base_norm)
         / max(float(remainder_norm), 1e-12)

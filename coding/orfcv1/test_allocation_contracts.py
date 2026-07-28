@@ -154,6 +154,7 @@ def test_dynamic_pool_and_selection_objective():
     state = _select_state(audit, distortion, discrete, select_args)
     assert state["target_set"].tolist() == [2, 1]
     assert state["active_target_set"].tolist() == [1]
+    assert state["selected"][state["competitor_local"]].tolist() == [0]
     assert state["gap"] == 5 and state["empirical_margin"] == 2
 
 
