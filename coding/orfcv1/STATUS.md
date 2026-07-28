@@ -20,9 +20,9 @@ Current pipeline:
 4. `allocation_train.py short` jointly updates the rotation and all codebooks.
    With `--outer-refresh`, each outer block recomputes the discrete JVP table,
    exact Top-K ideal allocation set and hard fixed-rate competitors on reserved
-   training images.  The inner block minimizes a soft minimum over the ideal
-   set and the empirical violation between the best set member and best
-   sampled outside competitor. Codebooks use
+   training images.  The inner block minimizes the best ideal-set distortion
+   and the empirical violation between the best set member and best sampled
+   outside competitor, using the active pair's subgradient. Codebooks use
    Adam; the rotation uses Cayley-SGD directly on the orthogonal manifold.
    The recovery auxiliary updates both the rotation and every active codebook;
    conflicting gradients are projected against the primary distortion

@@ -27,7 +27,7 @@
   gradient when adding the empirical recovery gradient for every parameter.
 - Refresh the hard candidate set around every ideal-set member; retain
   low-distortion outside competitors and extreme measured remainders.
-- Optimize the soft minimum inside the ideal set and its margin against the
+- Optimize the active minimum inside the ideal set and its margin against the
   best sampled outside competitor, while retaining the uniform 6-bit reference.
 - Accept the proxy only if held-out hard-PQ candidate distortion improves
   without breaking the menu monotonicity gate.

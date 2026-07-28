@@ -434,14 +434,9 @@ def _loss(codec, tail, batch, state, args, remainder_weight):
     competitors = torch.as_tensor(
         state["competitor_local"], device=D.device)
     normalized = D / state["distortion_scale"]
-    temperature = args.margin_temperature
-    candidate = -temperature * (
-        torch.logsumexp(-normalized[targets] / temperature, 0)
-        - math.log(len(targets)))
+    candidate = normalized[targets].min()
     if len(competitors):
-        outside = -temperature * (
-            torch.logsumexp(-normalized[competitors] / temperature, 0)
-            - math.log(len(competitors)))
+        outside = normalized[competitors].min()
         recovery = torch.relu(
             candidate - outside
             + args.recovery_margin / state["distortion_scale"])
@@ -997,7 +992,6 @@ def parser():
     short.add_argument("--tie-atol", type=float, default=1e-8)
     short.add_argument("--tie-rtol", type=float, default=1e-8)
     short.add_argument("--lse-temperature", type=float, default=0.1)
-    short.add_argument("--margin-temperature", type=float, default=0.01)
     short.add_argument("--recovery-margin", type=float, default=0.0)
     short.add_argument("--candidate-mean-weight", type=float, default=0.0)
     short.add_argument("--ideal-set-size", type=int, default=16)
