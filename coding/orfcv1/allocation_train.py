@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repair an operational RD menu and test candidate-bound remainder training."""
+"""Warm up a multi-rate PQ menu and train fixed-rate recovery."""
 
 import argparse
 import json
@@ -146,54 +146,6 @@ def _curve_report(bits, distortion, tolerance):
     }
 
 
-@torch.no_grad()
-def _seed_from_anchor(codec, anchor, split_scale=0.001):
-    """Build a nested menu around the anchor using data-driven mode centres."""
-    base = codec.pq.quantizers[anchor].codebooks
-    groups, size, dimension = base.shape
-    order = torch.empty(groups, size, dtype=torch.long, device=base.device)
-    for group in range(groups):
-        points = base[group]
-        first = (points - points.mean(0)).square().sum(1).argmin()
-        chosen = torch.zeros(size, dtype=torch.bool, device=base.device)
-        distance = (points - points[first]).square().sum(1)
-        for index in range(size):
-            current = first if index == 0 else distance.argmax()
-            order[group, index] = current
-            chosen[current] = True
-            distance = torch.minimum(
-                distance, (points - points[current]).square().sum(1))
-            distance[chosen] = -1
-    for mode, quantizer in enumerate(codec.pq.quantizers[:anchor]):
-        target = quantizer.codebooks
-        indices = order[:, :target.shape[1], None].expand(
-            -1, -1, dimension)
-        target.copy_(torch.gather(base, 1, indices))
-    previous = base.detach().clone()
-    for quantizer in codec.pq.quantizers[anchor + 1:]:
-        target, candidates = quantizer.codebooks, quantizer.codebooks.clone()
-        for group in range(groups):
-            centres, pool = previous[group], candidates[group]
-            used = torch.zeros(
-                len(pool), dtype=torch.bool, device=pool.device)
-            additions = []
-            distance = torch.cdist(pool, centres).square().amin(1)
-            for _ in range(target.shape[1] - centres.shape[0]):
-                index = distance.argmax()
-                candidate = pool[index]
-                nearest = torch.cdist(
-                    candidate[None], centres).argmin()
-                point = centres[nearest] + split_scale * (
-                    candidate - centres[nearest])
-                additions.append(point)
-                used[index] = True
-                distance = torch.minimum(
-                    distance, (pool - point).square().sum(1))
-                distance[used] = -1
-            target[group].copy_(torch.cat([centres, torch.stack(additions)]))
-        previous = target.detach().clone()
-
-
 def _base(args):
     device = torch.device(args.device)
     codec = load_codec_v1(args.codec, device).train()
@@ -205,39 +157,20 @@ def _base(args):
     return device, codec, tail, train_x, train_y, val_x, val_y
 
 
-def command_repair(args):
+def command_warmup(args):
     device, codec, tail, train_x, train_y, val_x, val_y = _base(args)
     bits = np.log2(codec.pq.mode_sizes).astype(int)
-    if args.anchor_bit not in bits:
-        raise ValueError("anchor bit is absent from the mode menu")
-    anchor = int(np.flatnonzero(bits == args.anchor_bit)[0])
     allocations = _uniform_allocations(codec)
-    original = _hard_eval(
+    before = _hard_eval(
         codec, tail, val_x, val_y, allocations, args)
-    anchor_codebook = codec.pq.quantizers[anchor].codebooks.detach().clone()
-    _seed_from_anchor(codec, anchor, args.split_scale)
-    seeded = _hard_eval(
-        codec, tail, val_x, val_y, allocations, args)
-    scale = max(float(seeded.mean()), 1.0)
+    rotation = codec.transform.triu_params.detach().clone()
+    scale = max(float(before.mean()), 1.0)
     codec.requires_grad_(False)
-    params = []
-    for mode, quantizer in enumerate(codec.pq.quantizers):
-        if mode != anchor:
-            quantizer.codebooks.requires_grad_(True)
-            params.append(quantizer.codebooks)
+    params = [quantizer.codebooks for quantizer in codec.pq.quantizers]
+    for parameter in params:
+        parameter.requires_grad_(True)
     optimizer = torch.optim.Adam(params, lr=args.lr)
     rng = np.random.default_rng(args.seed)
-    seeded_report = _curve_report(
-        bits, seeded, args.monotonic_tolerance)
-    best_key = (
-        seeded_report["violations"],
-        int((seeded[anchor] - seeded[-1]) / max(
-            seeded[anchor], 1e-12) < args.minimum_high_rate_gain),
-        float(np.mean(np.delete(seeded, anchor))),
-        seeded_report["max_relative_violation"])
-    best_state = {
-        key: value.detach().cpu().clone()
-        for key, value in codec.state_dict().items()}
     history = []
     for step in range(args.steps):
         batch = _sample(
@@ -246,59 +179,26 @@ def command_repair(args):
         D = _distortions(
             codec, tail, batch, allocations, args.allocation_chunk,
             args.pq_temperature, True)
-        violation = torch.relu(
-            D[1:] - (1.0 - args.margin) * D[:-1]).mean() / scale
-        mean = D.mean() / scale
-        loss = mean + args.monotonic_weight * violation
+        loss = D.mean() / scale
         loss.backward()
         grad = torch.nn.utils.clip_grad_norm_(params, args.grad_clip)
         optimizer.step()
-        row = {
-            "step": step + 1, "loss": float(loss),
-            "mean": float(mean), "monotonic": float(violation),
-            "grad_norm": float(grad),
-        }
-        if (step + 1) % args.eval_steps == 0 or step + 1 == args.steps:
-            curve = _hard_eval(
-                codec, tail, val_x, val_y, allocations, args)
-            report = _curve_report(bits, curve, args.monotonic_tolerance)
-            key = (
-                report["violations"],
-                int((curve[anchor] - curve[-1]) / max(
-                    curve[anchor], 1e-12) < args.minimum_high_rate_gain),
-                float(np.mean(np.delete(curve, anchor))),
-                report["max_relative_violation"])
-            row["validation"] = report
-            if best_key is None or key < best_key:
-                best_key = key
-                best_state = {
-                    key: value.detach().cpu().clone()
-                    for key, value in codec.state_dict().items()}
-        history.append(row)
-    codec.load_state_dict(best_state)
+        if step == 0 or (step + 1) % args.log_steps == 0:
+            history.append({
+                "step": step + 1, "loss": float(loss),
+                "grad_norm": float(grad)})
     after = _hard_eval(codec, tail, val_x, val_y, allocations, args)
-    anchor_exact = torch.equal(
-        codec.pq.quantizers[anchor].codebooks, anchor_codebook)
-    if not anchor_exact:
-        raise RuntimeError("frozen anchor codebook changed")
+    rotation_exact = torch.equal(codec.transform.triu_params, rotation)
+    if not rotation_exact:
+        raise RuntimeError("warmup changed the frozen rotation")
     save_codec_v1(codec, args.checkpoint)
-    report = {
-        "before": _curve_report(bits, original, args.monotonic_tolerance),
-        "anchor_seeded": seeded_report,
+    _write(args.output, {
+        "before": _curve_report(bits, before, args.monotonic_tolerance),
         "after": _curve_report(bits, after, args.monotonic_tolerance),
-        "anchor_bit": args.anchor_bit, "anchor_codebook_exact": anchor_exact,
+        "rotation_frozen": rotation_exact,
         "steps": args.steps, "checkpoint": args.checkpoint,
         "history": history,
-    }
-    high_gain = (
-        after[anchor] - after[-1]) / max(after[anchor], 1e-12)
-    report["high_rate_gain"] = float(high_gain)
-    _write(args.output, report)
-    if (
-        not report["after"]["monotonic"]
-        or high_gain < args.minimum_high_rate_gain
-    ):
-        raise RuntimeError("repaired menu did not pass the monotonic RD gate")
+    })
 
 
 def _select_state(source, distortion, calibration, args):
@@ -390,8 +290,6 @@ def _objective_terms(distortion, state, args, remainder_weight):
     complete = len(D) == len(state["full_A"])
     A = state["full_A"] if complete else state["A"]
     minimizers = state["minimizers"] if complete else state["minimizer_local"]
-    reference_index = (
-        state["reference"] if complete else state["reference_local"])
     e = D - state["intercept"] - A @ state["c"]
     scale = args.lse_temperature * state["omega_scale"]
     high = scale * np.log(np.exp((e - e.max()) / scale).sum()) + e.max()
@@ -404,21 +302,13 @@ def _objective_terms(distortion, state, args, remainder_weight):
         omega_raw - args.recovery_fraction * state["gap"], 0.0
     ) / state["omega_scale"]
     candidate = D[minimizers].mean() / state["distortion_scale"]
-    topk = np.sort(D)[-min(args.topk, len(D)):].mean()
-    topk /= state["distortion_scale"]
-    reference = (
-        D[reference_index] / state["distortion_scale"]
-        if reference_index is not None else 0.0)
-    base = (
-        args.candidate_weight * candidate + args.topk_weight * topk
-        + args.reference_weight * reference)
+    base = candidate
     return {
         "score": float(base + remainder_weight * recovery),
         "base": float(base), "recovery": float(recovery),
         "omega": float(np.ptp(e)), "gap": float(state["gap"]),
         "recovery_ratio": float(np.ptp(e) / max(state["gap"], 1e-12)),
-        "candidate": float(candidate), "topk": float(topk),
-        "reference": float(reference),
+        "candidate": float(candidate),
     }
 
 
@@ -440,18 +330,10 @@ def _loss(codec, tail, batch, state, args, remainder_weight):
         omega_raw - args.recovery_fraction * state["gap"]
     ) / state["omega_scale"]
     candidate = D[state["minimizer_local"]].mean() / state["distortion_scale"]
-    topk = torch.topk(
-        D, min(args.topk, len(D))).values.mean() / state["distortion_scale"]
-    reference = (
-        D[state["reference_local"]] / state["distortion_scale"]
-        if state["reference_local"] is not None else D.new_zeros(()))
-    base = (
-        args.candidate_weight * candidate + args.topk_weight * topk
-        + args.reference_weight * reference)
+    base = candidate
     return base + remainder_weight * recovery, {
         "base": base, "omega": omega, "recovery": recovery,
         "candidate": candidate,
-        "topk": topk, "reference": reference,
     }
 
 
@@ -469,7 +351,7 @@ def _calibrate_remainder(codec, tail, batch, state, args, params):
     if args.remainder_grad_ratio < 0:
         return args.remainder_weight
     _, terms = _loss(codec, tail, batch, state, args, 0.0)
-    targets = params if args.remainder_parameters == "joint" else params[:1]
+    targets = params[:1]
     base = torch.autograd.grad(
         terms["base"], targets, retain_graph=True, allow_unused=True)
     remainder = torch.autograd.grad(
@@ -484,18 +366,29 @@ def _calibrate_remainder(codec, tail, batch, state, args, params):
         if float(remainder_norm) > 1e-12 else 0.0)
 
 
-def _backward(loss, terms, params, args, remainder_weight):
-    if remainder_weight <= 0 or args.remainder_parameters == "joint":
-        loss.backward()
-        return
+def _protect_primary(auxiliary, primary):
+    if auxiliary is None or primary is None:
+        return auxiliary, 0.0, False
+    dot = torch.dot(auxiliary.flatten(), primary.flatten())
+    denom = primary.square().sum().clamp_min(1e-24)
+    cosine = dot / torch.sqrt(
+        denom * auxiliary.square().sum().clamp_min(1e-24))
+    if dot < 0:
+        auxiliary = auxiliary - dot / denom * primary
+    return auxiliary, float(cosine), bool(dot < 0)
+
+
+def _backward(terms, params, remainder_weight):
     terms["base"].backward(retain_graph=True)
+    if remainder_weight <= 0:
+        return 0.0, False
     gradient = torch.autograd.grad(
         terms["recovery"], params[0], allow_unused=True)[0]
+    gradient, cosine, projected = _protect_primary(
+        gradient, params[0].grad)
     if gradient is not None:
-        if params[0].grad is None:
-            params[0].grad = remainder_weight * gradient
-        else:
-            params[0].grad.add_(gradient, alpha=remainder_weight)
+        params[0].grad.add_(gradient, alpha=remainder_weight)
+    return cosine, projected
 
 
 def _report(source, distortion, state, dimension):
@@ -559,12 +452,8 @@ def _state_report(state):
 
 def command_short(args):
     device, codec, tail, train_x, train_y, val_x, val_y = _base(args)
-    saved = np.load(args.allocation_file, allow_pickle=False)
     calibration = np.load(args.calibration, allow_pickle=False)
-    audit = {
-        "allocations": np.asarray(saved["allocations"]),
-        "rates": np.asarray(saved["rates"]),
-    }
+    audit = _allocation_source(calibration["allocations"], calibration)
     bits = np.log2(codec.pq.mode_sizes).astype(int)
     params = _joint_parameters(codec)
     optimizer = torch.optim.Adam(params, lr=args.lr)
@@ -630,7 +519,8 @@ def command_short(args):
         optimizer.zero_grad(set_to_none=True)
         loss, terms = _loss(
             codec, tail, batch, state, args, remainder_weight)
-        _backward(loss, terms, params, args, remainder_weight)
+        gradient_cosine, gradient_projected = _backward(
+            terms, params, remainder_weight)
         grad = torch.nn.utils.clip_grad_norm_(params, args.grad_clip)
         optimizer.step()
         if (
@@ -644,9 +534,9 @@ def command_short(args):
                 "base": float(terms["base"]), "omega": float(terms["omega"]),
                 "recovery": float(terms["recovery"]),
                 "candidate": float(terms["candidate"]),
-                "topk": float(terms["topk"]),
-                "reference": float(terms["reference"]),
                 "grad_norm": float(grad),
+                "gradient_cosine": gradient_cosine,
+                "gradient_projected": gradient_projected,
                 "remainder_weight": remainder_weight,
                 "training_pool_size": int(
                     len(training_source["allocations"])),
@@ -721,7 +611,7 @@ def command_short(args):
             if validation_trace[-1]["step"] == total_steps else None),
         "final_state": _state_report(state),
         "joint_codebooks": True,
-        "remainder_parameters": args.remainder_parameters,
+        "remainder_parameters": "u",
         "dynamic_allocations": args.dynamic_allocations,
         "audit_allocation_count": int(len(audit["allocations"])),
         "epochs": args.epochs, "train_images": args.train_images,
@@ -736,8 +626,6 @@ def command_short(args):
             float(paired.mean() - half), float(paired.mean() + half)],
         "checkpoint": args.checkpoint, "arrays": str(array_path),
     })
-    if not curve_report["monotonic"]:
-        raise RuntimeError("short training broke the monotonic RD gate")
 
 
 def _common(parser):
@@ -760,7 +648,6 @@ def _common(parser):
     parser.add_argument("--steps", type=int, default=20)
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--grad-clip", type=float, default=1.0)
-    parser.add_argument("--anchor-bit", type=int, default=6)
     parser.add_argument("--monotonic-tolerance", type=float, default=0.01)
     parser.add_argument("--seed", type=int, default=42)
 
@@ -768,16 +655,11 @@ def _common(parser):
 def parser():
     main = argparse.ArgumentParser()
     sub = main.add_subparsers(dest="command", required=True)
-    repair = sub.add_parser("repair")
-    _common(repair)
-    repair.add_argument("--monotonic-weight", type=float, default=10.0)
-    repair.add_argument("--margin", type=float, default=0.0)
-    repair.add_argument("--eval-steps", type=int, default=5)
-    repair.add_argument("--minimum-high-rate-gain", type=float, default=0.0)
-    repair.add_argument("--split-scale", type=float, default=0.001)
+    warmup = sub.add_parser("warmup")
+    _common(warmup)
+    warmup.add_argument("--log-steps", type=int, default=10)
     short = sub.add_parser("short")
     _common(short)
-    short.add_argument("--allocation-file", required=True)
     short.add_argument("--calibration", required=True)
     short.add_argument("--refresh-images", type=int, default=8)
     short.add_argument("--refresh-steps", type=int, default=5)
@@ -794,15 +676,9 @@ def parser():
     short.add_argument("--tie-atol", type=float, default=1e-8)
     short.add_argument("--tie-rtol", type=float, default=1e-8)
     short.add_argument("--lse-temperature", type=float, default=0.1)
-    short.add_argument("--candidate-weight", type=float, default=1.0)
-    short.add_argument("--topk-weight", type=float, default=0.25)
-    short.add_argument("--topk", type=int, default=8)
     short.add_argument("--reference-bit", type=int, default=6)
-    short.add_argument("--reference-weight", type=float, default=1.0)
     short.add_argument("--remainder-weight", type=float, default=0.0)
     short.add_argument("--remainder-grad-ratio", type=float, default=-1.0)
-    short.add_argument(
-        "--remainder-parameters", choices=("u", "joint"), default="u")
     short.add_argument("--recovery-fraction", type=float, default=1.0)
     short.add_argument("--dynamic-allocations", action="store_true")
     short.add_argument("--dynamic-single", type=int, default=32)

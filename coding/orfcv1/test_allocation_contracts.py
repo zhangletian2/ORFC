@@ -8,7 +8,7 @@ import torch
 
 from allocation_train import (
     _allocation_source, _curve_report, _design, _dynamic_source,
-    _objective_terms, _positive_fit, _seed_from_anchor, _select_state,
+    _objective_terms, _positive_fit, _protect_primary, _select_state,
 )
 from fixed_rate_remainder import (
     decompose_output_vectors, validate_fixed_total_rate,
@@ -81,8 +81,7 @@ def test_dynamic_pool_and_selection_objective():
     select_args = Namespace(
         ridge=1e-8, allocations=3, seed=42, reference_bit=2,
         tie_atol=1e-8, tie_rtol=1e-8, lse_temperature=0.1,
-        recovery_fraction=1.0, candidate_weight=1.0, topk_weight=0.25,
-        topk=2, reference_weight=1.0)
+        recovery_fraction=1.0)
     distortion = np.asarray([5.0, 3.0, 4.0])
     state = _select_state(audit, distortion, calibration, select_args)
     terms = _objective_terms(
@@ -90,28 +89,12 @@ def test_dynamic_pool_and_selection_objective():
     assert terms["score"] >= terms["base"] and terms["omega"] >= 0
 
 
-def test_nested_anchor_initialisation():
-    class Quantizer:
-        def __init__(self, size):
-            self.codebooks = torch.zeros(1, size, 1)
-
-    class PQ:
-        def __init__(self):
-            self.quantizers = [Quantizer(size) for size in (2, 4, 8)]
-
-    class Codec:
-        def __init__(self):
-            self.pq = PQ()
-
-    codec = Codec()
-    anchor = torch.arange(4.0).reshape(1, 4, 1)
-    codec.pq.quantizers[1].codebooks.copy_(anchor)
-    _seed_from_anchor(codec, 1)
-    low = set(codec.pq.quantizers[0].codebooks.flatten().tolist())
-    middle = set(anchor.flatten().tolist())
-    assert low < middle
-    assert torch.equal(codec.pq.quantizers[1].codebooks, anchor)
-    assert torch.equal(codec.pq.quantizers[2].codebooks[:, :4], anchor)
+def test_primary_gradient_protection():
+    primary = torch.tensor([1.0, 0.0])
+    auxiliary = torch.tensor([-2.0, 1.0])
+    protected, cosine, projected = _protect_primary(auxiliary, primary)
+    assert projected and cosine < 0
+    assert torch.dot(primary, protected).abs() < 1e-7
 
 
 def test_remainder_decomposition():
@@ -130,6 +113,6 @@ if __name__ == "__main__":
     test_positive_projection_and_candidate_binding()
     test_fixed_rate_and_curve_contracts()
     test_dynamic_pool_and_selection_objective()
-    test_nested_anchor_initialisation()
+    test_primary_gradient_protection()
     test_remainder_decomposition()
     print("PASS: allocation contracts")

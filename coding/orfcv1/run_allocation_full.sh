@@ -3,11 +3,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 PY=${PY:-/home/user/anaconda3/envs/featcodec2/bin/python}
-MENU=${MENU:?set MENU to a repaired checkpoint from run_allocation_short.sh}
+MENU=${MENU:?set MENU to menu_warmup.pt from run_allocation_short.sh}
+CALIBRATION=${CALIBRATION:?set CALIBRATION to its calibration_R192.npz}
 RUN_ID=${RUN_ID:-allocation_full_$(date -u +%Y%m%dT%H%M%SZ)}
 OUT=${OUT:-results/dinov2_vitl14/rate_allocation/$RUN_ID}
 CACHE=artifacts/dinov2_vitl14/cache
-P1=results/dinov2_vitl14/p1_fixed_rate/formal_p1_corrected_20260727T090628Z
 EPOCHS=${EPOCHS:-100}
 TRAIN_IMAGES=${TRAIN_IMAGES:-4500}
 IMAGES=${IMAGES:-32}
@@ -20,8 +20,7 @@ train_one() {
   local gpu=$1 name=$2 ratio=$3
   CUDA_VISIBLE_DEVICES=$gpu "$PY" allocation_train.py short \
     --codec "$MENU" \
-    --allocation-file "$P1/response/measurement_R192.npz" \
-    --calibration "$P1/response/calibration_R192.npz" \
+    --calibration "$CALIBRATION" \
     --features "$CACHE/features_train_blk20_n4500_ss1608637542.npy" \
     --teachers "$CACHE/teacher_train_blk20_n4500_ss1608637542.npy" \
     --hard-features "$CACHE/features_val_blk20_n500_ss1608637542.npy" \
@@ -33,15 +32,14 @@ train_one() {
     --hard-images 128 --hard-image-offset 0 --hard-batch-size 16 \
     --allocations 8 --allocation-chunk 8 \
     --tau-start 0.5 --tau-end 0.005 --schedule-unit epoch --lr 0.0003 \
-    --reference-weight 2 --monotonic-tolerance 0.001 \
-    --remainder-grad-ratio "$ratio" --remainder-parameters u \
+    --monotonic-tolerance 0.001 --remainder-grad-ratio "$ratio" \
     --dynamic-allocations --dynamic-single 32 --dynamic-random 32 \
     >"$OUT/logs/$name.log" 2>&1
 }
 
-train_one "${GPU_BASE:-4}" candidate_only 0 &
+train_one "${GPU_BASE:-4}" target_only 0 &
 p0=$!
-train_one "${GPU_PROXY:-5}" candidate_recovery 0.25 &
+train_one "${GPU_PROXY:-5}" target_recovery 0.25 &
 p1=$!
 wait "$p0" "$p1"
 echo "$OUT"

@@ -24,7 +24,7 @@ from fixed_rate_remainder import (
     validate_fixed_total_rate,
 )
 from multimode_pq import MultiModeSoftPQ
-from opq import batch_normalize_gpu
+from opq import batch_normalize_gpu, learn_opq_rotation
 from soft_pq import OrthogonalTransform
 from allocate import dp_allocate
 
@@ -37,21 +37,6 @@ def dump_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2), encoding="utf-8")
-
-
-def load_transform(kind, source, dimension, device):
-    if kind == "identity":
-        transform = OrthogonalTransform(dimension)
-    elif kind == "opq":
-        data = np.load(source)
-        key = "R" if "R" in data else "rotation"
-        transform = OrthogonalTransform(dimension)
-        transform.init_from_opq(data[key])
-    else:
-        transform = load_codec_v1(source, device=device).transform
-    transform = transform.to(device).eval()
-    transform.requires_grad_(False)
-    return transform
 
 
 def build_tail(layer, device):
@@ -80,38 +65,43 @@ def command_prepare(args):
     np.random.seed(args.seed)
     device = torch.device("cuda")
     features = np.load(args.features, mmap_mode="r")
-    transform = load_transform(
-        args.source_kind, args.source, features.shape[-1], device)
     rng = np.random.default_rng(args.seed)
     ids = rng.choice(
         len(features), min(args.images, len(features)), replace=False)
-    rotation = transform.get_rotation().detach()
     vectors = []
     for start in range(0, len(ids), args.batch_size):
         x = torch.from_numpy(
             np.asarray(features[ids[start:start + args.batch_size]])).float().to(device)
         y, _, _ = batch_normalize_gpu(x, mode=args.norm_mode)
-        vectors.append((y.reshape(-1, y.shape[-1]) @ rotation).cpu())
-    z = torch.cat(vectors)
-    if len(z) > args.max_vectors:
-        keep = torch.randperm(len(z), generator=torch.Generator().manual_seed(
+        vectors.append(y.reshape(-1, y.shape[-1]).cpu())
+    y = torch.cat(vectors)
+    if len(y) > args.max_vectors:
+        keep = torch.randperm(len(y), generator=torch.Generator().manual_seed(
             args.seed))[:args.max_vectors]
-        z = z[keep]
+        y = y[keep]
     sizes = [2**bits for bits in csv_ints(args.mode_bits)]
+    transform = OrthogonalTransform(features.shape[-1])
+    history = []
+    if args.source_kind == "opq":
+        rotation, _, history = learn_opq_rotation(
+            y, args.groups, features.shape[-1] // args.groups,
+            2**args.opq_bits, max_iter_opq=args.opq_iters,
+            max_iter_kmeans=args.kmeans_iters, device=device, verbose=True)
+        raw = torch.as_tensor(rotation, device=device)
+        left, _, right = torch.linalg.svd(raw)
+        rotation = (left @ right).cpu().numpy()
+        transform.init_from_opq(rotation)
+    transform = transform.to(device).eval()
+    transform.requires_grad_(False)
+    rotation = transform.get_rotation().detach()
+    z = y.to(device) @ rotation
     pq = MultiModeSoftPQ(args.groups, sizes, features.shape[-1] // args.groups)
     pq.init_from_kmeans(
         z, device=device, max_iter=args.kmeans_iters, seed=args.seed)
-    anchor_bits = args.anchor_bits
-    if args.anchor_codec:
-        anchor = load_codec_v1(args.anchor_codec, device=device)
-        anchor_bits = anchor_bits or int(np.log2(anchor.pq.K))
-        if 2**anchor_bits not in sizes or anchor.pq.K != 2**anchor_bits:
-            raise ValueError("anchor codec size is absent from the mode menu")
-        if not torch.allclose(
-                rotation, anchor.transform.get_rotation(), atol=0, rtol=0):
-            raise ValueError("anchor codec and source transform differ")
-        pq.quantizers[sizes.index(2**anchor_bits)].codebooks.copy_(
-            anchor.pq.codebooks.detach().cpu())
+    probe = z[:min(len(z), 512)].reshape(-1, pq.G, pq.d).permute(1, 0, 2)
+    aligned_mse = [
+        float(torch.cdist(probe, q.codebooks.to(device)).square().amin(2).mean())
+        for q in pq.quantizers]
     codec = FeatureCodecV1(pq.to(device), transform)
     output.parent.mkdir(parents=True, exist_ok=True)
     save_codec_v1(codec, output)
@@ -119,8 +109,13 @@ def command_prepare(args):
         "arm": args.arm, "mode_bits": list(csv_ints(args.mode_bits)),
         "training_images": int(len(ids)), "vectors": int(len(z)),
         "kmeans_iters": args.kmeans_iters, "seed": args.seed,
-        "source_kind": args.source_kind, "source": args.source,
-        "anchor_codec": args.anchor_codec, "anchor_bits": anchor_bits,
+        "source_kind": args.source_kind, "opq_bits": args.opq_bits,
+        "opq_iters": args.opq_iters, "opq_history": [
+            [mse, delta if np.isfinite(delta) else None]
+            for mse, delta in history],
+        "rotation_orth_error": transform.orth_error(),
+        "codebook_coordinates": "normalised_features@effective_rotation",
+        "initial_rotated_mse": aligned_mse,
     })
     print(f"saved {output}")
 
@@ -375,19 +370,18 @@ def parser():
     p.add_argument("--arm", required=True)
     p.add_argument("--features", required=True)
     p.add_argument("--output", required=True)
-    p.add_argument("--source-kind", choices=("identity", "opq", "checkpoint"),
+    p.add_argument("--source-kind", choices=("scratch", "opq"),
                    required=True)
-    p.add_argument("--source", default="")
     p.add_argument("--mode-bits", required=True)
     p.add_argument("--groups", type=int, default=32)
     p.add_argument("--images", type=int, default=2000)
     p.add_argument("--max-vectors", type=int, default=200000)
     p.add_argument("--kmeans-iters", type=int, default=50)
+    p.add_argument("--opq-bits", type=int, default=6)
+    p.add_argument("--opq-iters", type=int, default=20)
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--norm-mode", default="per_image")
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--anchor-codec", default="")
-    p.add_argument("--anchor-bits", type=int, default=0)
     p.add_argument("--force", action="store_true")
     p = sub.add_parser("calibrate", parents=[common])
     p.add_argument("--output-dir", required=True)
