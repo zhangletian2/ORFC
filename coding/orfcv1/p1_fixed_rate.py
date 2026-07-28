@@ -14,7 +14,9 @@ ORFC = HERE.parent / "orfc"
 THEORY = HERE.parents[2] / "theory_verify"
 sys.path[:0] = [str(HERE), str(ORFC), str(THEORY)]
 
-from codec_v1 import FeatureCodecV1, load_codec_v1, save_codec_v1
+from codec_v1 import (
+    DirectOrthogonalTransform, FeatureCodecV1, load_codec_v1, save_codec_v1,
+)
 from fixed_rate_remainder import (
     adjacent_exchange_allocations,
     evaluate_fixed_rate_decomposition,
@@ -25,7 +27,6 @@ from fixed_rate_remainder import (
 )
 from multimode_pq import MultiModeSoftPQ
 from opq import batch_normalize_gpu, learn_opq_rotation
-from soft_pq import OrthogonalTransform
 from allocate import dp_allocate
 
 
@@ -80,18 +81,15 @@ def command_prepare(args):
             args.seed))[:args.max_vectors]
         y = y[keep]
     sizes = [2**bits for bits in csv_ints(args.mode_bits)]
-    transform = OrthogonalTransform(features.shape[-1])
+    transform = DirectOrthogonalTransform(features.shape[-1]).to(device)
     history = []
     if args.source_kind == "opq":
         rotation, _, history = learn_opq_rotation(
             y, args.groups, features.shape[-1] // args.groups,
             2**args.opq_bits, max_iter_opq=args.opq_iters,
             max_iter_kmeans=args.kmeans_iters, device=device, verbose=True)
-        raw = torch.as_tensor(rotation, device=device)
-        left, _, right = torch.linalg.svd(raw)
-        rotation = (left @ right).cpu().numpy()
         transform.init_from_opq(rotation)
-    transform = transform.to(device).eval()
+    transform = transform.eval()
     transform.requires_grad_(False)
     rotation = transform.get_rotation().detach()
     z = y.to(device) @ rotation

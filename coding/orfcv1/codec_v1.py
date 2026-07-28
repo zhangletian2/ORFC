@@ -2,8 +2,8 @@
 ORFC-v1 extended codec: per-group residual decomposition and
 reconstruction audit for the complete ViT tail distortion pipeline.
 
-Reuses OrthogonalTransform and SoftPQ from ``orfc/soft_pq.py``; this
-module only adds the diagnostic forward path and audit check.
+Reuses the PQ implementation from ``orfc/soft_pq.py`` and adds the
+diagnostic forward path, direct orthogonal transform and audit check.
 """
 
 import math
@@ -21,6 +21,7 @@ from soft_pq import (
     SoftPQ, OrthogonalTransform, FeatureTransform, FeatureCodec,
     FrozenTail, save_codec as _save_codec_base, load_codec as _load_codec_base,
 )
+from cayley import DirectOrthogonalTransform
 from multimode_pq import MultiModeSoftPQ
 
 
@@ -332,6 +333,8 @@ def load_codec_v1(path, device='cuda'):
         ttype = meta.get('transform_type')
         if ttype == 'OrthogonalTransform':
             transform = OrthogonalTransform(meta['D'])
+        elif ttype == 'DirectOrthogonalTransform':
+            transform = DirectOrthogonalTransform(meta['D'])
         elif ttype == 'FeatureTransform':
             transform = FeatureTransform(meta['D_in'], meta['D_out'])
     codec = FeatureCodecV1(pq, transform)

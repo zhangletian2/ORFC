@@ -32,6 +32,7 @@ train_one() {
     --hard-images 128 --hard-image-offset 0 --hard-batch-size 16 \
     --allocations 8 --allocation-chunk 8 \
     --tau-start 0.5 --tau-end 0.005 --schedule-unit epoch --lr 0.0003 \
+    --rotation-lr "${ROTATION_LR:-0.0003}" \
     --monotonic-tolerance 0.001 --remainder-grad-ratio "$ratio" \
     --dynamic-allocations --dynamic-single 32 --dynamic-random 32 \
     >"$OUT/logs/$name.log" 2>&1

@@ -4,16 +4,18 @@ Branch: `dev`
 
 Current pipeline:
 
-1. `p1_fixed_rate.py` learns an OPQ rotation or starts from identity, then runs
-   every mode's K-means in that effective rotation's coordinates.
+1. `p1_fixed_rate.py` learns an OPQ rotation or starts from identity, stores
+   the effective matrix directly, then runs every mode's K-means in those
+   coordinates.
 2. `fixed_rate_remainder.py` measures
    \(D=\Phi+M+C+N\) on hard allocations.
 3. `allocation_train.py warmup` freezes the clean OPQ/identity rotation and
    task-aligns every independently initialized mode codebook.
 4. `allocation_train.py short` jointly updates the rotation and all codebooks
-   using exact tail distortion at the current analytic target. The recovery
-   auxiliary acts only on the rotation and conflicting auxiliary gradients are
-   projected away from the primary distortion gradient.
+   using exact tail distortion at the current analytic target. Codebooks use
+   Adam; the rotation uses Cayley-SGD directly on the orthogonal manifold.
+   The recovery auxiliary acts only on the rotation, and conflicts are removed
+   after both rotation gradients are projected to the tangent space.
 5. `run_allocation_full.sh` extends the accepted short configuration to the
    original 5k-scale protocol (4.5k optimisation plus 500 held-out validation)
    with 100 epochs, temperature annealing and a fixed hard-validation trace.

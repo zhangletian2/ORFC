@@ -6,9 +6,11 @@ from argparse import Namespace
 import numpy as np
 import torch
 
+from cayley import CayleySGD, DirectOrthogonalTransform
 from allocation_train import (
     _allocation_source, _curve_report, _design, _dynamic_source,
     _objective_terms, _positive_fit, _protect_primary, _select_state,
+    _tangent_gradient,
 )
 from fixed_rate_remainder import (
     decompose_output_vectors, validate_fixed_total_rate,
@@ -97,6 +99,30 @@ def test_primary_gradient_protection():
     assert torch.dot(primary, protected).abs() < 1e-7
 
 
+def test_direct_cayley_descent_and_orthogonality():
+    torch.manual_seed(42)
+    transform = DirectOrthogonalTransform(8).double()
+    target, _ = torch.linalg.qr(torch.randn(8, 8, dtype=torch.float64))
+    optimizer = CayleySGD(
+        [transform.rotation], lr=0.05, reorthogonalize_every=10)
+    initial = (transform.rotation - target).square().sum().item()
+    for _ in range(20):
+        optimizer.zero_grad(set_to_none=True)
+        loss = (transform.rotation - target).square().sum()
+        loss.backward()
+        optimizer.step()
+    assert loss.item() < initial
+    assert transform.orth_error() < 1e-10
+
+
+def test_rotation_gradient_is_tangent():
+    rotation, _ = torch.linalg.qr(torch.randn(8, 8))
+    tangent = _tangent_gradient(rotation, torch.randn(8, 8))
+    assert torch.allclose(
+        rotation.t() @ tangent + tangent.t() @ rotation,
+        torch.zeros(8, 8), atol=1e-5)
+
+
 def test_remainder_decomposition():
     response = torch.tensor([[[[1.0, 0.0]], [[0.0, 2.0]]]])
     delta = response.sum(1)
@@ -114,5 +140,7 @@ if __name__ == "__main__":
     test_fixed_rate_and_curve_contracts()
     test_dynamic_pool_and_selection_objective()
     test_primary_gradient_protection()
+    test_direct_cayley_descent_and_orthogonality()
+    test_rotation_gradient_is_tangent()
     test_remainder_decomposition()
     print("PASS: allocation contracts")

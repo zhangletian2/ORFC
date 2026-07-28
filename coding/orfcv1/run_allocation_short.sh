@@ -53,6 +53,7 @@ short_run() {
     --refresh-images 32 --hard-images 64 --hard-image-offset 64 \
     --allocations 64 --allocation-chunk 4 --dynamic-allocations \
     --monotonic-tolerance 0.001 \
+    --rotation-lr "${ROTATION_LR:-0.00001}" \
     --remainder-grad-ratio "$ratio" \
     >"$OUT/logs/$name.log" 2>&1
 }

@@ -10,6 +10,9 @@
 
 ## Candidate-bound short training
 
+- Audit Cayley-SGD against the former skew-Cayley/Adam path: require finite
+  gradients, stable orthogonality, lower rotation-step time and no regression
+  in the exact initial distortion before short training is accepted.
 - Compare candidate-only and candidate-plus-remainder from the same repaired
   checkpoint, seed and train/validation split.
 - Jointly update \(U\) and all mode codebooks for reconstruction; route the

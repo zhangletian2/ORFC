@@ -10,6 +10,7 @@ import numpy as np
 import torch
 from scipy.optimize import lsq_linear
 
+from cayley import CayleySGD, DirectOrthogonalTransform
 from codec_v1 import load_codec_v1, save_codec_v1
 from fixed_rate_remainder import allocation_rates
 from opq import batch_inv_normalize_gpu, batch_normalize_gpu
@@ -163,7 +164,7 @@ def command_warmup(args):
     allocations = _uniform_allocations(codec)
     before = _hard_eval(
         codec, tail, val_x, val_y, allocations, args)
-    rotation = codec.transform.triu_params.detach().clone()
+    rotation = codec.transform.get_rotation().detach().clone()
     scale = max(float(before.mean()), 1.0)
     codec.requires_grad_(False)
     params = [quantizer.codebooks for quantizer in codec.pq.quantizers]
@@ -188,7 +189,7 @@ def command_warmup(args):
                 "step": step + 1, "loss": float(loss),
                 "grad_norm": float(grad)})
     after = _hard_eval(codec, tail, val_x, val_y, allocations, args)
-    rotation_exact = torch.equal(codec.transform.triu_params, rotation)
+    rotation_exact = torch.equal(codec.transform.get_rotation(), rotation)
     if not rotation_exact:
         raise RuntimeError("warmup changed the frozen rotation")
     save_codec_v1(codec, args.checkpoint)
@@ -339,25 +340,39 @@ def _loss(codec, tail, batch, state, args, remainder_weight):
 
 def _joint_parameters(codec):
     codec.requires_grad_(False)
-    codec.transform.triu_params.requires_grad_(True)
-    params = [codec.transform.triu_params]
+    if not isinstance(codec.transform, DirectOrthogonalTransform):
+        raise TypeError(
+            "allocation training requires DirectOrthogonalTransform")
+    rotation = codec.transform.rotation
+    rotation.requires_grad_(True)
+    codebooks = []
     for quantizer in codec.pq.quantizers:
         quantizer.codebooks.requires_grad_(True)
-        params.append(quantizer.codebooks)
-    return params
+        codebooks.append(quantizer.codebooks)
+    return rotation, codebooks
 
 
-def _calibrate_remainder(codec, tail, batch, state, args, params):
+def _tangent_gradient(rotation, gradient):
+    if gradient is None:
+        return None
+    value = rotation.detach()
+    product = value.t() @ gradient
+    return gradient - value @ (0.5 * (product + product.t()))
+
+
+def _calibrate_remainder(codec, tail, batch, state, args, rotation):
     if args.remainder_grad_ratio < 0:
         return args.remainder_weight
     _, terms = _loss(codec, tail, batch, state, args, 0.0)
-    targets = params[:1]
     base = torch.autograd.grad(
-        terms["base"], targets, retain_graph=True, allow_unused=True)
+        terms["base"], rotation, retain_graph=True, allow_unused=True)[0]
     remainder = torch.autograd.grad(
-        terms["recovery"], targets, allow_unused=True)
-    norm = lambda values: torch.sqrt(sum(
-        value.square().sum() for value in values if value is not None))
+        terms["recovery"], rotation, allow_unused=True)[0]
+    base = _tangent_gradient(rotation, base)
+    remainder = _tangent_gradient(rotation, remainder)
+    norm = lambda value: (
+        value.norm() if value is not None
+        else torch.zeros((), device=rotation.device))
     base_norm, remainder_norm = norm(base), norm(remainder)
     codec.zero_grad(set_to_none=True)
     return (
@@ -378,16 +393,21 @@ def _protect_primary(auxiliary, primary):
     return auxiliary, float(cosine), bool(dot < 0)
 
 
-def _backward(terms, params, remainder_weight):
+def _backward(terms, rotation, remainder_weight):
     terms["base"].backward(retain_graph=True)
+    primary = _tangent_gradient(rotation, rotation.grad)
+    rotation.grad = primary
     if remainder_weight <= 0:
         return 0.0, False
     gradient = torch.autograd.grad(
-        terms["recovery"], params[0], allow_unused=True)[0]
+        terms["recovery"], rotation, allow_unused=True)[0]
+    gradient = _tangent_gradient(rotation, gradient)
     gradient, cosine, projected = _protect_primary(
-        gradient, params[0].grad)
-    if gradient is not None:
-        params[0].grad.add_(gradient, alpha=remainder_weight)
+        gradient, primary)
+    if gradient is not None and primary is None:
+        rotation.grad = remainder_weight * gradient
+    elif gradient is not None:
+        rotation.grad.add_(gradient, alpha=remainder_weight)
     return cosine, projected
 
 
@@ -455,8 +475,14 @@ def command_short(args):
     calibration = np.load(args.calibration, allow_pickle=False)
     audit = _allocation_source(calibration["allocations"], calibration)
     bits = np.log2(codec.pq.mode_sizes).astype(int)
-    params = _joint_parameters(codec)
-    optimizer = torch.optim.Adam(params, lr=args.lr)
+    rotation, codebooks = _joint_parameters(codec)
+    params = [rotation, *codebooks]
+    rotation_lr = args.rotation_lr or args.lr
+    rotation_optimizer = CayleySGD(
+        [rotation], lr=rotation_lr,
+        fixed_point_iterations=args.cayley_iterations,
+        reorthogonalize_every=args.reorthogonalize_every)
+    codebook_optimizer = torch.optim.Adam(codebooks, lr=args.lr)
     rng = np.random.default_rng(args.seed)
     refresh_x = train_x[:args.refresh_images]
     refresh_y = train_y[:args.refresh_images]
@@ -494,14 +520,18 @@ def command_short(args):
         args.epochs
         if args.schedule_unit == "epoch" and args.epochs > 0
         else total_steps)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=max(schedule_length, 1), eta_min=args.lr * 0.01)
+    rotation_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        rotation_optimizer, T_max=max(schedule_length, 1),
+        eta_min=rotation_lr * 0.01)
+    codebook_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        codebook_optimizer, T_max=max(schedule_length, 1),
+        eta_min=args.lr * 0.01)
     args.pq_temperature = args.tau_start
     calibration_batch = _sample(
         train_x, train_y, args.images, np.random.default_rng(args.seed + 1),
         device, args.norm_mode, np.arange(min(args.images, len(train_x))))
     remainder_weight = _calibrate_remainder(
-        codec, tail, calibration_batch, state, args, params)
+        codec, tail, calibration_batch, state, args, rotation)
     history, active, refresh = [], [], 0
     initial_terms = _objective_terms(
         before_val_D, audit_state, args, remainder_weight)
@@ -516,18 +546,21 @@ def command_short(args):
         args.pq_temperature = temperature
         batch = _sample(
             train_x, train_y, args.images, rng, device, args.norm_mode, ids)
-        optimizer.zero_grad(set_to_none=True)
+        rotation_optimizer.zero_grad(set_to_none=True)
+        codebook_optimizer.zero_grad(set_to_none=True)
         loss, terms = _loss(
             codec, tail, batch, state, args, remainder_weight)
         gradient_cosine, gradient_projected = _backward(
-            terms, params, remainder_weight)
+            terms, rotation, remainder_weight)
         grad = torch.nn.utils.clip_grad_norm_(params, args.grad_clip)
-        optimizer.step()
+        codebook_optimizer.step()
+        rotation_optimizer.step()
         if (
             args.schedule_unit == "step" or not steps_per_epoch
             or (step + 1) % steps_per_epoch == 0
         ):
-            scheduler.step()
+            rotation_scheduler.step()
+            codebook_scheduler.step()
         if step == 0 or (step + 1) % args.log_steps == 0:
             history.append({
                 "step": step + 1, "loss": float(loss),
@@ -537,6 +570,9 @@ def command_short(args):
                 "grad_norm": float(grad),
                 "gradient_cosine": gradient_cosine,
                 "gradient_projected": gradient_projected,
+                "rotation_step_size": rotation_optimizer.state[
+                    rotation].get("last_step_size"),
+                "orthogonality_frobenius": codec.transform.orth_error(),
                 "remainder_weight": remainder_weight,
                 "training_pool_size": int(
                     len(training_source["allocations"])),
@@ -616,6 +652,10 @@ def command_short(args):
         "audit_allocation_count": int(len(audit["allocations"])),
         "epochs": args.epochs, "train_images": args.train_images,
         "batch_size": args.images, "learning_rate": args.lr,
+        "rotation_learning_rate": rotation_lr,
+        "rotation_optimizer": "CayleySGD",
+        "cayley_iterations": args.cayley_iterations,
+        "reorthogonalize_every": args.reorthogonalize_every,
         "tau": [args.tau_start, args.tau_end],
         "schedule_unit": args.schedule_unit,
         "total_steps": total_steps,
@@ -679,6 +719,9 @@ def parser():
     short.add_argument("--reference-bit", type=int, default=6)
     short.add_argument("--remainder-weight", type=float, default=0.0)
     short.add_argument("--remainder-grad-ratio", type=float, default=-1.0)
+    short.add_argument("--rotation-lr", type=float)
+    short.add_argument("--cayley-iterations", type=int, default=5)
+    short.add_argument("--reorthogonalize-every", type=int, default=100)
     short.add_argument("--recovery-fraction", type=float, default=1.0)
     short.add_argument("--dynamic-allocations", action="store_true")
     short.add_argument("--dynamic-single", type=int, default=32)
