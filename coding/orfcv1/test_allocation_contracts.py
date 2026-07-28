@@ -138,12 +138,17 @@ def test_dynamic_pool_and_selection_objective():
         recovery_margin=0.0, candidate_mean_weight=0.0)
     distortion = np.asarray([5.0, 3.0, 4.0])
     state = _select_state(audit, distortion, calibration, select_args)
+    assert state["operational_best"] == int(distortion.argmin())
     terms = _objective_terms(
         distortion[state["selected"]], state, select_args, 0.5)
     assert terms["score"] >= terms["base"] and terms["omega"] >= 0
     assert terms["empirical_margin"] == 1.0
     select_args.primary_target = "operational_best"
     select_args.candidate_mean_weight = 0.0
+    terms = _objective_terms(
+        distortion[state["selected"]], state, select_args, 0.5)
+    assert np.isclose(terms["base"], terms["operational_best"])
+    select_args.primary_target = "outer_operational_best"
     terms = _objective_terms(
         distortion[state["selected"]], state, select_args, 0.5)
     assert np.isclose(terms["base"], terms["operational_best"])
@@ -169,6 +174,8 @@ def test_primary_gradient_protection():
     protected, cosine, projected = _protect_primary(auxiliary, primary)
     assert projected and cosine < 0
     assert torch.dot(primary, protected).abs() < 1e-7
+    _, cosine, _ = _protect_primary(torch.zeros(2), torch.zeros(2))
+    assert np.isfinite(cosine)
 
 
 def test_joint_recovery_gradients():

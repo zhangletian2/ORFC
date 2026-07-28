@@ -36,7 +36,7 @@ run_one() {
     --dynamic-allocations --dynamic-single 32 --dynamic-random 32 \
     --ideal-set-size "${IDEAL_SET_SIZE:-256}" \
     --ideal-batch-size "${IDEAL_BATCH_SIZE:-16}" \
-    --primary-target "${PRIMARY_TARGET:-operational_best}" \
+    --primary-target "${PRIMARY_TARGET:-outer_operational_best}" \
     --candidate-mean-weight "${CANDIDATE_MEAN_WEIGHT:-0}" \
     --recovery-margin 0 --remainder-grad-ratio "$ratio" \
     --rotation-lr 0.00001 --lr 0.00001 \

@@ -319,6 +319,7 @@ def _select_state(source, distortion, calibration, args):
         raise RuntimeError("ideal set does not contain the ideal minimizer")
     outside = np.setdiff1d(np.arange(len(phi)), target_set)
     target = int(target_set[np.argmin(distortion[target_set])])
+    operational_best = int(np.argmin(distortion))
     active_count = min(
         getattr(args, "ideal_batch_size", len(target_set)),
         len(target_set))
@@ -337,7 +338,8 @@ def _select_state(source, distortion, calibration, args):
     edge = max(2, args.allocations // 4)
     selected = (
         set(order[:edge]) | set(order[-edge:])
-        | set(map(int, minimizers)) | set(map(int, active_targets)))
+        | set(map(int, minimizers)) | set(map(int, active_targets))
+        | {operational_best})
     outside_bits = np.asarray(
         calibration.get("ideal_set_outside_bits", np.empty(0)))
     if outside_bits.size:
@@ -376,6 +378,8 @@ def _select_state(source, distortion, calibration, args):
         "phi": phi[selected], "full_phi": phi,
         "target": target, "target_set": target_set,
         "active_target_set": active_targets,
+        "operational_best": operational_best,
+        "operational_best_local": local[operational_best],
         "minimizers": minimizers,
         "target_local": target_local,
         "target_set_local": target_set_local,
@@ -441,10 +445,8 @@ def _objective_terms(distortion, state, args, remainder_weight):
         state["distortion_scale"])
     candidate = target_value / state["distortion_scale"]
     operational_best = float(D.min()) / state["distortion_scale"]
-    primary = (
-        operational_best
-        if getattr(args, "primary_target", "ideal_set") == "operational_best"
-        else candidate)
+    mode = getattr(args, "primary_target", "ideal_set")
+    primary = operational_best if mode != "ideal_set" else candidate
     base = primary + (
         args.candidate_mean_weight * D.mean() / state["distortion_scale"])
     return {
@@ -489,11 +491,11 @@ def _loss(codec, tail, batch, state, args, remainder_weight):
         recovery = candidate.new_zeros(())
         recovery_constraint = candidate.new_zeros(())
         empirical_margin = candidate.new_tensor(float("inf"))
-    operational_best = normalized.min()
-    primary = (
-        operational_best
-        if getattr(args, "primary_target", "ideal_set") == "operational_best"
-        else candidate)
+    mode = getattr(args, "primary_target", "ideal_set")
+    operational_best = (
+        normalized[state["operational_best_local"]]
+        if mode == "outer_operational_best" else normalized.min())
+    primary = operational_best if mode != "ideal_set" else candidate
     base = primary + args.candidate_mean_weight * normalized.mean()
     return base + remainder_weight * recovery, {
         "base": base, "omega": omega, "recovery": recovery,
@@ -559,8 +561,10 @@ def _protect_primary(auxiliary, primary):
         return auxiliary, 0.0, False
     dot = torch.dot(auxiliary.flatten(), primary.flatten())
     denom = primary.square().sum().clamp_min(1e-24)
-    cosine = dot / torch.sqrt(
-        denom * auxiliary.square().sum().clamp_min(1e-24))
+    cosine_denom = torch.sqrt(
+        denom.double() * auxiliary.square().sum().double()
+    ).clamp_min(1e-24)
+    cosine = dot.double() / cosine_denom
     if dot < 0:
         auxiliary = auxiliary - dot / denom * primary
     return auxiliary, float(cosine), bool(dot < 0)
@@ -658,6 +662,9 @@ def _state_report(state):
         for group in range(state["allocations"].shape[1]))
     return {
         "target": int(state["target"]),
+        "operational_best": int(state["operational_best"]),
+        "operational_best_allocation": state["allocations"][
+            state["operational_best_local"]].tolist(),
         "target_allocation": state["allocations"][
             state["target_local"]].tolist(),
         "target_phi": float(state["phi"][state["target_local"]]),
@@ -1068,7 +1075,8 @@ def parser():
     short.add_argument("--recovery-margin", type=float, default=0.0)
     short.add_argument("--candidate-mean-weight", type=float, default=0.0)
     short.add_argument(
-        "--primary-target", choices=("ideal_set", "operational_best"),
+        "--primary-target",
+        choices=("ideal_set", "operational_best", "outer_operational_best"),
         default="ideal_set")
     short.add_argument("--ideal-set-size", type=int, default=16)
     short.add_argument("--ideal-batch-size", type=int, default=16)
