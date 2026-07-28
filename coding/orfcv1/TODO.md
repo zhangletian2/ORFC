@@ -40,25 +40,46 @@
 - Select the ideal-set size from an independent bootstrap stability audit.
   Report nominal Top-K coverage of bootstrap optima and fail the calibration
   gate when the requested probability mass cannot fit the trainable set.
-- Use 300 calibration images, a disjoint 64-image hard-mining slice and a
-  later optimisation slice in the next short experiment. Evaluate the complete
-  Top-256 set only at outer refreshes and use an active 16-member subset for
-  inner gradients.
-- Run the paired `primary_only` versus `primary_recovery` short experiment from
-  `run_outer_inner_short.sh`. Do not start full optimisation until held-out
-  target distortion is non-inferior and the empirical recovery margin improves.
+- The paired Top-256/active-16 short gate is complete. Its final accepted run
+  uses 300 calibration images, 300 disjoint hard-mining images, a later
+  512-image optimisation slice and 300 independent validation images.
+- Preserve the accepted outer operational anchor: recompute it only on the
+  300-image hard-mining slice, then hold it fixed inside the following inner
+  block. Keep the primary gradient protected from the recovery auxiliary.
+- Treat Top-256 as an 84.38%-coverage empirical set. Before a stronger recovery
+  claim, compare uncertainty-aware Top-338/Top-512 or a bootstrap union while
+  keeping the exact feasible-space count and `strict_recovery_certified=false`.
 
-## Full optimisation
+## Next stage before full optimisation
 
-- Use the original 5k-scale pool as 4.5k optimisation plus 500 held-out
-  validation images; test remains isolated.
+- Do not run the current `run_allocation_full.sh`; it still implements the old
+  single-target/no-outer-refresh protocol.
+- First add a medium-duration paired gate that inherits the accepted
+  Top-256/active-16 objective, 300-image ideal calibration, 300-image outer
+  hard mining, fixed outer operational anchor and mutually disjoint inner and
+  validation slices.
+- Recalibrate the recovery weight after each outer refresh. The current short
+  path calibrates it only at initialization, which is insufficient for a long
+  run whose ideal table, active set and hard competitors change.
+- Refresh the outer table and operational anchor periodically rather than on
+  every inner epoch; record every anchor switch, auxiliary weight and
+  primary/recovery gradient cosine.
+- Accept the medium gate only if the independent operational-best distortion
+  is non-inferior, the ideal-set best and sampled margin improve, menu
+  monotonicity holds and no result is presented as a global certificate.
+
+## Full optimisation after the medium gate
+
+- Use the original 5k-scale pool while reserving disjoint calibration,
+  hard-mining and held-out validation subsets; test remains isolated.
 - Match ORFC's batch 32, 100 epochs, `3e-4` learning rate, gradient clipping
   and epoch-wise `0.5 -> 0.005` PQ-temperature/LR schedules.
-- Keep the 261 allocations fixed as an audit set. Refresh a separate training
-  allocation pool once per epoch.
-- Record the complete hard validation objective once per epoch, but always
-  deliver the final training state. Accept the optimisation only when its
-  final candidate distortion and remainder range improve over initialization.
+- Use exact Top-K sets plus independent exact-uniform allocation samples for
+  empirical audit. Do not retain the historical fixed 261-pool contract.
+- Record the complete hard validation objective at each outer refresh and
+  deliver the final training state. Accept only when final operational-best
+  distortion, ideal-set distortion and empirical recovery margin meet the
+  paired validation gates.
 
 ## Final acceptance
 

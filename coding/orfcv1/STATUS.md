@@ -29,11 +29,10 @@ Current pipeline:
    conflicting gradients are projected against the primary distortion
    gradient, with the rotation gradients first mapped to the tangent space.
    Full tail distortion never refits the ideal table inside an inner block.
-5. `run_allocation_full.sh` extends the accepted short configuration to the
-   original 5k-scale protocol (4.5k optimisation plus 500 held-out validation)
-   with 100 epochs, temperature annealing and a fixed hard-validation trace.
-   It always returns the final training state instead of rolling back to an
-   earlier checkpoint.
+5. `run_allocation_full.sh` is retained as a stale historical driver. It does
+   not yet inherit the accepted Top-256/active-16 objective, 300-image outer
+   mining, fixed outer operational anchor or disjoint data slices, and must not
+   be used for the next full experiment.
 6. `eval_v1_1_all.py` evaluates a frozen non-uniform allocation on downstream
    classification and segmentation tasks.
 7. `ideal_set_statistics.py` measures bootstrap stability of the ideal
@@ -89,7 +88,28 @@ but the 64-image and 300-image nominal Top-16 sets were disjoint. Outer
 calibration therefore requires more than 64 images before another training
 claim is made.
 
-For the next short run, the statistical outer set is nominal Top-256 and the
-inner active set is 16. On the 300-image calibration, Top-256 contains 84.38%
-of bootstrap optima; this is a measured stability level, not a 95% confidence
-guarantee.
+The final short gate is
+`statset256_mining300_20260728T180555Z`. It uses disjoint 300-image ideal
+calibration, 300-image hard mining, 512-image inner optimisation and
+300-image independent validation. The exact ideal Top-256 set is used outside
+and 16 active members inside. Both arms selected uniform 6-bit as the outer
+operational anchor.
+
+On 300 independent images and 843 common allocations, recovery minus
+primary-only changed:
+
+- uniform 6-bit distortion by -2.37, CI95 [-6.25, 1.23];
+- exact-uniform-512 mean distortion by -2.89, CI95 [-4.28, -1.60];
+- common-candidate mean distortion by -5.14, CI95 [-7.90, -2.50];
+- Top-256 best distortion by -8.53, CI95 [-14.29, -3.31];
+- empirical inside-versus-outside margin by +6.17, CI95 [0.87, 11.47];
+- common-candidate remainder range by -3.42, CI95 [-10.65, 1.93].
+
+The short gate therefore passes as an incremental empirical objective: it
+improves the ideal-set candidates and sampled recovery margin without a
+detectable regression at the operational best allocation. It does not certify
+recovery. Uniform 6-bit remains outside the nominal Top-256 and is the
+empirical optimum; the sampled remainder-range-to-ideal-gap ratio is about
+772. The complete feasible space contains
+84,225,312,014,367,853,059,837 allocations, so no finite pool used here is a
+strict search-space reduction.
