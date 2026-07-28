@@ -29,6 +29,7 @@ run_one() {
     --outer-mining-offset 64 --outer-batch-size 4 \
     --outer-group-chunk 8 --outer-eps 0.01 \
     --dynamic-allocations --dynamic-single 32 --dynamic-random 32 \
+    --ideal-set-size "${IDEAL_SET_SIZE:-16}" \
     --candidate-mean-weight 0.1 --margin-temperature 0.01 \
     --recovery-margin 0 --remainder-grad-ratio "$ratio" \
     --rotation-lr 0.00001 --lr 0.00001 \

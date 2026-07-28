@@ -19,9 +19,10 @@ Current pipeline:
    task-aligns every independently initialized mode codebook.
 4. `allocation_train.py short` jointly updates the rotation and all codebooks.
    With `--outer-refresh`, each outer block recomputes the discrete JVP table,
-   exact ideal allocation and hard fixed-rate competitors on reserved training
-   images.  The inner block minimizes ideal-target distortion and a smooth
-   empirical recovery violation. Codebooks use
+   exact Top-K ideal allocation set and hard fixed-rate competitors on reserved
+   training images.  The inner block minimizes a soft minimum over the ideal
+   set and the empirical violation between the best set member and best
+   sampled outside competitor. Codebooks use
    Adam; the rotation uses Cayley-SGD directly on the orthogonal manifold.
    The recovery auxiliary updates both the rotation and every active codebook;
    conflicting gradients are projected against the primary distortion
@@ -52,13 +53,15 @@ Measurement contract:
 
 - `ideal_gap` is the exact best-versus-runner-up gap over every feasible
   finite-menu allocation, computed by Top-2 dynamic programming.
+- `ideal_set_gap` is the exact ideal-cost separation between the best
+  allocation and the first allocation outside the Top-K ideal set.
 - `omega_sampled` is the observed range of \(E=D-\Phi\) over the saved
-  allocation pool and is therefore a lower bound on the global remainder
-  range.
+  allocation pool. It is a lower bound on the global remainder range, so the
+  fixed audit pool is empirical even when Top-K ideal members are exact.
 - The recovery condition can only be certified after a valid upper bound on
   the global remainder range is available.
-- The exact ideal runner-up is always included in the measured allocation
-  pool, so the sampled and exact ideal gaps agree.
+- Every exact Top-K member and the first ideal-cost allocation outside that
+  set are always included in the sampled pool.
 
 Outer/inner smoke:
 
@@ -67,3 +70,9 @@ Outer/inner smoke:
   and all six mode codebooks while preserving menu monotonicity;
 - the 4-image held-out empirical margin moved from -12426.8 to -12409.2.
   This is a gradient-path smoke only, not an effectiveness result.
+
+The 10-step single-target formal pair reduced the fixed-pool remainder range
+only with the recovery auxiliary, but its held-out target distortion was
+7.37 higher than primary-only (95% CI [1.07, 13.68]).  The near-zero
+best-versus-runner-up ideal gap made the single target unstable; this motivated
+the Top-K set objective.

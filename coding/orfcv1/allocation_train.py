@@ -14,7 +14,7 @@ from codec_v1 import load_codec_v1, save_codec_v1
 from fixed_rate_remainder import allocation_rates
 from opq import batch_inv_normalize_gpu, batch_normalize_gpu
 from p1_fixed_rate import (
-    build_tail, estimate_c, make_allocations, top2_cost_allocate,
+    build_tail, estimate_c, make_allocations, topk_cost_allocate,
 )
 
 
@@ -44,6 +44,75 @@ def _ideal_phi(source, calibration):
         return table[groups, allocations].sum(1)
     A = _design(source["rates"], int(calibration["rate_dimension"]))
     return A @ np.asarray(calibration["c_g"], dtype=np.float64)
+
+
+def _ideal_table(calibration):
+    if "ideal_cost_table" in calibration:
+        return np.asarray(calibration["ideal_cost_table"], dtype=np.float64)
+    bits = np.asarray(calibration["mode_bits"], dtype=np.float64)
+    c = np.asarray(calibration["c_g"], dtype=np.float64)
+    dimension = int(calibration["rate_dimension"])
+    return c[:, None] * np.exp2(-2.0 * bits[None] / dimension)
+
+
+def _with_ideal_set(calibration, args):
+    """Attach an exact Top-K ideal set and its separation from the complement."""
+    if args.ideal_set_size < 1:
+        raise ValueError("ideal-set-size must be positive")
+    updated = dict(calibration)
+    bits = tuple(map(int, calibration["mode_bits"]))
+    budget = int(np.asarray(calibration["ideal_bits"]).sum())
+    top = topk_cost_allocate(
+        _ideal_table(calibration), bits, budget, args.ideal_set_size + 1)
+    count = min(args.ideal_set_size, len(top["bits"]))
+    members = top["bits"][:count]
+    outside = top["bits"][count] if len(top["bits"]) > count else np.empty(0)
+    outside_value = (
+        float(top["values"][count])
+        if len(top["values"]) > count else float("inf"))
+    second = top["bits"][1] if len(top["bits"]) > 1 else np.empty(0)
+    second_value = (
+        float(top["values"][1]) if len(top["values"]) > 1 else float("inf"))
+    updated.update({
+        "ideal_bits": members[0],
+        "ideal_value": np.asarray(top["values"][0]),
+        "second_bits": second,
+        "second_value": np.asarray(second_value),
+        "ideal_gap": np.asarray(second_value - top["values"][0]),
+        "ideal_set_bits": members,
+        "ideal_set_values": top["values"][:count],
+        "ideal_set_outside_bits": outside,
+        "ideal_set_gap": np.asarray(outside_value - top["values"][0]),
+    })
+    return updated
+
+
+def _ideal_anchor_modes(calibration):
+    lookup = {
+        int(bit): index
+        for index, bit in enumerate(calibration["mode_bits"])}
+    rows = np.atleast_2d(calibration.get(
+        "ideal_set_bits", calibration["ideal_bits"]))
+    outside = np.asarray(
+        calibration.get("ideal_set_outside_bits", np.empty(0)))
+    if outside.size:
+        rows = np.concatenate([rows, outside[None]], axis=0)
+    return np.asarray([
+        [lookup[int(bit)] for bit in row] for row in rows
+    ], dtype=np.int64)
+
+
+def _feasible_count(groups, mode_bits, budget):
+    counts = {0: 1}
+    for _ in range(groups):
+        next_counts = {}
+        for used, count in counts.items():
+            for bit in mode_bits:
+                total = used + int(bit)
+                if total <= budget:
+                    next_counts[total] = next_counts.get(total, 0) + count
+        counts = next_counts
+    return counts.get(budget, 0)
 
 
 def _sample(features, teachers, count, rng, device, norm_mode, ids=None):
@@ -209,33 +278,38 @@ def _select_state(source, distortion, calibration, args):
     tolerance = max(
         args.tie_atol, args.tie_rtol * max(abs(float(phi.min())), 1.0))
     minimizers = np.flatnonzero(phi <= phi.min() + tolerance)
-    outside = np.setdiff1d(
-        np.arange(len(phi)), minimizers, assume_unique=True)
-    gap = float(calibration["ideal_gap"])
     lookup = {
         int(bit): index
         for index, bit in enumerate(calibration["mode_bits"])}
-    target_modes = np.asarray(
-        [lookup[int(bit)] for bit in calibration["ideal_bits"]])
-    hits = np.flatnonzero(np.all(
-        source["allocations"] == target_modes, axis=1))
-    if len(hits) != 1:
-        raise ValueError("allocation pool must contain the fixed ideal solution")
-    target = int(hits[0])
-    if target not in minimizers:
-        raise RuntimeError("fixed ideal solution does not minimize fixed Phi")
+    target_bits = np.atleast_2d(calibration.get(
+        "ideal_set_bits", calibration["ideal_bits"]))
+    target_set = []
+    for row in target_bits:
+        modes = np.asarray([lookup[int(bit)] for bit in row])
+        hits = np.flatnonzero(np.all(source["allocations"] == modes, axis=1))
+        if len(hits) != 1:
+            raise ValueError(
+                "allocation pool must contain every ideal-set member")
+        target_set.append(int(hits[0]))
+    target_set = np.asarray(sorted(set(target_set)), dtype=int)
+    if not np.intersect1d(target_set, minimizers).size:
+        raise RuntimeError("ideal set does not contain the ideal minimizer")
+    outside = np.setdiff1d(np.arange(len(phi)), target_set)
+    target = int(target_set[np.argmin(distortion[target_set])])
+    gap = float(calibration.get(
+        "ideal_set_gap", calibration["ideal_gap"]))
     order = np.argsort(remainder)
     edge = max(2, args.allocations // 4)
     selected = (
         set(order[:edge]) | set(order[-edge:])
-        | set(map(int, minimizers)) | {target})
-    if "second_bits" in calibration:
-        second_modes = np.asarray(
-            [lookup[int(bit)] for bit in calibration["second_bits"]])
-        second_hits = np.flatnonzero(np.all(
-            source["allocations"] == second_modes, axis=1))
-        if len(second_hits) == 1:
-            selected.add(int(second_hits[0]))
+        | set(map(int, minimizers)) | set(map(int, target_set)))
+    outside_bits = np.asarray(
+        calibration.get("ideal_set_outside_bits", np.empty(0)))
+    if outside_bits.size:
+        modes = np.asarray([lookup[int(bit)] for bit in outside_bits])
+        hits = np.flatnonzero(np.all(source["allocations"] == modes, axis=1))
+        if len(hits) == 1:
+            selected.add(int(hits[0]))
     distortion_order = outside[np.argsort(distortion[outside])]
     selected.update(map(int, distortion_order[:edge]))
     selected.update(map(int, distortion_order[-edge:]))
@@ -253,17 +327,22 @@ def _select_state(source, distortion, calibration, args):
     selected = np.asarray(sorted(selected), dtype=int)
     local = {index: position for position, index in enumerate(selected)}
     target_local = local[target]
+    target_set_local = np.asarray([
+        local[int(index)] for index in target_set], dtype=int)
+    target_local_set = set(map(int, target_set_local))
     competitor_local = np.asarray([
         position for position in range(len(selected))
-        if position != target_local], dtype=int)
+        if position not in target_local_set], dtype=int)
     empirical_margin = (
-        float(np.min(distortion[outside] - distortion[target]))
+        float(distortion[outside].min() - distortion[target_set].min())
         if len(outside) else float("inf"))
     return {
         "selected": selected, "allocations": source["allocations"][selected],
         "phi": phi[selected], "full_phi": phi,
-        "target": target, "minimizers": minimizers,
+        "target": target, "target_set": target_set,
+        "minimizers": minimizers,
         "target_local": target_local,
+        "target_set_local": target_set_local,
         "competitor_local": competitor_local,
         "minimizer_local": np.asarray(
             [local[int(index)] for index in minimizers]),
@@ -272,7 +351,7 @@ def _select_state(source, distortion, calibration, args):
         "reference": reference,
         "reference_local": local.get(reference),
         "omega_scale": max(float(np.ptp(remainder)), 1.0),
-        "distortion_scale": max(float(distortion[target]), 1.0),
+        "distortion_scale": max(float(distortion[target_set].min()), 1.0),
     }
 
 
@@ -307,8 +386,9 @@ def _objective_terms(distortion, state, args, remainder_weight):
     D = np.asarray(distortion, dtype=np.float64)
     complete = len(D) == len(state["full_phi"])
     phi = state["full_phi"] if complete else state["phi"]
-    target = state["target"] if complete else state["target_local"]
-    competitors = np.delete(np.arange(len(D)), target)
+    targets = (
+        state["target_set"] if complete else state["target_set_local"])
+    competitors = np.setdiff1d(np.arange(len(D)), targets)
     e = D - phi
     scale = args.lse_temperature * state["omega_scale"]
     high = scale * np.log(np.exp((e - e.max()) / scale).sum()) + e.max()
@@ -317,19 +397,21 @@ def _objective_terms(distortion, state, args, remainder_weight):
         scale * np.log(np.exp((low_e - low_e.max()) / scale).sum())
         + low_e.max())
     omega_raw = high + low - 2 * scale * math.log(len(e))
+    target_value = float(D[targets].min())
     margin = (
-        float(np.min(D[competitors] - D[target]))
+        float(D[competitors].min() - target_value)
         if len(competitors) else float("inf"))
     recovery = max(args.recovery_margin - margin, 0.0) / (
         state["distortion_scale"])
-    candidate = D[target] / state["distortion_scale"]
+    candidate = target_value / state["distortion_scale"]
     base = candidate + (
         args.candidate_mean_weight * D.mean() / state["distortion_scale"])
     return {
         "score": float(base + remainder_weight * recovery),
         "base": float(base), "recovery": float(recovery),
         "omega": float(np.ptp(e)), "gap": float(state["gap"]),
-        "recovery_ratio": float(np.ptp(e) / max(state["gap"], 1e-12)),
+        "sampled_omega_to_set_gap": float(
+            np.ptp(e) / max(state["gap"], 1e-12)),
         "candidate": float(candidate), "empirical_margin": margin,
     }
 
@@ -347,22 +429,32 @@ def _loss(codec, tail, batch, state, args, remainder_weight):
         + scaled_tau * torch.logsumexp(-e / scaled_tau, 0)
         - 2 * scaled_tau * math.log(len(e)))
     omega = omega_raw / state["omega_scale"]
-    target = state["target_local"]
+    targets = torch.as_tensor(
+        state["target_set_local"], device=D.device)
     competitors = torch.as_tensor(
         state["competitor_local"], device=D.device)
-    violations = (
-        D[target] - D[competitors] + args.recovery_margin
-    ) / state["distortion_scale"]
-    recovery = torch.relu(
-        args.margin_temperature * torch.logsumexp(
-            violations / args.margin_temperature, 0))
-    candidate = D[target] / state["distortion_scale"]
+    normalized = D / state["distortion_scale"]
+    temperature = args.margin_temperature
+    candidate = -temperature * (
+        torch.logsumexp(-normalized[targets] / temperature, 0)
+        - math.log(len(targets)))
+    if len(competitors):
+        outside = -temperature * (
+            torch.logsumexp(-normalized[competitors] / temperature, 0)
+            - math.log(len(competitors)))
+        recovery = torch.relu(
+            candidate - outside
+            + args.recovery_margin / state["distortion_scale"])
+        empirical_margin = D[competitors].min() - D[targets].min()
+    else:
+        recovery = candidate.new_zeros(())
+        empirical_margin = candidate.new_tensor(float("inf"))
     base = candidate + (
         args.candidate_mean_weight * D.mean() / state["distortion_scale"])
     return base + remainder_weight * recovery, {
         "base": base, "omega": omega, "recovery": recovery,
         "candidate": candidate,
-        "empirical_margin": (D[competitors] - D[target]).min(),
+        "empirical_margin": empirical_margin,
     }
 
 
@@ -456,12 +548,18 @@ def _report(source, distortion, state, dimension):
     phi = state["full_phi"]
     remainder = distortion - phi
     minimizers = np.asarray(state["minimizers"])
+    targets = np.asarray(state["target_set"])
+    outside = np.setdiff1d(np.arange(len(distortion)), targets)
+    target = int(targets[np.argmin(distortion[targets])])
     gap = state["gap"]
     return {
         "mean_distortion": float(distortion.mean()),
-        "target_index": int(state["target"]),
-        "target_bits": source["rates"][state["target"]].tolist(),
-        "target_distortion": float(distortion[state["target"]]),
+        "target_index": target,
+        "target_bits": source["rates"][target].tolist(),
+        "target_distortion": float(distortion[target]),
+        "ideal_set_indices": targets.tolist(),
+        "ideal_set_count": int(len(targets)),
+        "ideal_set_best_distortion": float(distortion[targets].min()),
         "minimizer_indices": minimizers.tolist(),
         "minimizer_count": int(len(minimizers)),
         "best_minimizer_index": int(
@@ -473,12 +571,14 @@ def _report(source, distortion, state, dimension):
             float(distortion[state["reference"]])
             if state["reference"] is not None else None),
         "omega": float(np.ptp(remainder)),
-        "empirical_margin": float(np.min(
-            np.delete(distortion, state["target"])
-            - distortion[state["target"]])),
+        "empirical_margin": (
+            float(distortion[outside].min() - distortion[targets].min())
+            if len(outside) else float("inf")),
         "set_external_gap": float(gap),
-        "recovery_ratio": float(np.ptp(remainder) / max(gap, 1e-12)),
-        "candidate_count": int(np.count_nonzero(
+        "omega_scope": "sampled_pool",
+        "sampled_omega_to_set_gap": float(
+            np.ptp(remainder) / max(gap, 1e-12)),
+        "sampled_near_ideal_count": int(np.count_nonzero(
             phi - phi.min() <= np.ptp(remainder) + 1e-12)),
     }
 
@@ -511,6 +611,10 @@ def _state_report(state):
         "target_allocation": state["allocations"][
             state["target_local"]].tolist(),
         "target_phi": float(state["phi"][state["target_local"]]),
+        "ideal_set_count": int(len(state["target_set"])),
+        "ideal_set_indices": state["target_set"].tolist(),
+        "ideal_set_allocations": state["allocations"][
+            state["target_set_local"]].tolist(),
         "minimizers": state["minimizers"].tolist(),
         "gap": float(state["gap"]),
         "selected": state["selected"].tolist(),
@@ -540,23 +644,13 @@ def _refresh_ideal(codec, tail, features, calibration, args):
     }
     table = np.stack([
         estimates[bit][1].mean(0) for bit in bits], axis=1)
-    budget = int(round(float(
-        allocation_rates(
-            calibration["allocations"][:1],
-            calibration["cost_table"]).sum())))
-    optimum = top2_cost_allocate(table, bits, budget)
     updated = dict(calibration)
     updated.update({
         "c_g": estimates[args.reference_bit][0],
         "ideal_cost_table": table,
-        "ideal_bits": optimum["ideal_bits"],
-        "second_bits": optimum["second_bits"],
-        "ideal_gap": np.asarray(optimum["ideal_gap"]),
-        "ideal_value": np.asarray(optimum["ideal_value"]),
-        "second_value": np.asarray(optimum["second_value"]),
         "ideal_model": np.asarray("discrete_jvp"),
     })
-    return updated
+    return _with_ideal_set(updated, args)
 
 
 def _refresh_training_state(
@@ -570,6 +664,8 @@ def _refresh_training_state(
     if previous is not None:
         anchors = np.unique(np.concatenate([
             anchors, previous["allocations"]]), axis=0)
+    anchors = np.unique(np.concatenate([
+        anchors, _ideal_anchor_modes(calibration)]), axis=0)
     source = _dynamic_source(
         _allocation_source(anchors, calibration), calibration,
         calibration["c_g"], args, refresh)
@@ -588,8 +684,11 @@ def command_short(args):
         calibration = _calibration_dict(saved)
     if args.outer_refresh and not args.dynamic_allocations:
         raise ValueError("outer refresh requires dynamic allocations")
+    calibration = _with_ideal_set(calibration, args)
     audit_calibration = dict(calibration)
-    audit = _allocation_source(calibration["allocations"], calibration)
+    audit_allocations = np.unique(np.concatenate([
+        calibration["allocations"], _ideal_anchor_modes(calibration)]), axis=0)
+    audit = _allocation_source(audit_allocations, calibration)
     bits = np.log2(codec.pq.mode_sizes).astype(int)
     rotation, codebooks = _joint_parameters(codec)
     params = [rotation, *codebooks]
@@ -709,6 +808,7 @@ def command_short(args):
                 "training_pool_size": int(
                     len(training_source["allocations"])),
                 "target_index": int(state["target"]),
+                "ideal_set_count": int(len(state["target_set"])),
                 "minimizer_count": int(len(state["minimizers"])),
                 "set_external_gap": float(state["gap"]),
                 "epoch": epoch, "temperature": temperature,
@@ -792,8 +892,13 @@ def command_short(args):
             "ideal_cost_table", np.empty((0, 0))),
         final_ideal_bits=calibration["ideal_bits"],
         final_ideal_gap=calibration["ideal_gap"],
+        final_ideal_set_bits=calibration["ideal_set_bits"],
+        final_ideal_set_values=calibration["ideal_set_values"],
+        final_ideal_set_gap=calibration["ideal_set_gap"],
         fixed_audit_target_index=target,
-        final_dynamic_target_index=final_dynamic_state["target"])
+        fixed_audit_target_indices=audit_state["target_set"],
+        final_dynamic_target_index=final_dynamic_state["target"],
+        final_dynamic_target_indices=final_dynamic_state["target_set"])
     _write(args.output, {
         "before": before, "after": after, "menu": curve_report,
         "initial_dynamic": initial_dynamic_report,
@@ -809,6 +914,16 @@ def command_short(args):
         "remainder_parameters": "u+codebooks",
         "dynamic_allocations": args.dynamic_allocations,
         "audit_allocation_count": int(len(audit["allocations"])),
+        "audit_scope": "fixed_empirical_pool",
+        "feasible_allocation_count": str(_feasible_count(
+            codec.pq.G, calibration["mode_bits"],
+            int(np.asarray(calibration["ideal_bits"]).sum()))),
+        "sampled_remainder_is_global_lower_bound": True,
+        "global_remainder_upper_bound": None,
+        "strict_recovery_certified": False,
+        "ideal_set_size": int(len(calibration["ideal_set_bits"])),
+        "ideal_set_definition": "exact_top_k_phi",
+        "recovery_objective": "empirical_best_outside_minus_best_inside",
         "epochs": args.epochs, "train_images": args.train_images,
         "batch_size": args.images, "learning_rate": args.lr,
         "rotation_learning_rate": rotation_lr,
@@ -825,9 +940,11 @@ def command_short(args):
         "outer_mining_images": args.outer_mining_images,
         "candidate_mean_weight": args.candidate_mean_weight,
         "recovery_margin": args.recovery_margin,
-        "final_target_paired_delta": float(paired.mean()),
-        "final_target_paired_delta_ci95": [
+        "fixed_member_paired_delta": float(paired.mean()),
+        "fixed_member_paired_delta_ci95": [
             float(paired.mean() - half), float(paired.mean() + half)],
+        "paired_member_selection": (
+            "lowest training-audit distortion in initial ideal set"),
         "checkpoint": args.checkpoint, "arrays": str(array_path),
     })
 
@@ -883,6 +1000,7 @@ def parser():
     short.add_argument("--margin-temperature", type=float, default=0.01)
     short.add_argument("--recovery-margin", type=float, default=0.0)
     short.add_argument("--candidate-mean-weight", type=float, default=0.0)
+    short.add_argument("--ideal-set-size", type=int, default=16)
     short.add_argument("--reference-bit", type=int, default=6)
     short.add_argument("--remainder-weight", type=float, default=0.0)
     short.add_argument("--remainder-grad-ratio", type=float, default=-1.0)

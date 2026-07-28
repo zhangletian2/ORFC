@@ -11,12 +11,14 @@ from cayley import CayleySGD, DirectOrthogonalTransform
 from allocation_train import (
     _allocation_source, _backward, _curve_report, _dynamic_source,
     _objective_terms, _protect_primary, _select_state,
-    _tangent_gradient,
+    _tangent_gradient, _with_ideal_set,
 )
 from fixed_rate_remainder import (
     decompose_output_vectors, validate_fixed_total_rate,
 )
-from p1_fixed_rate import make_allocations, top2_allocate, top2_cost_allocate
+from p1_fixed_rate import (
+    make_allocations, top2_allocate, top2_cost_allocate, topk_cost_allocate,
+)
 
 
 def test_fixed_ideal_candidate_binding():
@@ -72,6 +74,9 @@ def test_top2_matches_brute_force():
         for choice in product(bits, repeat=2) if sum(choice) == 4)
     assert tuple(discrete["ideal_bits"]) == brute[0][1]
     assert tuple(discrete["second_bits"]) == brute[1][1]
+    top = topk_cost_allocate(table, bits, 4, 3)
+    assert [tuple(row) for row in top["bits"]] == [
+        row[1] for row in brute[:3]]
     allocations, _, _ = make_allocations(
         c, bits, budget, 0, 0, 42, 2)
     realised = {tuple(np.asarray(bits)[row]) for row in allocations}
@@ -121,6 +126,11 @@ def test_dynamic_pool_and_selection_objective():
     discrete["ideal_bits"] = np.asarray([3, 1])
     state = _select_state(audit, distortion, discrete, select_args)
     assert state["target"] == 2 and state["full_phi"].tolist() == [7, 4, 2]
+    set_args = Namespace(ideal_set_size=2)
+    discrete = _with_ideal_set(discrete, set_args)
+    state = _select_state(audit, distortion, discrete, select_args)
+    assert state["target_set"].tolist() == [1, 2]
+    assert state["gap"] == 5 and state["empirical_margin"] == 2
 
 
 def test_primary_gradient_protection():

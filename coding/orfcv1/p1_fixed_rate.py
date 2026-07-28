@@ -160,11 +160,13 @@ def estimate_c(codec, tail, features, mode, bit, args, device):
     return np.exp2(2.0 * bit / codec.pq.d) * q.mean(0), q
 
 
-def top2_cost_allocate(ideal_cost_table, mode_bits, budget):
-    """Exact best and runner-up allocations for any separable mode table."""
+def topk_cost_allocate(ideal_cost_table, mode_bits, budget, k):
+    """Exact top-k allocations for any separable fixed-budget mode table."""
     ideal_cost_table = np.asarray(ideal_cost_table, dtype=np.float64)
     if ideal_cost_table.ndim != 2 or ideal_cost_table.shape[1] != len(mode_bits):
         raise ValueError("ideal cost table must have shape [groups, modes]")
+    if k < 1:
+        raise ValueError("k must be positive")
     states = {0: [(0.0, ())]}
     for costs in ideal_cost_table:
         next_states = {}
@@ -181,12 +183,22 @@ def top2_cost_allocate(ideal_cost_table, mode_bits, budget):
             for row in sorted(rows, key=lambda item: (item[0], item[1])):
                 if all(row[1] != kept[1] for kept in unique):
                     unique.append(row)
-                if len(unique) == 2:
+                if len(unique) == k:
                     break
             states[used] = unique
     rows = states.get(budget, [])
     if not rows:
         raise ValueError(f"budget {budget} is infeasible")
+    return {
+        "values": np.asarray([row[0] for row in rows], dtype=np.float64),
+        "bits": np.asarray([row[1] for row in rows], dtype=np.int64),
+    }
+
+
+def top2_cost_allocate(ideal_cost_table, mode_bits, budget):
+    """Exact best and runner-up allocations for any separable mode table."""
+    top = topk_cost_allocate(ideal_cost_table, mode_bits, budget, 2)
+    rows = list(zip(top["values"], top["bits"]))
     second = rows[1] if len(rows) > 1 else (float("inf"), ())
     return {
         "ideal_value": float(rows[0][0]),

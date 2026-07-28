@@ -13,10 +13,10 @@
 - Calibrate \(c_g\) on data disjoint from held-out distortion evaluation with
   central JVPs at 6/7/8 bits. Report the across-rate CV and span before treating
   \(c_g2^{-2r_g/d}\) as a common ideal curve.
-- Compute the ideal allocation and its exact global finite-menu gap with
-  Top-2 dynamic programming.
-- Keep the discrete ideal table and target fixed inside each inner block.
-  At outer boundaries, recompute them from reserved calibration images without
+- Compute an exact Top-K ideal set and its separation from the first outside
+  allocation with dynamic programming.
+- Keep the discrete ideal table and Top-K set fixed inside each inner block.
+  At outer boundaries, recompute both from reserved calibration images without
   fitting full nonlinear distortion.
 - Audit Cayley-SGD against the former skew-Cayley/Adam path: require finite
   gradients, stable orthogonality, lower rotation-step time and no regression
@@ -25,15 +25,18 @@
   checkpoint, seed and train/validation split.
 - Jointly update \(U\) and all mode codebooks. Protect the primary distortion
   gradient when adding the empirical recovery gradient for every parameter.
-- Refresh the hard candidate set around the fixed ideal solution; retain
-  difficult allocations with extreme measured remainder.
-- Bind the loss to the complete minimizer set, candidate Top-K distortion,
-  the uniform 6-bit reference and the sampled recovery violation.
+- Refresh the hard candidate set around every ideal-set member; retain
+  low-distortion outside competitors and extreme measured remainders.
+- Optimize the soft minimum inside the ideal set and its margin against the
+  best sampled outside competitor, while retaining the uniform 6-bit reference.
 - Accept the proxy only if held-out hard-PQ candidate distortion improves
   without breaking the menu monotonicity gate.
 - Before claiming recovery, derive or validate an upper bound for the
   remainder range over all feasible allocations. A sampled range alone cannot
   certify the theorem.
+- Label the fixed audit pool and all adaptively mined pools as empirical.
+  Report their size against the exact number of feasible allocations; do not
+  treat absence of a sampled counterexample as a certificate.
 - Run the paired `primary_only` versus `primary_recovery` short experiment from
   `run_outer_inner_short.sh`. Do not start full optimisation until held-out
   target distortion is non-inferior and the empirical recovery margin improves.
