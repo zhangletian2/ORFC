@@ -7,7 +7,8 @@ import numpy as np
 import torch
 
 from allocation_train import (
-    _curve_report, _design, _positive_fit, _seed_from_anchor, _select_state,
+    _allocation_source, _curve_report, _design, _dynamic_source,
+    _objective_terms, _positive_fit, _seed_from_anchor, _select_state,
 )
 from fixed_rate_remainder import (
     decompose_output_vectors, validate_fixed_total_rate,
@@ -62,6 +63,33 @@ def test_fixed_rate_and_curve_contracts():
     assert passed["monotonic"] and not failed["monotonic"]
 
 
+def test_dynamic_pool_and_selection_objective():
+    costs = np.broadcast_to(np.arange(1, 4, dtype=float), (2, 3))
+    calibration = {
+        "cost_table": costs, "mode_bits": np.arange(1, 4),
+        "rate_dimension": np.asarray(1), "c_g": np.ones(2)}
+    audit = _allocation_source(np.asarray([[0, 2], [1, 1], [2, 0]]),
+                               calibration)
+    args = Namespace(
+        dynamic_allocations=True, dynamic_single=2, dynamic_random=2,
+        seed=42)
+    pool = _dynamic_source(audit, calibration, np.asarray([2.0, 1.0]),
+                           args, 0)
+    assert len(pool["allocations"]) >= len(audit["allocations"])
+    validate_fixed_total_rate(pool["allocations"], costs)
+
+    select_args = Namespace(
+        ridge=1e-8, allocations=3, seed=42, reference_bit=2,
+        tie_atol=1e-8, tie_rtol=1e-8, lse_temperature=0.1,
+        recovery_fraction=1.0, candidate_weight=1.0, topk_weight=0.25,
+        topk=2, reference_weight=1.0)
+    distortion = np.asarray([5.0, 3.0, 4.0])
+    state = _select_state(audit, distortion, calibration, select_args)
+    terms = _objective_terms(
+        distortion[state["selected"]], state, select_args, 0.5)
+    assert terms["score"] >= terms["base"] and terms["omega"] >= 0
+
+
 def test_nested_anchor_initialisation():
     class Quantizer:
         def __init__(self, size):
@@ -101,6 +129,7 @@ def test_remainder_decomposition():
 if __name__ == "__main__":
     test_positive_projection_and_candidate_binding()
     test_fixed_rate_and_curve_contracts()
+    test_dynamic_pool_and_selection_objective()
     test_nested_anchor_initialisation()
     test_remainder_decomposition()
     print("PASS: allocation contracts")

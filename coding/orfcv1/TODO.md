@@ -12,9 +12,11 @@
 
 - Compare candidate-only and candidate-plus-remainder from the same repaired
   checkpoint, seed and train/validation split.
-- Jointly update \(U\) and all mode codebooks, including K64.
+- Jointly update \(U\) and all mode codebooks for reconstruction; route the
+  remainder gradient to \(U\) so its contribution can be identified.
 - Refresh \(c_g\), the analytic minimizer set, its external gap and the hard
-  candidate set during training.
+  candidate set during training. Regenerate neighbouring and random
+  fixed-budget allocations around the updated analytic solution.
 - Bind the loss to the complete minimizer set, candidate Top-K distortion,
   the uniform 6-bit reference and the sampled recovery violation.
 - Accept the proxy only if held-out hard-PQ candidate distortion improves
@@ -24,10 +26,13 @@
 
 - Use the original 5k-scale pool as 4.5k optimisation plus 500 held-out
   validation images; test remains isolated.
-- Match ORFC's 100 epochs, `3e-4` learning rate, gradient clipping and
-  `0.5 -> 0.005` PQ-temperature schedule.
-- Refresh coefficients/candidates and select checkpoints once per epoch using
-  validation only.
+- Match ORFC's batch 32, 100 epochs, `3e-4` learning rate, gradient clipping
+  and epoch-wise `0.5 -> 0.005` PQ-temperature/LR schedules.
+- Keep the 261 allocations fixed as an audit set. Refresh a separate training
+  allocation pool once per epoch.
+- Select checkpoints with the complete hard validation objective, include the
+  initial checkpoint, and reject every checkpoint whose base objective
+  regresses from initialization.
 
 ## Final acceptance
 

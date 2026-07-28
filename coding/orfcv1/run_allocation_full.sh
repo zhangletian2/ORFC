@@ -10,7 +10,7 @@ CACHE=artifacts/dinov2_vitl14/cache
 P1=results/dinov2_vitl14/p1_fixed_rate/formal_p1_corrected_20260727T090628Z
 EPOCHS=${EPOCHS:-100}
 TRAIN_IMAGES=${TRAIN_IMAGES:-4500}
-IMAGES=${IMAGES:-4}
+IMAGES=${IMAGES:-32}
 STEPS_PER_EPOCH=$(( (TRAIN_IMAGES + IMAGES - 1) / IMAGES ))
 
 # The original 5k pool is split into 4.5k optimisation and 500 held-out
@@ -29,12 +29,14 @@ train_one() {
     --output "$OUT/$name.json" --checkpoint "$OUT/$name.pt" \
     --epochs "$EPOCHS" --train-images "$TRAIN_IMAGES" --images "$IMAGES" \
     --refresh-images 64 --refresh-steps "$STEPS_PER_EPOCH" \
-    --select-steps "$STEPS_PER_EPOCH" --log-steps 100 \
-    --hard-images 128 --hard-image-offset 0 --hard-batch-size 4 \
-    --allocations 8 --allocation-chunk 2 \
-    --tau-start 0.5 --tau-end 0.005 --lr 0.0003 \
+    --select-steps "$STEPS_PER_EPOCH" --log-steps 25 \
+    --hard-images 128 --hard-image-offset 0 --hard-batch-size 16 \
+    --allocations 8 --allocation-chunk 8 \
+    --tau-start 0.5 --tau-end 0.005 --schedule-unit epoch --lr 0.0003 \
     --reference-weight 2 --monotonic-tolerance 0.001 \
-    --remainder-grad-ratio "$ratio" \
+    --remainder-grad-ratio "$ratio" --remainder-parameters u \
+    --dynamic-allocations --dynamic-single 32 --dynamic-random 32 \
+    --selection-base-tolerance 0 \
     >"$OUT/logs/$name.log" 2>&1
 }
 

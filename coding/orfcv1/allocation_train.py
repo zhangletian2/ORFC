@@ -11,8 +11,9 @@ import torch
 from scipy.optimize import lsq_linear
 
 from codec_v1 import load_codec_v1, save_codec_v1
+from fixed_rate_remainder import allocation_rates
 from opq import batch_inv_normalize_gpu, batch_normalize_gpu
-from p1_fixed_rate import build_tail
+from p1_fixed_rate import build_tail, make_allocations
 
 
 def _write(path, value):
@@ -320,7 +321,9 @@ def _select_state(source, distortion, calibration, args):
     selected = (
         set(order[:edge]) | set(order[-edge:])
         | set(map(int, minimizers)) | {target})
-    selected.update(map(int, outside[np.argsort(distortion[outside])[:edge]]))
+    distortion_order = outside[np.argsort(distortion[outside])]
+    selected.update(map(int, distortion_order[:edge]))
+    selected.update(map(int, distortion_order[-edge:]))
     reference = None
     bits = calibration["mode_bits"][source["allocations"]]
     hits = np.flatnonzero(np.all(bits == args.reference_bit, axis=1))
@@ -336,15 +339,86 @@ def _select_state(source, distortion, calibration, args):
     local = {index: position for position, index in enumerate(selected)}
     return {
         "selected": selected, "allocations": source["allocations"][selected],
-        "A": A[selected], "intercept": intercept, "c": c,
+        "A": A[selected], "full_A": A, "intercept": intercept, "c": c,
         "target": target, "minimizers": minimizers,
         "minimizer_local": np.asarray(
             [local[int(index)] for index in minimizers]),
         "gap": gap,
         "reference": reference,
         "reference_local": local.get(reference),
-        "omega_scale": max(float(np.ptp(remainder[selected])), 1.0),
+        "omega_scale": max(float(np.ptp(remainder)), 1.0),
         "distortion_scale": max(float(distortion[target]), 1.0),
+    }
+
+
+def _allocation_source(allocations, calibration):
+    allocations = np.asarray(allocations, dtype=np.int64)
+    return {
+        "allocations": allocations,
+        "rates": allocation_rates(allocations, calibration["cost_table"]),
+    }
+
+
+def _subset_distortion(source, distortion, subset):
+    lookup = {
+        tuple(row.tolist()): value
+        for row, value in zip(source["allocations"], distortion)}
+    return np.asarray([
+        lookup[tuple(row.tolist())] for row in subset["allocations"]])
+
+
+def _dynamic_source(audit, calibration, c, args, refresh):
+    if not args.dynamic_allocations:
+        return audit
+    budget = int(round(float(audit["rates"][0].sum())))
+    generated, _, _ = make_allocations(
+        c, tuple(map(int, calibration["mode_bits"])), budget,
+        args.dynamic_single, args.dynamic_random, args.seed + refresh,
+        int(calibration["rate_dimension"]))
+    pool = np.unique(
+        np.concatenate([audit["allocations"], generated]), axis=0)
+    return _allocation_source(pool, calibration)
+
+
+def _set_scales(state, scales):
+    state["omega_scale"], state["distortion_scale"] = scales
+    return state
+
+
+def _objective_terms(distortion, state, args, remainder_weight):
+    D = np.asarray(distortion, dtype=np.float64)
+    complete = len(D) == len(state["full_A"])
+    A = state["full_A"] if complete else state["A"]
+    minimizers = state["minimizers"] if complete else state["minimizer_local"]
+    reference_index = (
+        state["reference"] if complete else state["reference_local"])
+    e = D - state["intercept"] - A @ state["c"]
+    scale = args.lse_temperature * state["omega_scale"]
+    high = scale * np.log(np.exp((e - e.max()) / scale).sum()) + e.max()
+    low_e = -e
+    low = (
+        scale * np.log(np.exp((low_e - low_e.max()) / scale).sum())
+        + low_e.max())
+    omega_raw = high + low - 2 * scale * math.log(len(e))
+    recovery = max(
+        omega_raw - args.recovery_fraction * state["gap"], 0.0
+    ) / state["omega_scale"]
+    candidate = D[minimizers].mean() / state["distortion_scale"]
+    topk = np.sort(D)[-min(args.topk, len(D)):].mean()
+    topk /= state["distortion_scale"]
+    reference = (
+        D[reference_index] / state["distortion_scale"]
+        if reference_index is not None else 0.0)
+    base = (
+        args.candidate_weight * candidate + args.topk_weight * topk
+        + args.reference_weight * reference)
+    return {
+        "score": float(base + remainder_weight * recovery),
+        "base": float(base), "recovery": float(recovery),
+        "omega": float(np.ptp(e)), "gap": float(state["gap"]),
+        "recovery_ratio": float(np.ptp(e) / max(state["gap"], 1e-12)),
+        "candidate": float(candidate), "topk": float(topk),
+        "reference": float(reference),
     }
 
 
@@ -391,6 +465,39 @@ def _joint_parameters(codec):
     return params
 
 
+def _calibrate_remainder(codec, tail, batch, state, args, params):
+    if args.remainder_grad_ratio < 0:
+        return args.remainder_weight
+    _, terms = _loss(codec, tail, batch, state, args, 0.0)
+    targets = params if args.remainder_parameters == "joint" else params[:1]
+    base = torch.autograd.grad(
+        terms["base"], targets, retain_graph=True, allow_unused=True)
+    remainder = torch.autograd.grad(
+        terms["recovery"], targets, allow_unused=True)
+    norm = lambda values: torch.sqrt(sum(
+        value.square().sum() for value in values if value is not None))
+    base_norm, remainder_norm = norm(base), norm(remainder)
+    codec.zero_grad(set_to_none=True)
+    return (
+        args.remainder_grad_ratio * float(base_norm)
+        / max(float(remainder_norm), 1e-12)
+        if float(remainder_norm) > 1e-12 else 0.0)
+
+
+def _backward(loss, terms, params, args, remainder_weight):
+    if remainder_weight <= 0 or args.remainder_parameters == "joint":
+        loss.backward()
+        return
+    terms["base"].backward(retain_graph=True)
+    gradient = torch.autograd.grad(
+        terms["recovery"], params[0], allow_unused=True)[0]
+    if gradient is not None:
+        if params[0].grad is None:
+            params[0].grad = remainder_weight * gradient
+        else:
+            params[0].grad.add_(gradient, alpha=remainder_weight)
+
+
 def _report(source, distortion, state, dimension):
     phi = state["intercept"] + _design(source["rates"], dimension) @ state["c"]
     remainder = distortion - phi
@@ -435,19 +542,29 @@ def _training_batches(args, count, rng):
 
 
 def _state_report(state):
+    coverage = sum(
+        len(np.unique(state["allocations"][:, group]))
+        for group in range(state["allocations"].shape[1]))
     return {
         "target": int(state["target"]),
         "minimizers": state["minimizers"].tolist(),
         "gap": float(state["gap"]),
         "selected": state["selected"].tolist(),
+        "selected_allocations": state["allocations"].tolist(),
+        "selected_count": int(len(state["selected"])),
+        "group_mode_coverage": int(coverage),
         "c": state["c"].tolist(),
     }
 
 
 def command_short(args):
     device, codec, tail, train_x, train_y, val_x, val_y = _base(args)
-    source = np.load(args.allocation_file, allow_pickle=False)
+    saved = np.load(args.allocation_file, allow_pickle=False)
     calibration = np.load(args.calibration, allow_pickle=False)
+    audit = {
+        "allocations": np.asarray(saved["allocations"]),
+        "rates": np.asarray(saved["rates"]),
+    }
     bits = np.log2(codec.pq.mode_sizes).astype(int)
     params = _joint_parameters(codec)
     optimizer = torch.optim.Adam(params, lr=args.lr)
@@ -457,65 +574,87 @@ def command_short(args):
     refresh_args = argparse.Namespace(**vars(args))
     refresh_args.hard_images = args.refresh_images
     refresh_args.hard_image_offset = 0
-    all_allocations = source["allocations"]
+    training_source = _dynamic_source(
+        audit, calibration, calibration["c_g"], args, 0)
     initial_D = _hard_eval(
-        codec, tail, refresh_x, refresh_y, all_allocations, refresh_args)
-    state = _select_state(source, initial_D, calibration, args)
+        codec, tail, refresh_x, refresh_y,
+        training_source["allocations"], refresh_args)
+    state = _select_state(training_source, initial_D, calibration, args)
+    training_scales = (state["omega_scale"], state["distortion_scale"])
+    audit_D = _subset_distortion(training_source, initial_D, audit)
+    audit_state = _select_state(audit, audit_D, calibration, args)
+    audit_scales = (
+        audit_state["omega_scale"], audit_state["distortion_scale"])
+    state = _set_scales(state, training_scales)
+    audit_state = _set_scales(audit_state, audit_scales)
     before_matrix = _hard_eval(
-        codec, tail, val_x, val_y, all_allocations, args,
+        codec, tail, val_x, val_y, audit["allocations"], args,
         return_per_image=True)
     before_val_D = before_matrix.mean(1)
     before = _report(
-        source, before_val_D, state, int(calibration["rate_dimension"]))
+        audit, before_val_D, audit_state,
+        int(calibration["rate_dimension"]))
     total_steps = (
         args.epochs * math.ceil(
             min(args.train_images, len(train_x)) / args.images)
         if args.epochs > 0 else args.steps)
+    steps_per_epoch = (
+        math.ceil(min(args.train_images, len(train_x)) / args.images)
+        if args.epochs > 0 else 0)
+    schedule_length = (
+        args.epochs
+        if args.schedule_unit == "epoch" and args.epochs > 0
+        else total_steps)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=max(total_steps, 1), eta_min=args.lr * 0.01)
-    remainder_weight, history, active = args.remainder_weight, [], []
-    selection, best_score, best_state = [], float("inf"), None
-    recalibrate = True
+        optimizer, T_max=max(schedule_length, 1), eta_min=args.lr * 0.01)
+    args.pq_temperature = args.tau_start
+    calibration_batch = _sample(
+        train_x, train_y, args.images, np.random.default_rng(args.seed + 1),
+        device, args.norm_mode, np.arange(min(args.images, len(train_x))))
+    remainder_weight = _calibrate_remainder(
+        codec, tail, calibration_batch, state, args, params)
+    history, active, refresh = [], [], 0
+    initial_terms = _objective_terms(
+        before_val_D, audit_state, args, remainder_weight)
+    initial_base = initial_terms["base"]
+    selection = [{"step": 0, **initial_terms, "eligible": True}]
+    best_score, best_step = initial_terms["score"], 0
+    best_state = {
+        key: value.detach().cpu().clone()
+        for key, value in codec.state_dict().items()}
     for step, epoch, ids in _training_batches(args, len(train_x), rng):
-        progress = step / max(total_steps - 1, 1)
+        progress = (
+            epoch / max(args.epochs - 1, 1)
+            if args.schedule_unit == "epoch" and epoch is not None
+            else step / max(total_steps - 1, 1))
         temperature = args.tau_start * (
             args.tau_end / args.tau_start) ** progress
         args.pq_temperature = temperature
         batch = _sample(
             train_x, train_y, args.images, rng, device, args.norm_mode, ids)
         optimizer.zero_grad(set_to_none=True)
-        _, terms = _loss(codec, tail, batch, state, args, 0.0)
-        if recalibrate and args.remainder_grad_ratio >= 0:
-            base_grad = torch.autograd.grad(
-                terms["base"], params, retain_graph=True, allow_unused=True)
-            omega_grad = torch.autograd.grad(
-                terms["recovery"], params, retain_graph=True, allow_unused=True)
-            base_norm = torch.sqrt(sum(
-                value.square().sum() for value in base_grad
-                if value is not None))
-            omega_norm = torch.sqrt(sum(
-                value.square().sum() for value in omega_grad
-                if value is not None))
-            remainder_weight = (
-                args.remainder_grad_ratio * float(base_norm)
-                / max(float(omega_norm), 1e-12)
-                if float(omega_norm) > 1e-12 else 0.0)
-            recalibrate = False
         loss, terms = _loss(
             codec, tail, batch, state, args, remainder_weight)
-        loss.backward()
+        _backward(loss, terms, params, args, remainder_weight)
         grad = torch.nn.utils.clip_grad_norm_(params, args.grad_clip)
         optimizer.step()
-        scheduler.step()
+        if (
+            args.schedule_unit == "step" or not steps_per_epoch
+            or (step + 1) % steps_per_epoch == 0
+        ):
+            scheduler.step()
         if step == 0 or (step + 1) % args.log_steps == 0:
             history.append({
                 "step": step + 1, "loss": float(loss),
                 "base": float(terms["base"]), "omega": float(terms["omega"]),
                 "recovery": float(terms["recovery"]),
                 "candidate": float(terms["candidate"]),
+                "topk": float(terms["topk"]),
                 "reference": float(terms["reference"]),
                 "grad_norm": float(grad),
                 "remainder_weight": remainder_weight,
+                "training_pool_size": int(
+                    len(training_source["allocations"])),
                 "target_index": int(state["target"]),
                 "minimizer_count": int(len(state["minimizers"])),
                 "set_external_gap": float(state["gap"]),
@@ -524,36 +663,57 @@ def command_short(args):
         if (
             args.refresh_steps > 0 and (step + 1) % args.refresh_steps == 0
         ):
+            refresh += 1
+            training_source = _dynamic_source(
+                audit, calibration, state["c"], args, refresh)
             current_D = _hard_eval(
                 codec, tail, refresh_x, refresh_y,
-                all_allocations, refresh_args)
-            state = _select_state(source, current_D, calibration, args)
-            active.append(_state_report(state))
-            recalibrate = True
+                training_source["allocations"], refresh_args)
+            state = _select_state(
+                training_source, current_D, calibration, args)
+            state = _set_scales(state, training_scales)
+            audit_D = _subset_distortion(
+                training_source, current_D, audit)
+            audit_state = _select_state(
+                audit, audit_D, calibration, args)
+            audit_state = _set_scales(audit_state, audit_scales)
+            report = _state_report(state)
+            report["pool_size"] = int(len(training_source["allocations"]))
+            active.append(report)
         if args.select_steps > 0 and (step + 1) % args.select_steps == 0:
             validation_D = _hard_eval(
-                codec, tail, val_x, val_y, state["allocations"], args)
-            score = float(validation_D[state["minimizer_local"]].mean())
-            if state["reference_local"] is not None:
-                score += args.reference_weight * float(
-                    validation_D[state["reference_local"]])
-            selection.append({"step": step + 1, "score": score})
-            if score < best_score:
-                best_score = score
+                codec, tail, val_x, val_y, audit["allocations"], args)
+            terms_val = _objective_terms(
+                validation_D, audit_state, args, remainder_weight)
+            eligible = (
+                terms_val["base"]
+                <= initial_base * (1 + args.selection_base_tolerance))
+            selection.append({
+                "step": step + 1, **terms_val, "eligible": eligible})
+            print(
+                f"step={step + 1}/{total_steps} epoch={epoch} "
+                f"score={terms_val['score']:.6g} "
+                f"base={terms_val['base']:.6g} "
+                f"omega={terms_val['omega']:.6g} "
+                f"pool={len(training_source['allocations'])} "
+                f"eligible={eligible}", flush=True)
+            if eligible and terms_val["score"] < best_score:
+                best_score, best_step = terms_val["score"], step + 1
                 best_state = {
                     key: value.detach().cpu().clone()
                     for key, value in codec.state_dict().items()}
-    if best_state is not None:
+    if args.select_steps > 0:
         codec.load_state_dict(best_state)
     final_D = _hard_eval(
-        codec, tail, refresh_x, refresh_y, all_allocations, refresh_args)
-    state = _select_state(source, final_D, calibration, args)
+        codec, tail, refresh_x, refresh_y,
+        audit["allocations"], refresh_args)
+    state = _select_state(audit, final_D, calibration, args)
     after_matrix = _hard_eval(
-        codec, tail, val_x, val_y, all_allocations, args,
+        codec, tail, val_x, val_y, audit["allocations"], args,
         return_per_image=True)
     after_val_D = after_matrix.mean(1)
     after = _report(
-        source, after_val_D, state, int(calibration["rate_dimension"]))
+        audit, after_val_D, state, int(calibration["rate_dimension"]))
     curve = _hard_eval(
         codec, tail, val_x, val_y, _uniform_allocations(codec), args)
     curve_report = _curve_report(
@@ -564,7 +724,7 @@ def command_short(args):
     half = 1.96 * paired.std(ddof=1) / np.sqrt(len(paired))
     array_path = Path(args.output).with_suffix(".npz")
     np.savez_compressed(
-        array_path, allocations=all_allocations,
+        array_path, allocations=audit["allocations"],
         before_per_image=before_matrix, after_per_image=after_matrix,
         final_target_index=target,
         final_minimizer_indices=state["minimizers"])
@@ -572,11 +732,20 @@ def command_short(args):
         "before": before, "after": after, "menu": curve_report,
         "history": history, "active_states": active,
         "validation_selection": selection,
+        "initial_validation_score": initial_terms["score"],
         "selected_validation_score": (
-            best_score if best_state is not None else None),
+            best_score if args.select_steps > 0 else None),
+        "selected_validation_step": (
+            best_step if args.select_steps > 0 else None),
         "final_state": _state_report(state),
         "joint_codebooks": True,
+        "remainder_parameters": args.remainder_parameters,
+        "dynamic_allocations": args.dynamic_allocations,
+        "audit_allocation_count": int(len(audit["allocations"])),
         "epochs": args.epochs, "train_images": args.train_images,
+        "batch_size": args.images, "learning_rate": args.lr,
+        "tau": [args.tau_start, args.tau_end],
+        "schedule_unit": args.schedule_unit,
         "total_steps": total_steps,
         "remainder_weight": remainder_weight,
         "remainder_grad_ratio": args.remainder_grad_ratio,
@@ -637,6 +806,8 @@ def parser():
     short.add_argument("--select-steps", type=int, default=0)
     short.add_argument("--tau-start", type=float, default=0.01)
     short.add_argument("--tau-end", type=float, default=0.01)
+    short.add_argument(
+        "--schedule-unit", choices=("step", "epoch"), default="step")
     short.add_argument("--ridge", type=float, default=1e-3)
     short.add_argument("--tie-atol", type=float, default=1e-8)
     short.add_argument("--tie-rtol", type=float, default=1e-8)
@@ -648,7 +819,13 @@ def parser():
     short.add_argument("--reference-weight", type=float, default=1.0)
     short.add_argument("--remainder-weight", type=float, default=0.0)
     short.add_argument("--remainder-grad-ratio", type=float, default=-1.0)
+    short.add_argument(
+        "--remainder-parameters", choices=("u", "joint"), default="u")
     short.add_argument("--recovery-fraction", type=float, default=1.0)
+    short.add_argument("--dynamic-allocations", action="store_true")
+    short.add_argument("--dynamic-single", type=int, default=32)
+    short.add_argument("--dynamic-random", type=int, default=32)
+    short.add_argument("--selection-base-tolerance", type=float, default=0.0)
     return main
 
 
