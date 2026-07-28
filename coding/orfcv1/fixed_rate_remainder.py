@@ -137,6 +137,39 @@ def ideal_phi(c_g, rates, rate_dimension=1):
     ).sum(axis=1)
 
 
+def decompose_output_vectors(phi, group_response, output_delta):
+    """Split one output distortion into analytic, menu, cross and nonlinear terms.
+
+    ``group_response`` has shape ``[B,G,...]`` and contains the local linear
+    response to each realised group error.  ``output_delta`` is the exact
+    frozen-tail output change with shape ``[B,...]``.
+    """
+    response = group_response.flatten(2)
+    delta = output_delta.flatten(1)
+    response_sum = response.sum(1)
+    self_quad = response.square().sum((1, 2)).double()
+    paired_quad = response_sum.square().sum(1).double()
+    distortion = delta.square().sum(1).double()
+    phi = torch.as_tensor(
+        phi, dtype=distortion.dtype, device=distortion.device
+    ).expand_as(distortion)
+    rho = delta - response_sum
+    menu = self_quad - phi
+    cross = paired_quad - self_quad
+    nonlinear = distortion - paired_quad
+    cross_bound = (
+        response.norm(dim=2).sum(1).square() - self_quad
+    ).clamp_min(0)
+    rho_norm = rho.norm(dim=1)
+    nonlinear_bound = 2 * response_sum.norm(dim=1) * rho_norm + rho_norm.square()
+    return {
+        "distortion": distortion, "phi": phi, "self_quad": self_quad,
+        "paired_quad": paired_quad, "menu": menu, "cross": cross,
+        "nonlinear": nonlinear, "cross_bound": cross_bound,
+        "nonlinear_bound": nonlinear_bound,
+    }
+
+
 def _swap_edge_range(allocations, remainder):
     index = {
         tuple(row.tolist()): i for i, row in enumerate(allocations)
@@ -287,5 +320,149 @@ def evaluate_fixed_rate_remainder(
         "distortion_mean": D,
         "phi": phi,
         "remainder": E,
+    }
+    return summary, arrays
+
+
+@torch.no_grad()
+def evaluate_fixed_rate_decomposition(
+    features_array,
+    teacher_cache,
+    codec,
+    tail,
+    allocations,
+    cost_table,
+    c_g,
+    norm_mode,
+    device,
+    allocation_chunk=4,
+    jvp_eps=0.01,
+    jvp_chunk=8,
+    rate_tolerance=1e-8,
+):
+    """Measure ``D=Phi+M+C+N`` for realised multi-mode PQ errors.
+
+    ``M`` is the realised self-quadratic/menu mismatch, ``C`` is quadratic
+    cross-group coupling and ``N`` is finite-amplitude nonlinear propagation.
+    Central finite differences estimate the local group responses.
+    """
+    if jvp_eps <= 0 or jvp_chunk < 1:
+        raise ValueError("jvp_eps and jvp_chunk must be positive")
+    if not hasattr(codec.pq, "quantizers"):
+        raise TypeError("fixed-rate decomposition requires MultiModeSoftPQ")
+    allocations = np.asarray(allocations, dtype=np.int64)
+    rates, totals, target = validate_fixed_total_rate(
+        allocations, cost_table, tolerance=rate_tolerance)
+    phi = ideal_phi(c_g, rates, rate_dimension=codec.pq.d)
+    keys = (
+        "distortion", "self_quad", "paired_quad", "menu", "cross",
+        "nonlinear", "cross_bound", "nonlinear_bound",
+    )
+    values = {
+        key: np.empty((len(allocations), len(features_array)), np.float64)
+        for key in keys
+    }
+    codec.eval()
+    groups = codec.pq.G
+    modes_count = len(codec.pq.quantizers)
+
+    for image_index in range(len(features_array)):
+        x = torch.from_numpy(np.array(
+            features_array[image_index:image_index + 1], copy=True
+        )).float().to(device)
+        teacher = torch.from_numpy(np.array(
+            teacher_cache[image_index:image_index + 1], copy=True
+        )).float().to(device)
+        y, mu, std = batch_normalize_gpu(x, mode=norm_mode)
+        rotation = codec.transform.get_rotation()
+        z = y.reshape(-1, y.shape[-1]) @ rotation
+        bank = torch.stack([
+            quantizer._quantise(z)[0].reshape(
+                1, y.shape[1], groups, codec.pq.d)
+            for quantizer in codec.pq.quantizers
+        ])
+        residual = bank[:, 0] - z.reshape(y.shape[1], groups, codec.pq.d)
+        errors = torch.stack([
+            residual[:, :, g] @ rotation.t()[
+                g * codec.pq.d:(g + 1) * codec.pq.d]
+            for g in range(groups)
+        ], dim=1) * std[0]
+        magnitude = errors.flatten(2).norm(dim=2)
+        directions = errors / magnitude.clamp_min(1e-12)[..., None, None]
+        flat_directions = directions.reshape(
+            modes_count * groups, y.shape[1], y.shape[-1])
+        response_rows = []
+        for start in range(0, len(flat_directions), jvp_chunk):
+            direction = flat_directions[start:start + jvp_chunk]
+            base = x.expand(len(direction), -1, -1)
+            plus = tail.forward_nograd(base + jvp_eps * direction)
+            minus = tail.forward_nograd(base - jvp_eps * direction)
+            response_rows.append((plus - minus) / (2 * jvp_eps))
+        response_bank = torch.cat(response_rows).reshape(
+            modes_count, groups, *teacher.shape[1:])
+        response_bank *= magnitude.reshape(
+            modes_count, groups, *([1] * (teacher.ndim - 1)))
+
+        bank_g = bank.permute(3, 0, 1, 2, 4)
+        group_index = torch.arange(groups, device=device)[None, :]
+        for start in range(0, len(allocations), allocation_chunk):
+            stop = min(start + allocation_chunk, len(allocations))
+            selected_modes = torch.as_tensor(
+                allocations[start:stop], dtype=torch.long, device=device)
+            selected = bank_g[group_index, selected_modes].permute(
+                0, 2, 3, 1, 4).reshape(stop - start, y.shape[1], -1)
+            reconstructed = batch_inv_normalize_gpu(
+                selected @ rotation.t(),
+                mu.expand(stop - start, *mu.shape[1:]),
+                std.expand(stop - start, *std.shape[1:]))
+            delta = tail.forward_nograd(reconstructed) - teacher
+            for offset, mode_row in enumerate(selected_modes):
+                response = response_bank[
+                    mode_row, torch.arange(groups, device=device)]
+                parts = decompose_output_vectors(
+                    phi[start + offset], response.unsqueeze(0),
+                    delta[offset:offset + 1])
+                for key in keys:
+                    values[key][start + offset, image_index] = (
+                        parts[key].item())
+
+    means = {key: array.mean(1) for key, array in values.items()}
+    remainder = (
+        values["menu"] + values["cross"] + values["nonlinear"])
+    reconstruction_error = values["distortion"] - (
+        phi[:, None] + remainder)
+    relative_error = np.abs(reconstruction_error) / np.maximum(
+        np.abs(values["distortion"]), 1.0)
+    component_ranges = {
+        key: float(np.ptp(means[key]))
+        for key in ("menu", "cross", "nonlinear")
+    }
+    summary = {
+        "n_allocations": int(len(allocations)),
+        "n_images": int(len(features_array)),
+        "target_rate": target,
+        "max_rate_error": float(np.abs(totals - target).max()),
+        "jvp_eps": float(jvp_eps),
+        "component_mean": {
+            key: float(means[key].mean())
+            for key in ("menu", "cross", "nonlinear")
+        },
+        "component_range": component_ranges,
+        "remainder_range": float(np.ptp(remainder.mean(1))),
+        "dominant_component_by_range": max(
+            component_ranges, key=component_ranges.get),
+        "max_abs_decomposition_error": float(
+            np.abs(reconstruction_error).max()),
+        "max_rel_decomposition_error": float(relative_error.max()),
+        "cross_bound_violations": int(np.count_nonzero(
+            np.abs(values["cross"]) > values["cross_bound"] + 1e-5)),
+        "nonlinear_bound_violations": int(np.count_nonzero(
+            np.abs(values["nonlinear"]) >
+            values["nonlinear_bound"] + 1e-5)),
+    }
+    arrays = {
+        "allocations": allocations, "rates": rates, "total_rates": totals,
+        "phi": phi, "remainder": remainder,
+        "decomposition_error": reconstruction_error, **values,
     }
     return summary, arrays

@@ -33,6 +33,7 @@ if _ORFC_DIR not in sys.path:
     sys.path.insert(0, _ORFC_DIR)
 from opq import batch_normalize_gpu, batch_inv_normalize_gpu
 from soft_pq import SoftPQ, OrthogonalTransform
+from fixed_rate_remainder import decompose_output_vectors
 
 
 class TinyTail(nn.Module):
@@ -419,6 +420,28 @@ def test_v1_1_heldout_invariance_and_k256(device):
         assert loaded.pq.K == 256
 
 
+def test_fixed_rate_decomposition_identity(device):
+    response = torch.tensor(
+        [[[[1.0, 0.0]], [[0.0, 2.0]]]], device=device)
+    delta = response.sum(1)
+    parts = decompose_output_vectors(3.0, response, delta)
+    _assert_close(parts["self_quad"].item(), 5.0, label="self quadratic")
+    _assert_close(parts["paired_quad"].item(), 5.0, label="paired quadratic")
+    _assert_close(parts["menu"].item(), 2.0, label="menu mismatch")
+    _assert_close(parts["cross"].item(), 0.0, label="cross interaction")
+    _assert_close(parts["nonlinear"].item(), 0.0, label="nonlinear remainder")
+    total = (
+        parts["phi"] + parts["menu"] + parts["cross"]
+        + parts["nonlinear"])
+    _assert_close(
+        parts["distortion"].item(), total.item(),
+        label="decomposition identity")
+    assert torch.all(
+        parts["cross"].abs() <= parts["cross_bound"] + 1e-6)
+    assert torch.all(
+        parts["nonlinear"].abs() <= parts["nonlinear_bound"] + 1e-6)
+
+
 def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     test_detail_contracts(device)
@@ -427,6 +450,7 @@ def main():
     test_checkpoint_and_opq_contract(device)
     test_v1_1_response_contracts(device)
     test_v1_1_heldout_invariance_and_k256(device)
+    test_fixed_rate_decomposition_identity(device)
     print(json.dumps({
         'status': 'PASS',
         'device': str(device),
@@ -438,6 +462,7 @@ def main():
             'checkpoint and OPQ metadata',
             'V1.1 response/energy/alpha/chunk contracts',
             'V1.1 heldout batch/order invariance and K256',
+            'fixed-rate Phi/M/C/N decomposition identity and bounds',
         ],
     }, indent=2))
 

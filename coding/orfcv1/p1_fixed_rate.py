@@ -17,6 +17,7 @@ sys.path[:0] = [str(HERE), str(ORFC), str(THEORY)]
 from codec_v1 import FeatureCodecV1, load_codec_v1, save_codec_v1
 from fixed_rate_remainder import (
     adjacent_exchange_allocations,
+    evaluate_fixed_rate_decomposition,
     evaluate_fixed_rate_remainder,
     nominal_cost_table,
     random_exchange_walk,
@@ -304,6 +305,30 @@ def command_measure(args):
         print(f"R={budget}: omega={summary['omega_sampled']:.6g}")
 
 
+@torch.no_grad()
+def command_decompose(args):
+    device = torch.device("cuda")
+    codec = load_codec_v1(args.codec, device=device)
+    tail = build_tail(args.layer, device)
+    features = np.load(args.features, mmap_mode="r")[:args.images]
+    teachers = np.load(args.teachers, mmap_mode="r")[:args.images]
+    out = Path(args.output_dir)
+    for budget in csv_ints(args.budgets):
+        calibration = np.load(
+            out / f"calibration_R{budget}.npz", allow_pickle=False)
+        summary, arrays = evaluate_fixed_rate_decomposition(
+            features, teachers, codec, tail, calibration["allocations"],
+            calibration["cost_table"], calibration["c_g"], args.norm_mode,
+            device, allocation_chunk=args.allocation_chunk,
+            jvp_eps=args.jvp_eps, jvp_chunk=args.jvp_chunk)
+        summary.update({"arm": args.arm, "budget": budget})
+        np.savez_compressed(out / f"decomposition_R{budget}.npz", **arrays)
+        dump_json(out / f"decomposition_R{budget}.json", summary)
+        print(
+            f"R={budget}: remainder={summary['remainder_range']:.6g}, "
+            f"dominant={summary['dominant_component_by_range']}")
+
+
 def command_audit(args):
     root, rows, errors, common = Path(args.run_dir), [], [], {}
     for arm in args.arms.split(","):
@@ -392,6 +417,14 @@ def parser():
     p.add_argument("--budgets", required=True)
     p.add_argument("--images", type=int, default=300)
     p.add_argument("--allocation-chunk", type=int, default=8)
+    p = sub.add_parser("decompose", parents=[common])
+    p.add_argument("--output-dir", required=True)
+    p.add_argument("--teachers", required=True)
+    p.add_argument("--budgets", required=True)
+    p.add_argument("--images", type=int, default=32)
+    p.add_argument("--allocation-chunk", type=int, default=4)
+    p.add_argument("--jvp-eps", type=float, default=0.01)
+    p.add_argument("--jvp-chunk", type=int, default=8)
     p = sub.add_parser("audit")
     p.add_argument("--run-dir", required=True)
     p.add_argument("--arms", default="identity,opq,orfc,response")
