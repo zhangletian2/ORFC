@@ -27,9 +27,6 @@ from fixed_rate_remainder import (
 )
 from multimode_pq import MultiModeSoftPQ
 from opq import batch_normalize_gpu, learn_opq_rotation
-from allocate import dp_allocate
-
-
 def csv_ints(value):
     return tuple(int(x) for x in value.split(","))
 
@@ -131,7 +128,6 @@ def estimate_c(codec, tail, features, mode, bit, args, device):
         y, _, std = batch_normalize_gpu(x, mode=args.norm_mode)
         _, info = codec(
             y, return_details=True, detail_level="train", modes=modes)
-        base = tail.forward_nograd(x)
         batch, tokens = x.shape[:2]
         residual = info["r_g"].reshape(
             groups, batch, tokens, d)
@@ -145,29 +141,66 @@ def estimate_c(codec, tail, features, mode, bit, args, device):
             error = error * std.unsqueeze(0)
             magnitude = error.flatten(2).norm(dim=2).clamp_min(1e-12)
             direction = error / magnitude[:, :, None, None]
-            perturbed = (
-                x.unsqueeze(0) + args.eps * direction).reshape(
-                    -1, tokens, x.shape[-1])
-            response = tail.forward_nograd(perturbed).reshape(
-                last - first, batch, *base.shape[1:])
-            delta = response - base.unsqueeze(0)
+            base = x.unsqueeze(0).expand(last - first, *x.shape)
+            plus_flat = tail.forward_nograd(
+                (base + args.eps * direction).reshape(
+                    -1, tokens, x.shape[-1]))
+            plus = plus_flat.reshape(
+                last - first, batch, *plus_flat.shape[1:])
+            minus_flat = tail.forward_nograd(
+                (base - args.eps * direction).reshape(
+                    -1, tokens, x.shape[-1]))
+            minus = minus_flat.reshape(plus.shape)
+            delta = (plus - minus) / (2.0 * args.eps)
             q_batch[:, first:last] = (
                 delta.flatten(2).square().sum(2)
-                * (magnitude / args.eps).square()).t()
+                * magnitude.square()).t()
         q_rows.append(q_batch.cpu().numpy())
     q = np.concatenate(q_rows)
     return np.exp2(2.0 * bit / codec.pq.d) * q.mean(0), q
 
 
+def top2_allocate(c_g, mode_bits, budget, dimension):
+    """Exact best and runner-up allocations for the separable ideal model."""
+    states = {0: [(0.0, ())]}
+    for group, coefficient in enumerate(c_g):
+        next_states = {}
+        for used, rows in states.items():
+            for value, path in rows:
+                for bit in mode_bits:
+                    total = used + bit
+                    if total <= budget:
+                        next_states.setdefault(total, []).append((
+                            value + coefficient * np.exp2(
+                                -2.0 * bit / dimension),
+                            path + (bit,)))
+        states = {}
+        for used, rows in next_states.items():
+            unique = []
+            for row in sorted(rows, key=lambda item: (item[0], item[1])):
+                if all(row[1] != kept[1] for kept in unique):
+                    unique.append(row)
+                if len(unique) == 2:
+                    break
+            states[used] = unique
+    rows = states.get(budget, [])
+    if not rows:
+        raise ValueError(f"budget {budget} is infeasible")
+    second = rows[1] if len(rows) > 1 else (float("inf"), ())
+    return {
+        "ideal_value": float(rows[0][0]),
+        "ideal_bits": np.asarray(rows[0][1], dtype=np.int64),
+        "second_value": float(second[0]),
+        "second_bits": np.asarray(second[1], dtype=np.int64),
+        "ideal_gap": float(second[0] - rows[0][0]),
+    }
+
+
 def make_allocations(
     c_g, mode_bits, budget, n_single, n_random, seed, dimension,
 ):
-    phi = {
-        g: {bits: float(c_g[g] * np.exp2(-2.0 * bits / dimension))
-            for bits in mode_bits}
-        for g in range(len(c_g))
-    }
-    ideal_bits, _ = dp_allocate(phi, budget, menu=mode_bits)
+    ideal_bits = top2_allocate(
+        c_g, mode_bits, budget, dimension)["ideal_bits"]
     index = {bits: i for i, bits in enumerate(mode_bits)}
     base = np.asarray([index[b] for b in ideal_bits], dtype=np.int64)
     costs = np.broadcast_to(
@@ -204,25 +237,62 @@ def command_calibrate(args):
     budgets, refs = csv_ints(args.budgets), csv_ints(args.reference_bits)
     if len(budgets) != len(refs):
         raise ValueError("budgets and reference-bits must have equal length")
+    requested = csv_ints(args.coefficient_bits) if args.coefficient_bits else ()
+    probe_bits = tuple(sorted(set(refs) | set(requested)))
+    if any(bit not in mode_bits for bit in (*refs, *probe_bits)):
+        raise ValueError("reference/coefficient bits must belong to mode-bits")
+    estimates = {
+        bit: estimate_c(
+            codec, tail, features, mode_bits.index(bit), bit, args, device)
+        for bit in probe_bits
+    }
+    c_by_bit = np.stack([estimates[bit][0] for bit in probe_bits])
+    q_by_bit = np.stack([estimates[bit][1] for bit in probe_bits])
+    mean = c_by_bit.mean(0).clip(1e-12)
+    rate_cv = c_by_bit.std(0) / mean
+    rate_span = c_by_bit.max(0) / c_by_bit.min(0).clip(1e-12)
+    stability = {
+        f"{name}_{stat}": float(function(values))
+        for name, values in (("rate_cv", rate_cv), ("rate_span", rate_span))
+        for stat, function in (
+            ("median", np.median), ("p95", lambda x: np.quantile(x, .95)),
+            ("max", np.max))
+    }
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
     for budget, ref in zip(budgets, refs):
-        c_g, q = estimate_c(
-            codec, tail, features, mode_bits.index(ref), ref, args, device)
+        c_g, q = estimates[ref]
         allocations, ideal_bits, costs = make_allocations(
             c_g, mode_bits, budget, args.single, args.random, args.seed,
             codec.pq.d)
+        optimum = top2_allocate(c_g, mode_bits, budget, codec.pq.d)
+        if not np.array_equal(ideal_bits, optimum["ideal_bits"]):
+            raise RuntimeError("allocation generator and exact DP disagree")
         np.savez_compressed(
             out / f"calibration_R{budget}.npz", c_g=c_g, q_per_image=q,
             allocations=allocations, ideal_bits=ideal_bits,
+            ideal_value=optimum["ideal_value"],
+            second_bits=optimum["second_bits"],
+            second_value=optimum["second_value"],
+            ideal_gap=optimum["ideal_gap"],
+            coefficient_bits=probe_bits, c_by_bit=c_by_bit,
+            q_per_image_by_bit=q_by_bit,
             cost_table=costs, mode_bits=mode_bits,
-            rate_dimension=codec.pq.d, coefficient_kind="jvp",
+            rate_dimension=codec.pq.d,
+            coefficient_kind="central_jvp_actual_residual",
             image_offset=args.image_offset)
         dump_json(out / f"calibration_R{budget}.json", {
             "arm": args.arm, "budget": budget, "reference_bit": ref,
             "n_images": int(len(q)), "n_allocations": int(len(allocations)),
             "c_min": float(c_g.min()), "c_max": float(c_g.max()),
-            "rate_dimension": codec.pq.d, "coefficient_kind": "jvp",
+            "ideal_bits": ideal_bits.tolist(),
+            "ideal_value": optimum["ideal_value"],
+            "second_bits": optimum["second_bits"].tolist(),
+            "second_value": optimum["second_value"],
+            "ideal_gap": optimum["ideal_gap"],
+            "coefficient_bits": list(probe_bits), **stability,
+            "rate_dimension": codec.pq.d,
+            "coefficient_kind": "central_jvp_actual_residual",
             "image_offset": args.image_offset, "codec": args.codec,
         })
         print(f"R={budget}: {len(allocations)} allocations")
@@ -242,28 +312,36 @@ def command_reallocate(args):
             old = np.load(old_path, allow_pickle=False)
             if tuple(old["mode_bits"]) != mode_bits:
                 raise ValueError(f"mode menu mismatch in {old_path}")
-            q = np.asarray(old["q_per_image"])
-            c_g = np.exp2(2.0 * ref / args.dimension) * q.mean(0)
+            q, c_g = np.asarray(old["q_per_image"]), np.asarray(old["c_g"])
             own, ideal, costs = make_allocations(
                 c_g, mode_bits, budget, args.single, args.random,
                 args.seed + index, args.dimension)
-            records[arm] = (c_g, q, own, ideal, costs, old_path)
+            optimum = top2_allocate(c_g, mode_bits, budget, args.dimension)
+            records[arm] = (
+                c_g, q, own, ideal, costs, old_path, optimum)
             union.update(map(tuple, own))
         allocations = np.asarray(sorted(union), dtype=np.int64)
         validate_fixed_total_rate(allocations, records[arms[0]][4])
-        for arm, (c_g, q, own, ideal, costs, old_path) in records.items():
+        for arm, record in records.items():
+            c_g, q, own, ideal, costs, old_path, optimum = record
             directory = output / arm
             directory.mkdir(parents=True, exist_ok=True)
             np.savez_compressed(
                 directory / f"calibration_R{budget}.npz",
                 c_g=c_g, q_per_image=q, allocations=allocations,
                 own_allocations=own, ideal_bits=ideal, cost_table=costs,
-                mode_bits=mode_bits, rate_dimension=args.dimension)
+                ideal_value=optimum["ideal_value"],
+                second_bits=optimum["second_bits"],
+                second_value=optimum["second_value"],
+                ideal_gap=optimum["ideal_gap"],
+                mode_bits=mode_bits, rate_dimension=args.dimension,
+                coefficient_kind="independent_saved_jvp")
             dump_json(directory / f"calibration_R{budget}.json", {
                 "arm": arm, "budget": budget, "reference_bit": ref,
                 "rate_dimension": args.dimension,
                 "n_images": int(len(q)), "n_own": int(len(own)),
                 "n_union": int(len(allocations)),
+                "ideal_gap": optimum["ideal_gap"],
                 "source_calibration": str(old_path),
             })
         print(f"R={budget}: common union has {len(allocations)} allocations")
@@ -289,6 +367,18 @@ def command_measure(args):
             calibration["cost_table"], calibration["c_g"], args.norm_mode,
             device, batch_size=args.batch_size,
             allocation_chunk=args.allocation_chunk)
+        sampled_gap = summary["phi_gap"]
+        exact_gap = float(calibration["ideal_gap"])
+        summary.update({
+            "phi_gap_sampled": sampled_gap,
+            "phi_gap": exact_gap,
+            "phi_gap_exact": exact_gap,
+            "chi_sampled": (
+                float(summary["omega_sampled"] / exact_gap)
+                if np.isfinite(exact_gap) and exact_gap > 0 else None),
+            "omega_scope": "sampled_allocation_lower_bound",
+            "ideal_model_fixed_from_independent_calibration": True,
+        })
         summary.update({
             "arm": args.arm, "budget": budget,
             "rate_dimension": rate_dimension,
@@ -386,6 +476,7 @@ def parser():
     p.add_argument("--mode-bits", required=True)
     p.add_argument("--budgets", required=True)
     p.add_argument("--reference-bits", required=True)
+    p.add_argument("--coefficient-bits")
     p.add_argument("--images", type=int, default=64)
     p.add_argument("--image-offset", type=int, default=0)
     p.add_argument("--group-chunk", type=int, default=8)

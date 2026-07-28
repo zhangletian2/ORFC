@@ -35,7 +35,8 @@ CUDA_VISIBLE_DEVICES=${GPU_INIT:-4} "$PY" p1_fixed_rate.py calibrate \
   --arm "$INIT" --codec "$OUT/menu_warmup.pt" \
   --features "$CACHE/features_train_blk20_n4500_ss1608637542.npy" \
   --output-dir "$OUT/calibration" --mode-bits 3,4,5,6,7,8 \
-  --budgets 192 --reference-bits 6 --images 64 --group-chunk 8 \
+  --budgets 192 --reference-bits 6 --coefficient-bits 6,7,8 \
+  --images 64 --group-chunk 8 \
   --single 32 --random 32 --seed 42 \
   >"$OUT/logs/calibration.log" 2>&1
 

@@ -2,31 +2,27 @@
 """Small CPU contracts for the current fixed-rate allocation pipeline."""
 
 from argparse import Namespace
+from itertools import product
 
 import numpy as np
 import torch
 
 from cayley import CayleySGD, DirectOrthogonalTransform
 from allocation_train import (
-    _allocation_source, _curve_report, _design, _dynamic_source,
-    _objective_terms, _positive_fit, _protect_primary, _select_state,
+    _allocation_source, _curve_report, _dynamic_source,
+    _objective_terms, _protect_primary, _select_state,
     _tangent_gradient,
 )
 from fixed_rate_remainder import (
     decompose_output_vectors, validate_fixed_total_rate,
 )
+from p1_fixed_rate import top2_allocate
 
 
-def test_positive_projection_and_candidate_binding():
+def test_fixed_ideal_candidate_binding():
     rates = np.asarray([[1, 3], [2, 2], [3, 1]], dtype=np.float64)
-    A = _design(rates, 1)
-    intercept, expected = 7.0, np.asarray([2.0, 8.0])
-    distortion = intercept + A @ expected
-    fitted_intercept, fitted = _positive_fit(
-        A, distortion, expected, ridge=1e-8)
-    assert np.allclose(fitted_intercept, intercept, atol=1e-5)
-    assert np.allclose(fitted, expected, atol=1e-4)
-
+    expected = np.asarray([1.0, 16.0])
+    distortion = np.asarray([10.0, 1.0, 0.0])
     source = {
         "rates": rates,
         "allocations": np.asarray([[0, 2], [1, 1], [2, 0]]),
@@ -35,12 +31,15 @@ def test_positive_projection_and_candidate_binding():
         "rate_dimension": np.asarray(1),
         "c_g": expected,
         "mode_bits": np.asarray([1, 2, 3]),
+        "ideal_bits": np.asarray([1, 3]),
+        "ideal_gap": np.asarray(0.5625),
     }
     args = Namespace(
-        ridge=1e-8, allocations=3, seed=42, reference_bit=2,
+        allocations=3, seed=42, reference_bit=2,
         tie_atol=1e-8, tie_rtol=1e-8)
     state = _select_state(source, distortion, calibration, args)
-    assert state["target"] == int(distortion.argmin())
+    assert state["target"] == 0
+    assert np.array_equal(state["c"], expected)
     assert state["allocations"][state["minimizer_local"][0]].tolist() == (
         source["allocations"][state["minimizers"][0]].tolist())
     assert state["reference"] == 1
@@ -50,9 +49,22 @@ def test_positive_projection_and_candidate_binding():
             "rate_dimension": np.asarray(1),
             "c_g": np.zeros(2),
             "mode_bits": np.asarray([1, 2, 3]),
+            "ideal_bits": np.asarray([1, 3]),
+            "ideal_gap": np.asarray(0.0),
         }, args)
     assert len(tied["minimizers"]) == 3
-    assert np.isinf(tied["gap"])
+    assert tied["gap"] == 0
+
+
+def test_top2_matches_brute_force():
+    c, bits, budget = np.asarray([1.0, 2.0, 3.0]), (1, 2, 3), 6
+    exact = top2_allocate(c, bits, budget, 2)
+    rows = sorted(
+        (sum(c[g] * 2 ** (-choice[g]) for g in range(3)), choice)
+        for choice in product(bits, repeat=3) if sum(choice) == budget)
+    assert tuple(exact["ideal_bits"]) == rows[0][1]
+    assert tuple(exact["second_bits"]) == rows[1][1]
+    assert np.isclose(exact["ideal_gap"], rows[1][0] - rows[0][0])
 
 
 def test_fixed_rate_and_curve_contracts():
@@ -69,7 +81,9 @@ def test_dynamic_pool_and_selection_objective():
     costs = np.broadcast_to(np.arange(1, 4, dtype=float), (2, 3))
     calibration = {
         "cost_table": costs, "mode_bits": np.arange(1, 4),
-        "rate_dimension": np.asarray(1), "c_g": np.ones(2)}
+        "rate_dimension": np.asarray(1), "c_g": np.ones(2),
+        "ideal_bits": np.asarray([2, 2]),
+        "ideal_gap": np.asarray(0.140625)}
     audit = _allocation_source(np.asarray([[0, 2], [1, 1], [2, 0]]),
                                calibration)
     args = Namespace(
@@ -81,7 +95,7 @@ def test_dynamic_pool_and_selection_objective():
     validate_fixed_total_rate(pool["allocations"], costs)
 
     select_args = Namespace(
-        ridge=1e-8, allocations=3, seed=42, reference_bit=2,
+        allocations=3, seed=42, reference_bit=2,
         tie_atol=1e-8, tie_rtol=1e-8, lse_temperature=0.1,
         recovery_fraction=1.0)
     distortion = np.asarray([5.0, 3.0, 4.0])
@@ -136,7 +150,8 @@ def test_remainder_decomposition():
 
 
 if __name__ == "__main__":
-    test_positive_projection_and_candidate_binding()
+    test_fixed_ideal_candidate_binding()
+    test_top2_matches_brute_force()
     test_fixed_rate_and_curve_contracts()
     test_dynamic_pool_and_selection_objective()
     test_primary_gradient_protection()

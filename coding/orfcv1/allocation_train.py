@@ -8,7 +8,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from scipy.optimize import lsq_linear
 
 from cayley import CayleySGD, DirectOrthogonalTransform
 from codec_v1 import load_codec_v1, save_codec_v1
@@ -26,23 +25,6 @@ def _write(path, value):
 
 def _design(rates, dimension):
     return np.exp2(-2.0 * np.asarray(rates) / float(dimension))
-
-
-def _positive_fit(A, y, c0, ridge=1e-3):
-    """Fit ``intercept + A @ c`` with non-negative ``c``."""
-    n, groups = A.shape
-    X = np.c_[np.ones(n), A] / np.sqrt(n)
-    target = np.asarray(y, dtype=np.float64) / np.sqrt(n)
-    if ridge > 0:
-        reg = np.zeros((groups, groups + 1))
-        reg[:, 1:] = np.sqrt(ridge) * np.eye(groups)
-        X = np.r_[X, reg]
-        target = np.r_[target, np.sqrt(ridge) * c0]
-    fit = lsq_linear(
-        X, target, bounds=(np.r_[-np.inf, np.zeros(groups)], np.inf))
-    if not fit.success:
-        raise RuntimeError(f"coefficient fit failed: {fit.message}")
-    return float(fit.x[0]), fit.x[1:]
 
 
 def _sample(features, teachers, count, rng, device, norm_mode, ids=None):
@@ -204,19 +186,27 @@ def command_warmup(args):
 
 def _select_state(source, distortion, calibration, args):
     A = _design(source["rates"], int(calibration["rate_dimension"]))
-    intercept, c = _positive_fit(
-        A, distortion, calibration["c_g"], args.ridge)
-    phi = intercept + A @ c
+    intercept, c = 0.0, np.asarray(calibration["c_g"], dtype=np.float64)
+    phi = A @ c
     remainder = distortion - phi
     tolerance = max(
         args.tie_atol, args.tie_rtol * max(abs(float(phi.min())), 1.0))
     minimizers = np.flatnonzero(phi <= phi.min() + tolerance)
     outside = np.setdiff1d(
         np.arange(len(phi)), minimizers, assume_unique=True)
-    gap = (
-        float(phi[outside].min() - phi.min()) if len(outside)
-        else float("inf"))
-    target = int(minimizers[np.argmin(distortion[minimizers])])
+    gap = float(calibration["ideal_gap"])
+    lookup = {
+        int(bit): index
+        for index, bit in enumerate(calibration["mode_bits"])}
+    target_modes = np.asarray(
+        [lookup[int(bit)] for bit in calibration["ideal_bits"]])
+    hits = np.flatnonzero(np.all(
+        source["allocations"] == target_modes, axis=1))
+    if len(hits) != 1:
+        raise ValueError("allocation pool must contain the fixed ideal solution")
+    target = int(hits[0])
+    if target not in minimizers:
+        raise RuntimeError("fixed ideal solution does not minimize fixed Phi")
     order = np.argsort(remainder)
     edge = max(2, args.allocations // 4)
     selected = (
@@ -586,7 +576,7 @@ def command_short(args):
         ):
             refresh += 1
             training_source = _dynamic_source(
-                audit, calibration, state["c"], args, refresh)
+                audit, calibration, calibration["c_g"], args, refresh)
             current_D = _hard_eval(
                 codec, tail, refresh_x, refresh_y,
                 training_source["allocations"], refresh_args)
@@ -617,10 +607,15 @@ def command_short(args):
         codec, tail, refresh_x, refresh_y,
         audit["allocations"], refresh_args)
     state = _select_state(audit, final_D, calibration, args)
+    state = _set_scales(state, audit_scales)
     after_matrix = _hard_eval(
         codec, tail, val_x, val_y, audit["allocations"], args,
         return_per_image=True)
     after_val_D = after_matrix.mean(1)
+    final_terms = _objective_terms(
+        after_val_D, state, args, remainder_weight)
+    if validation_trace[-1]["step"] != total_steps:
+        validation_trace.append({"step": total_steps, **final_terms})
     after = _report(
         audit, after_val_D, state, int(calibration["rate_dimension"]))
     curve = _hard_eval(
@@ -642,11 +637,11 @@ def command_short(args):
         "history": history, "active_states": active,
         "validation_trace": validation_trace,
         "initial_validation_score": initial_terms["score"],
-        "final_validation_score": (
-            validation_trace[-1]["score"]
-            if validation_trace[-1]["step"] == total_steps else None),
+        "final_validation_score": final_terms["score"],
         "final_state": _state_report(state),
         "joint_codebooks": True,
+        "fixed_ideal_model": True,
+        "coefficient_source": "independent_jvp",
         "remainder_parameters": "u",
         "dynamic_allocations": args.dynamic_allocations,
         "audit_allocation_count": int(len(audit["allocations"])),
@@ -712,7 +707,6 @@ def parser():
     short.add_argument("--tau-end", type=float, default=0.01)
     short.add_argument(
         "--schedule-unit", choices=("step", "epoch"), default="step")
-    short.add_argument("--ridge", type=float, default=1e-3)
     short.add_argument("--tie-atol", type=float, default=1e-8)
     short.add_argument("--tie-rtol", type=float, default=1e-8)
     short.add_argument("--lse-temperature", type=float, default=0.1)
