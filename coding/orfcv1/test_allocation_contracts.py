@@ -19,8 +19,9 @@ from allocation_train import (
     _with_ideal_set,
 )
 from fixed_rate_remainder import (
-    allocation_phi, bootstrap_remainder_range, decompose_output_vectors,
-    paired_contract_statistics, validate_fixed_total_rate,
+    allocation_correlation, allocation_phi, bootstrap_remainder_range,
+    decompose_output_vectors, paired_contract_statistics,
+    split_half_stability, validate_fixed_total_rate,
 )
 from ideal_set_statistics import _solve_batch, _suffix_counts
 from p1_fixed_rate import (
@@ -361,6 +362,14 @@ def test_paired_unified_measurement_contract():
     assert result["sampled_recovery_margin_point"] == -4.0
     assert result["structural_range_ci95"] == [4.0, 4.0]
     assert not result["sampled_recovery_condition_confident"]
+    stability = split_half_stability(
+        distortion - quad, repeats=10, seed=42)
+    assert stability["available"]
+    assert np.isclose(
+        stability["split_half_spearman"]["median"], 1.0)
+    correlation = allocation_correlation(
+        (distortion - quad).mean(1), (quad - analytic).mean(1))
+    assert np.isclose(correlation["pearson"], 1.0)
 
 
 if __name__ == "__main__":

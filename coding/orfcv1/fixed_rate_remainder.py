@@ -283,6 +283,69 @@ def paired_contract_statistics(
     return result
 
 
+def allocation_correlation(first, second):
+    """Return Pearson and rank correlation across allocation-level values."""
+    first, second = (
+        np.asarray(value, dtype=np.float64).reshape(-1)
+        for value in (first, second)
+    )
+    if first.shape != second.shape:
+        raise ValueError("allocation correlation inputs must match")
+
+    def correlation(x, y):
+        x, y = x - x.mean(), y - y.mean()
+        scale = np.linalg.norm(x) * np.linalg.norm(y)
+        return float(x @ y / scale) if scale > 0 else None
+
+    def rank(value):
+        order = np.argsort(value, kind="mergesort")
+        result = np.empty(len(value), dtype=np.float64)
+        result[order] = np.arange(len(value), dtype=np.float64)
+        return result
+
+    return {
+        "pearson": correlation(first, second),
+        "spearman": correlation(rank(first), rank(second)),
+    }
+
+
+def split_half_stability(per_image, repeats=200, seed=42):
+    """Measure whether allocation ordering replicates across disjoint halves."""
+    values = np.asarray(per_image, dtype=np.float64)
+    if values.ndim != 2:
+        raise ValueError("split-half stability requires shape [A,N]")
+    if values.shape[1] < 4 or repeats < 1:
+        return {"available": False, "repeats": 0}
+    rng, correlations, range_ratios = np.random.default_rng(seed), [], []
+    half = values.shape[1] // 2
+    for _ in range(repeats):
+        order = rng.permutation(values.shape[1])
+        first = values[:, order[:half]].mean(1)
+        second = values[:, order[half:2 * half]].mean(1)
+        correlation = allocation_correlation(first, second)["spearman"]
+        if correlation is not None:
+            correlations.append(correlation)
+        ranges = float(np.ptp(first)), float(np.ptp(second))
+        if max(ranges) > 0:
+            range_ratios.append(min(ranges) / max(ranges))
+
+    def report(rows):
+        rows = np.asarray(rows, dtype=np.float64)
+        return {
+            "median": float(np.median(rows)) if rows.size else None,
+            "ci95": (
+                np.quantile(rows, [0.025, 0.975]).tolist()
+                if rows.size else None),
+        }
+
+    return {
+        "available": True,
+        "repeats": int(repeats),
+        "split_half_spearman": report(correlations),
+        "split_half_range_ratio": report(range_ratios),
+    }
+
+
 def decompose_output_vectors(phi, group_response, output_delta):
     """Split one output distortion into analytic, menu, cross and nonlinear terms.
 
@@ -490,6 +553,7 @@ def evaluate_fixed_rate_decomposition(
     bootstrap_count=1000,
     bootstrap_batch=32,
     bootstrap_seed=42,
+    stability_repeats=200,
 ):
     """Measure the unified ``D``, quadratic and analytic ideal contracts.
 
@@ -674,6 +738,18 @@ def evaluate_fixed_rate_decomposition(
         values["distortion"], quad_phi, analytic_phi,
         bootstraps=bootstrap_count, batch_size=bootstrap_batch,
         seed=bootstrap_seed))
+    summary["split_half_stability"] = {
+        name: split_half_stability(
+            value, repeats=stability_repeats, seed=bootstrap_seed + 1)
+        for name, value in (
+            ("structural_remainder", structural),
+            ("rate_model_mismatch", rate_mismatch),
+            ("analytic_remainder", analytic_remainder),
+        )
+    }
+    summary["structural_rate_allocation_correlation"] = (
+        allocation_correlation(
+            structural.mean(1), rate_mismatch.mean(1)))
     arrays = {
         "allocations": allocations, "rates": rates, "total_rates": totals,
         "calibrated_phi": calibrated_phi,

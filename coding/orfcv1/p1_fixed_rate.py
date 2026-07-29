@@ -448,30 +448,54 @@ def command_decompose(args):
     teachers = np.load(args.teachers, mmap_mode="r")[:args.images]
     out = Path(args.output_dir)
     for budget in csv_ints(args.budgets):
-        calibration = np.load(
-            out / f"calibration_R{budget}.npz", allow_pickle=False)
-        if "reference_bit" in calibration.files:
-            reference_bit = int(calibration["reference_bit"])
+        source_path = (
+            Path(args.calibration) if args.calibration else
+            out / f"calibration_R{budget}.npz")
+        calibration = np.load(source_path, allow_pickle=False)
+
+        def field(name):
+            key = (
+                name if name in calibration.files else
+                f"calibration__{name}")
+            if key not in calibration.files:
+                raise KeyError(f"{name} is absent from {source_path}")
+            return calibration[key]
+
+        allocations = (
+            calibration[args.allocation_key]
+            if args.allocation_key in calibration.files else
+            field("allocations"))
+        if (
+            "reference_bit" in calibration.files
+            or "calibration__reference_bit" in calibration.files
+        ):
+            reference_bit = int(field("reference_bit"))
         else:
             distance = np.square(
-                calibration["c_by_bit"] - calibration["c_g"][None]).mean(1)
+                field("c_by_bit") - field("c_g")[None]).mean(1)
             reference_bit = int(
-                calibration["coefficient_bits"][distance.argmin()])
+                field("coefficient_bits")[distance.argmin()])
         summary, arrays = evaluate_fixed_rate_decomposition(
-            features, teachers, codec, tail, calibration["allocations"],
-            calibration["cost_table"], calibration["c_g"], args.norm_mode,
+            features, teachers, codec, tail, allocations,
+            field("cost_table"), field("c_g"), args.norm_mode,
             device, allocation_chunk=args.allocation_chunk,
             jvp_eps=args.jvp_eps, jvp_chunk=args.jvp_chunk,
-            mode_bits=calibration["mode_bits"],
+            mode_bits=field("mode_bits"),
             reference_bit=reference_bit,
             bootstrap_count=args.bootstrap_count,
             bootstrap_batch=args.bootstrap_batch,
             bootstrap_seed=args.seed + 2000,
+            stability_repeats=args.stability_repeats,
             ideal_cost_table=(
-                calibration["ideal_cost_table"]
-                if "ideal_cost_table" in calibration.files else None))
+                field("ideal_cost_table")
+                if (
+                    "ideal_cost_table" in calibration.files
+                    or "calibration__ideal_cost_table" in calibration.files)
+                else None))
         summary.update({
             "arm": args.arm, "budget": budget,
+            "calibration_source": str(source_path),
+            "allocation_key": args.allocation_key,
             "allocation_scope": "sampled_lower_bound",
             "ideal_terms_recomputed_for_current_codec": True,
             "complete_and_ideal_terms_paired_by_image": True,
@@ -578,6 +602,8 @@ def parser():
     p.add_argument("--allocation-chunk", type=int, default=8)
     p = sub.add_parser("decompose", parents=[common])
     p.add_argument("--output-dir", required=True)
+    p.add_argument("--calibration")
+    p.add_argument("--allocation-key", default="allocations")
     p.add_argument("--teachers", required=True)
     p.add_argument("--budgets", required=True)
     p.add_argument("--images", type=int, default=32)
@@ -586,6 +612,7 @@ def parser():
     p.add_argument("--jvp-chunk", type=int, default=8)
     p.add_argument("--bootstrap-count", type=int, default=1000)
     p.add_argument("--bootstrap-batch", type=int, default=32)
+    p.add_argument("--stability-repeats", type=int, default=200)
     p = sub.add_parser("audit")
     p.add_argument("--run-dir", required=True)
     p.add_argument("--arms", default="identity,opq,orfc,response")
