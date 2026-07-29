@@ -133,3 +133,22 @@ recomputes the ideal table, Top-256 set, hard competitors and operational
 anchor, followed by recovery-weight recalibration. A two-step smoke verified
 identical initial audit allocations, nonzero joint gradients, changing
 recovery weights, finite Cayley updates and monotonic six-mode menus.
+
+The formal multi-outer run is
+`statset256_multiouter_medium_20260729T030153Z`. All five refreshes completed;
+recovery weights stayed in [0.265, 0.289], uniform 6-bit remained the
+operational anchor, and menu/orthogonality gates passed. On 300 independent
+images and 910 common allocations, recovery minus primary-only changed common
+mean distortion by -25.03, CI95 [-30.53, -19.72], uniform 6-bit distortion by
+-2.41, CI95 [-7.03, 1.81], and sampled remainder range by -4.63, CI95
+[-19.58, 1.81]. Ideal-set best and empirical-margin intervals also crossed
+zero. The multi-outer arm is statistically indistinguishable from the accepted
+fixed-outer recovery arm, so refreshing the outer state adds no measured
+benefit yet.
+
+The remaining mismatch is inside the inner objective. Outer 300-image mining
+keeps the ideal-set-versus-uniform margin negative, while the four-image
+training hinge is usually inactive because its local ordering flips. Only
+three of eleven logged recovery terms were nonzero. The next gate must train a
+fixed outer-mined inside/outside pair with an unhinged paired expectation, or
+estimate that expectation by accumulating multiple inner batches.
