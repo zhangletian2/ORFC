@@ -13,8 +13,10 @@ from cayley import CayleySGD, DirectOrthogonalTransform
 from allocation_train import (
     _allocation_source, _backward, _choose_auxiliary, _curve_report,
     _dynamic_source,
-    _load_outer_state, _objective_terms, _protect_primary,
+    _load_outer_state, _loss_from_distortions, _objective_terms,
+    _protect_primary,
     _outer_pair_recovery, _save_outer_state, _select_state,
+    _restrict_ideal_set_to_source,
     _refresh_before_step, _tangent_gradient, _validate_training_slices,
     _with_ideal_set,
 )
@@ -25,7 +27,8 @@ from fixed_rate_remainder import (
 )
 from ideal_set_statistics import _solve_batch, _suffix_counts
 from p1_fixed_rate import (
-    make_allocations, top2_allocate, top2_cost_allocate, topk_cost_allocate,
+    make_allocations, separable_cost_range, top2_allocate,
+    top2_cost_allocate, topk_cost_allocate,
 )
 
 
@@ -89,6 +92,43 @@ def test_top2_matches_brute_force():
         c, bits, budget, 0, 0, 42, 2)
     realised = {tuple(np.asarray(bits)[row]) for row in allocations}
     assert rows[0][1] in realised and rows[1][1] in realised
+    extrema = separable_cost_range(table, bits, 4)
+    assert np.isclose(extrema["minimum"], brute[0][0])
+    assert np.isclose(extrema["maximum"], brute[-1][0])
+    assert np.isclose(
+        extrema["range"], brute[-1][0] - brute[0][0])
+
+
+def test_analytic_ideal_set_and_rate_mismatch_range():
+    calibration = {
+        "c_g": np.asarray([1.0, 16.0]),
+        "mode_bits": np.asarray([1, 2, 3]),
+        "cost_table": np.broadcast_to(
+            np.asarray([1, 2, 3]), (2, 3)),
+        "rate_dimension": np.asarray(1),
+        "ideal_bits": np.asarray([2, 2]),
+        "ideal_cost_table": np.asarray([
+            [8.0, 4.0, 2.0], [2.0, 4.0, 8.0]]),
+    }
+    args = Namespace(
+        ideal_set_size=1,
+        auxiliary_objective="analytic_remainder_range")
+    updated = _with_ideal_set(calibration, args)
+    expected = top2_allocate(
+        calibration["c_g"], (1, 2, 3), 4, 1)
+    assert np.array_equal(updated["ideal_bits"], expected["ideal_bits"])
+    mismatch = calibration["ideal_cost_table"] - np.stack([
+        calibration["c_g"] * np.exp2(-2.0 * bit)
+        for bit in calibration["mode_bits"]], axis=1)
+    exact = separable_cost_range(mismatch, (1, 2, 3), 4)
+    assert np.isclose(updated["rate_mismatch_range"], exact["range"])
+    source = _allocation_source(np.asarray([[1, 1]]), updated)
+    restricted = _restrict_ideal_set_to_source(updated, source, args)
+    state_args = Namespace(
+        **vars(args), allocations=1, seed=42, reference_bit=2,
+        tie_atol=1e-8, tie_rtol=1e-8, ideal_batch_size=1)
+    state = _select_state(source, np.asarray([1.0]), restricted, state_args)
+    assert state["target_set"].tolist() == [0]
 
 
 def test_fixed_rate_and_curve_contracts():
@@ -310,6 +350,11 @@ def test_remainder_range_is_a_distinct_auxiliary():
     auxiliary, auxiliary_constraint = _choose_auxiliary(
         args, omega, recovery, constraint)
     assert auxiliary is omega and auxiliary_constraint is omega
+    args.auxiliary_objective = "analytic_remainder_range"
+    _, terms = _loss_from_distortions(D, state, args, 1.0)
+    assert terms["auxiliary"] is terms["omega_upper"]
+    assert float(terms["omega_upper"] * state["omega_scale"]) >= float(
+        e.max() - e.min())
 
 
 def test_direct_cayley_descent_and_orthogonality():
@@ -375,6 +420,7 @@ def test_paired_unified_measurement_contract():
 if __name__ == "__main__":
     test_fixed_ideal_candidate_binding()
     test_top2_matches_brute_force()
+    test_analytic_ideal_set_and_rate_mismatch_range()
     test_fixed_rate_and_curve_contracts()
     test_statistical_allocation_helpers()
     test_dynamic_pool_and_selection_objective()

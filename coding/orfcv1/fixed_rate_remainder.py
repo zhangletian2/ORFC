@@ -152,8 +152,8 @@ def allocation_phi(
 
 
 def bootstrap_remainder_range(
-    distortion_per_image, phi, comparison=None, bootstraps=1000,
-    batch_size=32, seed=42,
+    distortion_per_image, phi, comparison=None, comparison_phi=None,
+    bootstraps=1000, batch_size=32, seed=42,
 ):
     """Bootstrap allocation extrema, reselecting max/min on every resample."""
     distortion = np.asarray(distortion_per_image, dtype=np.float64)
@@ -164,15 +164,21 @@ def bootstrap_remainder_range(
         comparison, dtype=np.float64)
     if other is not None and other.shape != distortion.shape:
         raise ValueError("comparison must match distortion")
+    other_phi = (
+        phi if comparison_phi is None else
+        np.asarray(comparison_phi, dtype=np.float64))
+    if other_phi.shape != phi.shape:
+        raise ValueError("comparison_phi must match phi")
 
-    def omega(values):
-        return float(np.ptp(values.mean(1) - phi))
+    def omega(values, reference):
+        return float(np.ptp(values.mean(1) - reference))
 
-    point = omega(distortion)
+    point = omega(distortion, phi)
     if bootstraps < 1 or distortion.shape[1] < 2:
         samples = np.asarray([point])
         differences = (
-            np.asarray([point - omega(other)]) if other is not None else None)
+            np.asarray([point - omega(other, other_phi)])
+            if other is not None else None)
     else:
         rng = np.random.default_rng(seed)
         rows, deltas = [], []
@@ -185,7 +191,7 @@ def bootstrap_remainder_range(
             rows.append(current)
             if other is not None:
                 baseline = np.ptp(
-                    other[:, ids].mean(2) - phi[:, None], axis=0)
+                    other[:, ids].mean(2) - other_phi[:, None], axis=0)
                 deltas.append(current - baseline)
         samples = np.concatenate(rows)
         differences = np.concatenate(deltas) if deltas else None
@@ -198,7 +204,8 @@ def bootstrap_remainder_range(
     }
     if differences is not None:
         result.update({
-            "paired_omega_change": float(point - omega(other)),
+            "paired_omega_change": float(
+                point - omega(other, other_phi)),
             "paired_omega_change_ci95": np.quantile(
                 differences, [0.025, 0.975]).tolist(),
         })

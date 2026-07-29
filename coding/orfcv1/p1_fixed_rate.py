@@ -209,6 +209,19 @@ def top2_cost_allocate(ideal_cost_table, mode_bits, budget):
     }
 
 
+def separable_cost_range(cost_table, mode_bits, budget):
+    """Exact min/max of a separable mode table at one total-rate budget."""
+    minimum = topk_cost_allocate(cost_table, mode_bits, budget, 1)
+    maximum = topk_cost_allocate(
+        -np.asarray(cost_table), mode_bits, budget, 1)
+    low, high = float(minimum["values"][0]), float(-maximum["values"][0])
+    return {
+        "minimum": low, "maximum": high, "range": high - low,
+        "minimum_bits": minimum["bits"][0],
+        "maximum_bits": maximum["bits"][0],
+    }
+
+
 def top2_allocate(c_g, mode_bits, budget, dimension):
     table = np.stack([
         np.asarray(c_g) * np.exp2(-2.0 * bit / dimension)
