@@ -15,7 +15,8 @@ from allocation_train import (
     _dynamic_source,
     _load_outer_state, _objective_terms, _protect_primary,
     _outer_pair_recovery, _save_outer_state, _select_state,
-    _tangent_gradient, _validate_training_slices, _with_ideal_set,
+    _refresh_before_step, _tangent_gradient, _validate_training_slices,
+    _with_ideal_set,
 )
 from fixed_rate_remainder import (
     allocation_phi, decompose_output_vectors, validate_fixed_total_rate,
@@ -122,6 +123,10 @@ def test_statistical_allocation_helpers():
         pass
     else:
         raise AssertionError("overlapping training slices were accepted")
+    refresh_args = Namespace(refresh_steps=10)
+    assert [
+        step for step in range(50) if _refresh_before_step(step, refresh_args)
+    ] == [10, 20, 30, 40]
 
 
 def test_dynamic_pool_and_selection_objective():

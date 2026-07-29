@@ -715,6 +715,15 @@ def _training_batches(args, count, rng):
             step += 1
 
 
+def _refresh_before_step(step, args):
+    """Refresh only before a block that will receive at least one update."""
+    return (
+        args.refresh_steps > 0
+        and step > 0
+        and step % args.refresh_steps == 0
+    )
+
+
 def _state_report(state):
     coverage = sum(
         len(np.unique(state["allocations"][:, group]))
@@ -942,27 +951,65 @@ def command_short(args):
         args.epochs
         if args.schedule_unit == "epoch" and args.epochs > 0
         else total_steps)
-    rotation_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        rotation_optimizer, T_max=max(schedule_length, 1),
-        eta_min=rotation_lr * 0.01)
-    codebook_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        codebook_optimizer, T_max=max(schedule_length, 1),
-        eta_min=args.lr * 0.01)
+    if args.restart_scheduler_on_refresh:
+        if args.schedule_unit != "step" or args.refresh_steps < 1:
+            raise ValueError(
+                "scheduler restart requires step scheduling and refresh-steps")
+        schedule_length = args.refresh_steps
+
+    def make_schedulers(reset=False):
+        if reset:
+            rotation_optimizer.param_groups[0]["lr"] = rotation_lr
+            codebook_optimizer.param_groups[0]["lr"] = args.lr
+        return (
+            torch.optim.lr_scheduler.CosineAnnealingLR(
+                rotation_optimizer, T_max=max(schedule_length, 1),
+                eta_min=rotation_lr * 0.01),
+            torch.optim.lr_scheduler.CosineAnnealingLR(
+                codebook_optimizer, T_max=max(schedule_length, 1),
+                eta_min=args.lr * 0.01),
+        )
+
+    rotation_scheduler, codebook_scheduler = make_schedulers()
     args.pq_temperature = args.tau_start
+    available = min(
+        args.train_images, len(train_x) - args.train_image_offset)
+    calibration_count = min(args.aux_calibration_images, available)
+    calibration_rng = np.random.default_rng(args.seed + 1)
+    calibration_ids = args.train_image_offset + calibration_rng.choice(
+        available, calibration_count, replace=False)
     calibration_batch = _sample(
-        train_x, train_y, args.images, np.random.default_rng(args.seed + 1),
-        device, args.norm_mode,
-        args.train_image_offset + np.arange(min(
-            args.images, len(train_x) - args.train_image_offset)))
+        train_x, train_y, calibration_count, calibration_rng,
+        device, args.norm_mode, calibration_ids)
     remainder_weight = _calibrate_remainder(
         codec, tail, calibration_batch, state, args, params, rotation)
     weight_history = [{
         "step": 0, "refresh": 0, "remainder_weight": remainder_weight}]
-    history, active, refresh, last_refresh_step = [], [], 0, 0
+    history, active, refresh = [], [], 0
     initial_terms = _objective_terms(
         initial_dynamic_D, initial_dynamic_state, args, remainder_weight)
     validation_trace = [{"step": 0, **initial_terms}]
     for step, epoch, ids in _training_batches(args, len(train_x), rng):
+        if _refresh_before_step(step, args):
+            refresh += 1
+            calibration, training_source, state = _refresh_training_state(
+                codec, tail, train_x, train_y, audit, state,
+                calibration, args, refresh)
+            state = _set_scales(state, training_scales)
+            remainder_weight = _calibrate_remainder(
+                codec, tail, calibration_batch, state, args, params, rotation)
+            if args.restart_scheduler_on_refresh:
+                rotation_scheduler, codebook_scheduler = make_schedulers(
+                    reset=True)
+            report = _state_report(state)
+            report["pool_size"] = int(len(training_source["allocations"]))
+            report["step"] = step
+            report["remainder_weight"] = remainder_weight
+            report["scheduler_restarted"] = args.restart_scheduler_on_refresh
+            active.append(report)
+            weight_history.append({
+                "step": step, "refresh": refresh,
+                "remainder_weight": remainder_weight})
         progress = (
             epoch / max(args.epochs - 1, 1)
             if args.schedule_unit == "epoch" and epoch is not None
@@ -972,6 +1019,8 @@ def command_short(args):
         args.pq_temperature = temperature
         batch = _sample(
             train_x, train_y, args.images, rng, device, args.norm_mode, ids)
+        rotation_lr_used = rotation_optimizer.param_groups[0]["lr"]
+        codebook_lr_used = codebook_optimizer.param_groups[0]["lr"]
         rotation_optimizer.zero_grad(set_to_none=True)
         codebook_optimizer.zero_grad(set_to_none=True)
         loss, terms = _loss(
@@ -1008,6 +1057,15 @@ def command_short(args):
                 "grad_norm": float(grad),
                 "rotation_grad_norm": parameter_grad_norms[0],
                 "codebook_grad_norms": parameter_grad_norms[1:],
+                "active_codebook_modes": [
+                    index for index, value in enumerate(parameter_grad_norms[1:])
+                    if value > 0],
+                "zero_codebook_grad_modes": [
+                    index for index, value in enumerate(parameter_grad_norms[1:])
+                    if value == 0],
+                "rotation_lr": rotation_lr_used,
+                "codebook_lr": codebook_lr_used,
+                "refresh": refresh,
                 "gradient_cosine": gradient_cosine,
                 "gradient_projected": gradient_projected,
                 "rotation_step_size": rotation_optimizer.state[
@@ -1024,25 +1082,6 @@ def command_short(args):
                 "set_external_gap": float(state["gap"]),
                 "epoch": epoch, "temperature": temperature,
             })
-        if (
-            args.refresh_steps > 0 and (step + 1) % args.refresh_steps == 0
-        ):
-            refresh += 1
-            last_refresh_step = step + 1
-            calibration, training_source, state = _refresh_training_state(
-                codec, tail, train_x, train_y, audit, state,
-                calibration, args, refresh)
-            state = _set_scales(state, training_scales)
-            remainder_weight = _calibrate_remainder(
-                codec, tail, calibration_batch, state, args, params, rotation)
-            report = _state_report(state)
-            report["pool_size"] = int(len(training_source["allocations"]))
-            report["step"] = step + 1
-            report["remainder_weight"] = remainder_weight
-            active.append(report)
-            weight_history.append({
-                "step": step + 1, "refresh": refresh,
-                "remainder_weight": remainder_weight})
         if args.select_steps > 0 and (step + 1) % args.select_steps == 0:
             validation_D = _hard_eval(
                 codec, tail, val_x, val_y,
@@ -1061,21 +1100,6 @@ def command_short(args):
                 f"margin={terms_val['empirical_margin']:.6g} "
                 f"omega={terms_val['omega']:.6g} "
                 f"pool={len(training_source['allocations'])}", flush=True)
-    if args.outer_refresh and last_refresh_step != total_steps:
-        refresh += 1
-        calibration, training_source, state = _refresh_training_state(
-            codec, tail, train_x, train_y, audit, state,
-            calibration, args, refresh)
-        state = _set_scales(state, training_scales)
-        remainder_weight = _calibrate_remainder(
-            codec, tail, calibration_batch, state, args, params, rotation)
-        report = _state_report(state)
-        report["step"] = total_steps
-        report["remainder_weight"] = remainder_weight
-        active.append(report)
-        weight_history.append({
-            "step": total_steps, "refresh": refresh,
-            "remainder_weight": remainder_weight})
     final_dynamic_matrix = _hard_eval(
         codec, tail, val_x, val_y, training_source["allocations"], args,
         return_per_image=True)
@@ -1164,6 +1188,9 @@ def command_short(args):
         "epochs": args.epochs, "train_images": args.train_images,
         "batch_size": args.images, "learning_rate": args.lr,
         "rotation_learning_rate": rotation_lr,
+        "aux_calibration_images": calibration_count,
+        "restart_scheduler_on_refresh": args.restart_scheduler_on_refresh,
+        "outer_refresh_count": refresh,
         "rotation_optimizer": "CayleySGD",
         "cayley_iterations": args.cayley_iterations,
         "reorthogonalize_every": args.reorthogonalize_every,
@@ -1259,6 +1286,7 @@ def parser():
     short.add_argument("--reference-bit", type=int, default=6)
     short.add_argument("--remainder-weight", type=float, default=0.0)
     short.add_argument("--remainder-grad-ratio", type=float, default=-1.0)
+    short.add_argument("--aux-calibration-images", type=int, default=32)
     short.add_argument("--rotation-lr", type=float)
     short.add_argument("--cayley-iterations", type=int, default=5)
     short.add_argument("--reorthogonalize-every", type=int, default=100)
@@ -1267,6 +1295,8 @@ def parser():
     short.add_argument("--dynamic-single", type=int, default=32)
     short.add_argument("--dynamic-random", type=int, default=32)
     short.add_argument("--outer-refresh", action="store_true")
+    short.add_argument(
+        "--restart-scheduler-on-refresh", action="store_true")
     short.add_argument("--outer-calibration-images", type=int, default=64)
     short.add_argument("--outer-calibration-offset", type=int, default=0)
     short.add_argument("--outer-mining-images", type=int, default=64)
