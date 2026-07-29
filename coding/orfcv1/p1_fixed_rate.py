@@ -11,8 +11,7 @@ import torch
 
 HERE = Path(__file__).resolve().parent
 ORFC = HERE.parent / "orfc"
-THEORY = HERE.parents[2] / "theory_verify"
-sys.path[:0] = [str(HERE), str(ORFC), str(THEORY)]
+sys.path[:0] = [str(HERE), str(ORFC)]
 
 from codec_v1 import (
     DirectOrthogonalTransform, FeatureCodecV1, load_codec_v1, save_codec_v1,
