@@ -16,6 +16,22 @@ if (( REFRESH_STEPS < 1 || STEPS < REFRESH_STEPS )); then
   exit 2
 fi
 
+GPU_STATE=${GPU_STATE:-4}
+GPU_BASE=${GPU_BASE:-4}
+GPU_RECOVERY=${GPU_RECOVERY:-5}
+GPU_REMAINDER=${GPU_REMAINDER:-6}
+seen=" "
+for gpu in "$GPU_STATE" "$GPU_BASE" "$GPU_RECOVERY" "$GPU_REMAINDER"; do
+  [[ "$seen" == *" $gpu "* ]] && continue
+  seen+="$gpu "
+  pids=$(nvidia-smi -i "$gpu" --query-compute-apps=pid \
+    --format=csv,noheader,nounits)
+  if [[ -n "$pids" ]]; then
+    echo "physical GPU $gpu is occupied by PID(s): $pids" >&2
+    exit 3
+  fi
+done
+
 COMMON=(
   --codec "$MENU" --calibration "$CALIBRATION"
   --features "$CACHE/features_train_blk20_n4500_ss1608637542.npy"
@@ -39,7 +55,8 @@ COMMON=(
 )
 
 mkdir -p "$OUT/logs"
-CUDA_VISIBLE_DEVICES="${GPU_STATE:-4}" "$PY" allocation_train.py short \
+trap 'printf "driver_exit=%s\n" "$?" >"$OUT/logs/driver_exit.txt"' EXIT
+CUDA_VISIBLE_DEVICES="$GPU_STATE" "$PY" allocation_train.py short \
   "${COMMON[@]}" --refresh-steps 0 --remainder-grad-ratio 0 \
   --output "$OUT/shared_unused.json" --checkpoint "$OUT/shared_unused.pt" \
   --outer-state-output "$STATE" --prepare-outer-only \
@@ -56,18 +73,21 @@ run_one() {
     >"$OUT/logs/$name.log" 2>&1
 }
 
-run_one "${GPU_BASE:-4}" primary_only 0 recovery &
+run_one "$GPU_BASE" primary_only 0 recovery &
 p0=$!
-run_one "${GPU_RECOVERY:-5}" primary_recovery 0.25 recovery \
+run_one "$GPU_RECOVERY" primary_recovery 0.25 recovery \
   --outer-gated-recovery --recovery-pairs "${RECOVERY_PAIRS:-4}" &
 p1=$!
-run_one "${GPU_REMAINDER:-6}" primary_remainder 0.25 remainder_range &
+run_one "$GPU_REMAINDER" primary_remainder 0.25 remainder_range &
 p2=$!
-failed=0
-wait "$p0" || failed=1
-wait "$p1" || failed=1
-wait "$p2" || failed=1
-if (( failed )); then
+set +e
+wait "$p0"; s0=$?
+wait "$p1"; s1=$?
+wait "$p2"; s2=$?
+set -e
+printf "primary_only\t%s\nprimary_recovery\t%s\nprimary_remainder\t%s\n" \
+  "$s0" "$s1" "$s2" | tee "$OUT/logs/arm_status.tsv"
+if (( s0 || s1 || s2 )); then
   echo "one or more medium-training arms failed; inspect $OUT/logs" >&2
   exit 1
 fi
