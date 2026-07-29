@@ -52,20 +52,18 @@
 
 ## Next stage before full optimisation
 
-- Do not run the current `run_allocation_full.sh`; it still implements the old
-  single-target/no-outer-refresh protocol.
+- `run_allocation_full.sh` has been structurally repaired, but remains blocked
+  until the revised three-arm medium gate passes.
 - The fixed-outer 50-step gate is complete: overall and ideal-set distortion
   improve, while the sampled remainder-range reduction is not significant.
 - The formal `run_multi_outer_medium.sh` gate is complete. Shared initial state,
   five outer refreshes and weight recalibration passed, but it produced no
   detectable gain over the fixed-outer recovery arm.
-- Replace the noisy four-image set hinge with one controlled comparison:
-  either optimize the unhinged expected distortion difference of the
-  outer-mined best-inside and best-outside pair, or accumulate enough inner
-  minibatches before evaluating the same hinge.
-- Keep the outer-mined pair fixed within each block, retain primary-gradient
-  protection, and compare against the current multi-outer checkpoint from the
-  same shared initial state.
+- Run the revised `run_multi_outer_medium.sh` from one shared outer state. It
+  compares primary-only, worst recovery violation and smooth remainder range,
+  retains primary-gradient protection and uses 300 independent audit images.
+- Require all intended menu modes to receive gradients in the remainder arm;
+  report inactive modes rather than inferring coverage from the allocation pool.
 - Refresh the outer table and operational anchor periodically rather than on
   every inner epoch; record every anchor switch, auxiliary weight and
   primary/recovery gradient cosine.

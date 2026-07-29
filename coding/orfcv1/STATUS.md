@@ -14,7 +14,9 @@ Current pipeline:
    test the common-shape assumption instead of fitting it from \(D\).
    When that assumption fails, calibration stores the directly measured
    per-group/per-mode JVP table and the evaluator uses its separable sum as
-   \(\Phi\).
+   \(\Phi\). Remainder measurement and the \(M/C/N\) decomposition now call
+   the same ideal-model function. Allocation extrema are reselected inside
+   every bootstrap replicate.
 3. `allocation_train.py warmup` freezes the clean OPQ/identity rotation and
    task-aligns every independently initialized mode codebook.
 4. `allocation_train.py short` jointly updates the rotation and all codebooks.
@@ -22,8 +24,8 @@ Current pipeline:
    exact Top-K ideal allocation set and hard fixed-rate competitors on reserved
    training images. The outer pass evaluates the complete ideal set; the inner
    pass keeps a small active subset containing the lowest-distortion and nominal
-   best members. It minimizes the active best distortion and its violation
-   against the best sampled outside competitor. Codebooks use
+   best members. The auxiliary is selected explicitly as either the smooth
+   sampled remainder range or the worst sampled recovery violation. Codebooks use
    Adam; the rotation uses Cayley-SGD directly on the orthogonal manifold.
    The recovery auxiliary updates both the rotation and every active codebook;
    conflicting gradients are projected against the primary distortion
@@ -31,10 +33,10 @@ Current pipeline:
    Full tail distortion never refits the ideal table inside an inner block.
    A prepared outer state can now be serialized once and loaded by both paired
    arms, and the recovery weight is recalibrated after every later refresh.
-5. `run_allocation_full.sh` is retained as a stale historical driver. It does
-   not yet inherit the accepted Top-256/active-16 objective, 300-image outer
-   mining, fixed outer operational anchor or disjoint data slices, and must not
-   be used for the next full experiment.
+5. `run_allocation_full.sh` now inherits the disjoint 300/300/3900 split,
+   Top-256/active-16 objective, fixed outer operational anchor and independent
+   300-image audit. It remains gated on the revised three-arm medium experiment
+   and must not be launched before that gate passes.
 6. `eval_v1_1_all.py` evaluates a frozen non-uniform allocation on downstream
    classification and segmentation tasks.
 7. `ideal_set_statistics.py` measures bootstrap stability of the ideal
@@ -68,6 +70,21 @@ Measurement contract:
   the global remainder range is available.
 - Every exact Top-K member and the first ideal-cost allocation outside that
   set are always included in the sampled pool.
+- Training outputs report a fixed-audit bootstrap interval for the sampled
+  remainder range and its paired change from initialization. Max/min
+  allocations are reselected in each resample, so the interval includes
+  empirical extreme-selection variability.
+
+Implementation repair on 2026-07-29:
+
+- remainder-range and recovery objectives have separate command-line contracts;
+- recovery aggregates the worst active violation by default;
+- outer refreshes occur before a trainable inner block, with no untrained final
+  refresh;
+- auxiliary gradient calibration defaults to 32 images;
+- optional per-block LR restart and per-mode gradient coverage are recorded;
+- the medium driver compares primary-only, recovery and remainder-range arms
+  on the same initial outer state and 300-image independent audit.
 
 Outer/inner smoke:
 

@@ -19,7 +19,8 @@ from allocation_train import (
     _with_ideal_set,
 )
 from fixed_rate_remainder import (
-    allocation_phi, decompose_output_vectors, validate_fixed_total_rate,
+    allocation_phi, bootstrap_remainder_range, decompose_output_vectors,
+    validate_fixed_total_rate,
 )
 from ideal_set_statistics import _solve_batch, _suffix_counts
 from p1_fixed_rate import (
@@ -102,6 +103,15 @@ def test_fixed_rate_and_curve_contracts():
     phi = allocation_phi(
         allocations, costs, np.ones(2), 1, ideal_cost_table=table)
     assert phi.tolist() == [7.0, 4.0, 2.0]
+    distortion = np.asarray([
+        [0., 0., 0., 0.], [1., 1., 1., 1.], [2., 2., 2., 2.]])
+    stats = bootstrap_remainder_range(
+        distortion, np.zeros(3), comparison=distortion / 2,
+        bootstraps=20, batch_size=5)
+    assert stats["omega_point"] == 2.0
+    assert stats["omega_bootstrap_ci95"] == [2.0, 2.0]
+    assert stats["paired_omega_change"] == 1.0
+    assert stats["paired_omega_change_ci95"] == [1.0, 1.0]
 
 
 def test_statistical_allocation_helpers():

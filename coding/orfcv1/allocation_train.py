@@ -11,7 +11,7 @@ import torch
 
 from cayley import CayleySGD, DirectOrthogonalTransform
 from codec_v1 import load_codec_v1, save_codec_v1
-from fixed_rate_remainder import allocation_rates
+from fixed_rate_remainder import allocation_rates, bootstrap_remainder_range
 from opq import batch_inv_normalize_gpu, batch_normalize_gpu
 from p1_fixed_rate import (
     build_tail, estimate_c, make_allocations, topk_cost_allocate,
@@ -1124,6 +1124,18 @@ def command_short(args):
     after = _report(
         audit, after_val_D, final_audit_state,
         int(audit_calibration["rate_dimension"]))
+    fixed_phi = audit_state["full_phi"]
+    before_stats = bootstrap_remainder_range(
+        before_matrix, fixed_phi, bootstraps=args.audit_bootstraps,
+        batch_size=args.audit_bootstrap_batch, seed=args.seed + 1000)
+    after_stats = bootstrap_remainder_range(
+        after_matrix, fixed_phi, comparison=before_matrix,
+        bootstraps=args.audit_bootstraps,
+        batch_size=args.audit_bootstrap_batch, seed=args.seed + 1000)
+    before.update(before_stats)
+    after.update(after_stats)
+    before["omega"] = before_stats["omega_point"]
+    after["omega"] = after_stats["omega_point"]
     final_dynamic_report = _report(
         training_source, final_dynamic_D, final_dynamic_state,
         int(calibration["rate_dimension"]))
@@ -1170,6 +1182,8 @@ def command_short(args):
         "dynamic_allocations": args.dynamic_allocations,
         "audit_allocation_count": int(len(audit["allocations"])),
         "audit_scope": "fixed_empirical_pool",
+        "audit_images": int(before_matrix.shape[1]),
+        "audit_bootstraps": args.audit_bootstraps,
         "feasible_allocation_count": str(_feasible_count(
             codec.pq.G, calibration["mode_bits"],
             int(np.asarray(calibration["ideal_bits"]).sum()))),
@@ -1287,6 +1301,8 @@ def parser():
     short.add_argument("--remainder-weight", type=float, default=0.0)
     short.add_argument("--remainder-grad-ratio", type=float, default=-1.0)
     short.add_argument("--aux-calibration-images", type=int, default=32)
+    short.add_argument("--audit-bootstraps", type=int, default=1000)
+    short.add_argument("--audit-bootstrap-batch", type=int, default=32)
     short.add_argument("--rotation-lr", type=float)
     short.add_argument("--cayley-iterations", type=int, default=5)
     short.add_argument("--reorthogonalize-every", type=int, default=100)

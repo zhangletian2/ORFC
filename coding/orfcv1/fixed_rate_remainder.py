@@ -151,6 +151,60 @@ def allocation_phi(
     return table[groups, np.asarray(allocations, dtype=np.int64)].sum(axis=1)
 
 
+def bootstrap_remainder_range(
+    distortion_per_image, phi, comparison=None, bootstraps=1000,
+    batch_size=32, seed=42,
+):
+    """Bootstrap allocation extrema, reselecting max/min on every resample."""
+    distortion = np.asarray(distortion_per_image, dtype=np.float64)
+    phi = np.asarray(phi, dtype=np.float64)
+    if distortion.ndim != 2 or phi.shape != (distortion.shape[0],):
+        raise ValueError("distortion must be [A,N] and phi must be [A]")
+    other = None if comparison is None else np.asarray(
+        comparison, dtype=np.float64)
+    if other is not None and other.shape != distortion.shape:
+        raise ValueError("comparison must match distortion")
+
+    def omega(values):
+        return float(np.ptp(values.mean(1) - phi))
+
+    point = omega(distortion)
+    if bootstraps < 1 or distortion.shape[1] < 2:
+        samples = np.asarray([point])
+        differences = (
+            np.asarray([point - omega(other)]) if other is not None else None)
+    else:
+        rng = np.random.default_rng(seed)
+        rows, deltas = [], []
+        for start in range(0, bootstraps, batch_size):
+            count = min(batch_size, bootstraps - start)
+            ids = rng.integers(
+                0, distortion.shape[1], size=(count, distortion.shape[1]))
+            means = distortion[:, ids].mean(2)
+            current = np.ptp(means - phi[:, None], axis=0)
+            rows.append(current)
+            if other is not None:
+                baseline = np.ptp(
+                    other[:, ids].mean(2) - phi[:, None], axis=0)
+                deltas.append(current - baseline)
+        samples = np.concatenate(rows)
+        differences = np.concatenate(deltas) if deltas else None
+    result = {
+        "omega_point": point,
+        "omega_bootstrap_ci95": np.quantile(
+            samples, [0.025, 0.975]).tolist(),
+        "omega_bootstrap_count": int(bootstraps),
+        "omega_extrema_reselected": True,
+    }
+    if differences is not None:
+        result.update({
+            "paired_omega_change": float(point - omega(other)),
+            "paired_omega_change_ci95": np.quantile(
+                differences, [0.025, 0.975]).tolist(),
+        })
+    return result
+
+
 def decompose_output_vectors(phi, group_response, output_delta):
     """Split one output distortion into analytic, menu, cross and nonlinear terms.
 
@@ -223,6 +277,9 @@ def evaluate_fixed_rate_remainder(
     allocation_chunk=4,
     rate_tolerance=1e-8,
     ideal_cost_table=None,
+    bootstrap_count=1000,
+    bootstrap_batch=32,
+    bootstrap_seed=42,
 ):
     """Measure ``D``, ``Phi`` and ``E=D-Phi`` on fixed-rate allocations.
 
@@ -301,11 +358,6 @@ def evaluate_fixed_rate_remainder(
     candidates = np.flatnonzero(gaps <= omega + 1e-12)
     edge_max, edge_count = _swap_edge_range(allocations, E)
 
-    paired = (
-        distortion[e_max] - distortion[e_min]
-        - (phi[e_max] - phi[e_min]))
-    paired_std = float(paired.std(ddof=1)) if n_images > 1 else 0.0
-    half = 1.96 * paired_std / max(np.sqrt(n_images), 1.0)
     summary = {
         "n_allocations": int(n_alloc),
         "n_images": int(n_images),
@@ -323,11 +375,10 @@ def evaluate_fixed_rate_remainder(
         "remainder_max_index": e_max,
         "swap_edge_max": float(edge_max),
         "swap_edge_count": int(edge_count),
-        "paired_omega_ci95": [
-            float(paired.mean() - half),
-            float(paired.mean() + half),
-        ],
     }
+    summary.update(bootstrap_remainder_range(
+        distortion, phi, bootstraps=bootstrap_count,
+        batch_size=bootstrap_batch, seed=bootstrap_seed))
     arrays = {
         "allocations": allocations,
         "rates": rates,

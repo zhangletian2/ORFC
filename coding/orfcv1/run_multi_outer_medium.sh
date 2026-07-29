@@ -11,11 +11,6 @@ CACHE=artifacts/dinov2_vitl14/cache
 STEPS=${STEPS:-50}
 REFRESH_STEPS=${REFRESH_STEPS:-10}
 STATE="$OUT/shared_initial_outer.npz"
-RECOVERY_MODE=()
-if [[ "${OUTER_GATED_RECOVERY:-0}" == 1 ]]; then
-  RECOVERY_MODE=(
-    --outer-gated-recovery --recovery-pairs "${RECOVERY_PAIRS:-4}")
-fi
 if (( REFRESH_STEPS < 1 || STEPS < REFRESH_STEPS )); then
   echo "require 1 <= REFRESH_STEPS <= STEPS" >&2
   exit 2
@@ -28,7 +23,7 @@ COMMON=(
   --hard-features "$CACHE/features_val_blk20_n500_ss1608637542.npy"
   --hard-teachers "$CACHE/teacher_val_blk20_n500_ss1608637542.npy"
   --steps "$STEPS" --images 4 --train-images 512 --train-image-offset 600
-  --hard-images 64 --hard-image-offset 0 --hard-batch-size 8
+  --hard-images 300 --hard-image-offset 0 --hard-batch-size 8
   --allocation-chunk 8 --allocations 16 --select-steps 10 --log-steps 5
   --outer-refresh --outer-calibration-images 300
   --minimum-saved-calibration-images 300 --outer-calibration-offset 0
@@ -36,10 +31,11 @@ COMMON=(
   --outer-batch-size 8 --outer-group-chunk 8 --outer-eps 0.01
   --dynamic-allocations --dynamic-single 32 --dynamic-random 32
   --ideal-set-size 256 --ideal-batch-size 16
-  --primary-target outer_operational_best --candidate-mean-weight 0
+  --primary-target outer_operational_best --candidate-mean-weight 0.05
   --recovery-margin 0 --rotation-lr 0.00001 --lr 0.00001
+  --recovery-aggregate max --aux-calibration-images 32
+  --audit-bootstraps 1000 --restart-scheduler-on-refresh
   --tau-start 0.01 --tau-end 0.01 --seed 42
-  "${RECOVERY_MODE[@]}"
 )
 
 mkdir -p "$OUT/logs"
@@ -50,21 +46,27 @@ CUDA_VISIBLE_DEVICES="${GPU_STATE:-4}" "$PY" allocation_train.py short \
   >"$OUT/logs/shared_outer.log" 2>&1
 
 run_one() {
-  local gpu=$1 name=$2 ratio=$3
+  local gpu=$1 name=$2 ratio=$3 objective=$4
+  shift 4
   CUDA_VISIBLE_DEVICES="$gpu" "$PY" allocation_train.py short \
     "${COMMON[@]}" --refresh-steps "$REFRESH_STEPS" \
     --initial-outer-state "$STATE" --remainder-grad-ratio "$ratio" \
+    --auxiliary-objective "$objective" "$@" \
     --output "$OUT/$name.json" --checkpoint "$OUT/$name.pt" \
     >"$OUT/logs/$name.log" 2>&1
 }
 
-run_one "${GPU_BASE:-4}" primary_only 0 &
+run_one "${GPU_BASE:-4}" primary_only 0 recovery &
 p0=$!
-run_one "${GPU_RECOVERY:-5}" primary_recovery 0.25 &
+run_one "${GPU_RECOVERY:-5}" primary_recovery 0.25 recovery \
+  --outer-gated-recovery --recovery-pairs "${RECOVERY_PAIRS:-4}" &
 p1=$!
+run_one "${GPU_REMAINDER:-6}" primary_remainder 0.25 remainder_range &
+p2=$!
 failed=0
 wait "$p0" || failed=1
 wait "$p1" || failed=1
+wait "$p2" || failed=1
 if (( failed )); then
   echo "one or more medium-training arms failed; inspect $OUT/logs" >&2
   exit 1
