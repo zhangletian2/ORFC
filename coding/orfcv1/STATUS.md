@@ -29,6 +29,8 @@ Current pipeline:
    conflicting gradients are projected against the primary distortion
    gradient, with the rotation gradients first mapped to the tangent space.
    Full tail distortion never refits the ideal table inside an inner block.
+   A prepared outer state can now be serialized once and loaded by both paired
+   arms, and the recovery weight is recalibrated after every later refresh.
 5. `run_allocation_full.sh` is retained as a stale historical driver. It does
    not yet inherit the accepted Top-256/active-16 objective, 300-image outer
    mining, fixed outer operational anchor or disjoint data slices, and must not
@@ -113,3 +115,21 @@ empirical optimum; the sampled remainder-range-to-ideal-gap ratio is about
 772. The complete feasible space contains
 84,225,312,014,367,853,059,837 allocations, so no finite pool used here is a
 strict search-space reduction.
+
+The fixed-outer 50-step gate is
+`statset256_medium_fixedouter_20260728T234817Z`. On 300 independent images and
+905 common allocations, recovery minus primary-only changed common-candidate
+mean distortion by -25.81, CI95 [-31.13, -20.66], uniform 6-bit distortion by
+-3.66, CI95 [-8.13, 0.28], Top-256 best distortion by -43.31, CI95
+[-53.69, -32.75], and the empirical set margin by +39.66, CI95
+[28.75, 49.94]. The sampled remainder range changed by only -5.16, CI95
+[-22.09, 2.38]. Both arms significantly improved overall distortion relative
+to the common initialization, but the recovery condition remains false.
+
+`run_multi_outer_medium.sh` implements the next gate without duplicating the
+trainer. It prepares one initial outer state for both arms, then performs five
+10-step inner blocks by default. Every later arm-specific outer refresh
+recomputes the ideal table, Top-256 set, hard competitors and operational
+anchor, followed by recovery-weight recalibration. A two-step smoke verified
+identical initial audit allocations, nonzero joint gradients, changing
+recovery weights, finite Cayley updates and monotonic six-mode menus.

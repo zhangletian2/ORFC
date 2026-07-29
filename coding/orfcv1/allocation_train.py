@@ -530,6 +530,8 @@ def _tangent_gradient(rotation, gradient):
 def _calibrate_remainder(codec, tail, batch, state, args, parameters, rotation):
     if args.remainder_grad_ratio < 0:
         return args.remainder_weight
+    if args.remainder_grad_ratio == 0:
+        return 0.0
     _, terms = _loss(codec, tail, batch, state, args, 0.0)
     base = list(torch.autograd.grad(
         terms["base"], parameters, retain_graph=True, allow_unused=True))
@@ -733,8 +735,44 @@ def _refresh_training_state(
     mine_args.hard_image_offset = args.outer_mining_offset
     distortion = _hard_eval(
         codec, tail, train_x, train_y, source["allocations"], mine_args)
-    return calibration, source, _select_state(
-        source, distortion, calibration, args)
+    state = _select_state(source, distortion, calibration, args)
+    state["mining_distortion"] = distortion
+    return calibration, source, state
+
+
+def _save_outer_state(path, calibration, source, state):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        f"calibration__{key}": value
+        for key, value in calibration.items()
+    }
+    payload.update({
+        "format_version": np.asarray(1),
+        "allocations": source["allocations"],
+        "mining_distortion": state["mining_distortion"],
+    })
+    np.savez_compressed(path, **payload)
+
+
+def _load_outer_state(path, args):
+    with np.load(path, allow_pickle=False) as saved:
+        if int(saved["format_version"]) != 1:
+            raise ValueError("unsupported shared outer-state format")
+        calibration = {
+            key.removeprefix("calibration__"): np.asarray(saved[key]).copy()
+            for key in saved.files if key.startswith("calibration__")
+        }
+        allocations = np.asarray(saved["allocations"]).copy()
+        distortion = np.asarray(saved["mining_distortion"]).copy()
+    if len(calibration["ideal_set_bits"]) != args.ideal_set_size:
+        raise ValueError("shared outer-state ideal-set size does not match")
+    source = _allocation_source(allocations, calibration)
+    if distortion.shape != (len(allocations),):
+        raise ValueError("shared outer-state distortion shape does not match")
+    state = _select_state(source, distortion, calibration, args)
+    state["mining_distortion"] = distortion
+    return calibration, source, state
 
 
 def command_short(args):
@@ -770,8 +808,24 @@ def command_short(args):
     refresh_args = argparse.Namespace(**vars(args))
     refresh_args.hard_images = args.outer_mining_images
     refresh_args.hard_image_offset = args.outer_mining_offset
-    calibration, training_source, state = _refresh_training_state(
-        codec, tail, train_x, train_y, audit, None, calibration, args, 0)
+    if args.initial_outer_state:
+        calibration, training_source, state = _load_outer_state(
+            args.initial_outer_state, args)
+        if not np.array_equal(calibration["mode_bits"], bits):
+            raise ValueError(
+                "shared outer-state mode menu does not match codec")
+    else:
+        calibration, training_source, state = _refresh_training_state(
+            codec, tail, train_x, train_y, audit, None, calibration, args, 0)
+    if args.outer_state_output:
+        _save_outer_state(
+            args.outer_state_output, calibration, training_source, state)
+    if args.prepare_outer_only:
+        if not args.outer_state_output:
+            raise ValueError(
+                "prepare-outer-only requires --outer-state-output")
+        print(args.outer_state_output)
+        return
     training_scales = (state["omega_scale"], state["distortion_scale"])
     audit_D = _hard_eval(
         codec, tail, train_x, train_y, audit["allocations"], refresh_args)
@@ -825,6 +879,8 @@ def command_short(args):
             args.images, len(train_x) - args.train_image_offset)))
     remainder_weight = _calibrate_remainder(
         codec, tail, calibration_batch, state, args, params, rotation)
+    weight_history = [{
+        "step": 0, "refresh": 0, "remainder_weight": remainder_weight}]
     history, active, refresh, last_refresh_step = [], [], 0, 0
     initial_terms = _objective_terms(
         initial_dynamic_D, initial_dynamic_state, args, remainder_weight)
@@ -893,9 +949,16 @@ def command_short(args):
                 codec, tail, train_x, train_y, audit, state,
                 calibration, args, refresh)
             state = _set_scales(state, training_scales)
+            remainder_weight = _calibrate_remainder(
+                codec, tail, calibration_batch, state, args, params, rotation)
             report = _state_report(state)
             report["pool_size"] = int(len(training_source["allocations"]))
+            report["step"] = step + 1
+            report["remainder_weight"] = remainder_weight
             active.append(report)
+            weight_history.append({
+                "step": step + 1, "refresh": refresh,
+                "remainder_weight": remainder_weight})
         if args.select_steps > 0 and (step + 1) % args.select_steps == 0:
             validation_D = _hard_eval(
                 codec, tail, val_x, val_y,
@@ -920,7 +983,15 @@ def command_short(args):
             codec, tail, train_x, train_y, audit, state,
             calibration, args, refresh)
         state = _set_scales(state, training_scales)
-        active.append(_state_report(state))
+        remainder_weight = _calibrate_remainder(
+            codec, tail, calibration_batch, state, args, params, rotation)
+        report = _state_report(state)
+        report["step"] = total_steps
+        report["remainder_weight"] = remainder_weight
+        active.append(report)
+        weight_history.append({
+            "step": total_steps, "refresh": refresh,
+            "remainder_weight": remainder_weight})
     final_dynamic_matrix = _hard_eval(
         codec, tail, val_x, val_y, training_source["allocations"], args,
         return_per_image=True)
@@ -1007,7 +1078,10 @@ def command_short(args):
         "schedule_unit": args.schedule_unit,
         "total_steps": total_steps,
         "remainder_weight": remainder_weight,
+        "remainder_weight_history": weight_history,
         "remainder_grad_ratio": args.remainder_grad_ratio,
+        "initial_outer_state": args.initial_outer_state,
+        "recalibrate_remainder_after_refresh": True,
         "outer_refresh": args.outer_refresh,
         "outer_calibration_images": args.outer_calibration_images,
         "saved_calibration_images": saved_images,
@@ -1098,6 +1172,9 @@ def parser():
     short.add_argument("--outer-batch-size", type=int, default=4)
     short.add_argument("--outer-group-chunk", type=int, default=8)
     short.add_argument("--outer-eps", type=float, default=0.01)
+    short.add_argument("--initial-outer-state")
+    short.add_argument("--outer-state-output")
+    short.add_argument("--prepare-outer-only", action="store_true")
     short.add_argument(
         "--minimum-saved-calibration-images", type=int, default=0)
     return main

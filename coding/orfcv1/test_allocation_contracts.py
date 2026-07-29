@@ -3,6 +3,8 @@
 
 from argparse import Namespace
 from itertools import product
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 import torch
@@ -10,7 +12,8 @@ import torch
 from cayley import CayleySGD, DirectOrthogonalTransform
 from allocation_train import (
     _allocation_source, _backward, _curve_report, _dynamic_source,
-    _objective_terms, _protect_primary, _select_state,
+    _load_outer_state, _objective_terms, _protect_primary,
+    _save_outer_state, _select_state,
     _tangent_gradient, _validate_training_slices, _with_ideal_set,
 )
 from fixed_rate_remainder import (
@@ -168,6 +171,43 @@ def test_dynamic_pool_and_selection_objective():
     assert state["gap"] == 5 and state["empirical_margin"] == 2
 
 
+def test_shared_outer_state_roundtrip():
+    costs = np.broadcast_to(np.arange(1, 4, dtype=float), (2, 3))
+    calibration = {
+        "cost_table": costs, "mode_bits": np.arange(1, 4),
+        "rate_dimension": np.asarray(1), "c_g": np.ones(2),
+        "ideal_cost_table": np.asarray([[3, 2, 1], [1, 2, 4]]),
+        "ideal_bits": np.asarray([3, 1]),
+        "ideal_gap": np.asarray(2.0),
+        "ideal_set_bits": np.asarray([[3, 1], [2, 2]]),
+        "ideal_set_values": np.asarray([2.0, 4.0]),
+        "ideal_set_outside_bits": np.asarray([1, 3]),
+        "ideal_set_gap": np.asarray(5.0),
+    }
+    source = _allocation_source(
+        np.asarray([[0, 2], [1, 1], [2, 0]]), calibration)
+    distortion = np.asarray([5.0, 3.0, 4.0])
+    args = Namespace(
+        allocations=3, seed=42, reference_bit=2,
+        tie_atol=1e-8, tie_rtol=1e-8, ideal_batch_size=1,
+        ideal_set_size=2)
+    state = _select_state(source, distortion, calibration, args)
+    state["mining_distortion"] = distortion
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "outer.npz"
+        _save_outer_state(path, calibration, source, state)
+        restored_calibration, restored_source, restored_state = (
+            _load_outer_state(path, args))
+    assert np.array_equal(
+        restored_source["allocations"], source["allocations"])
+    assert np.array_equal(
+        restored_state["mining_distortion"], distortion)
+    assert np.array_equal(
+        restored_calibration["ideal_set_bits"],
+        calibration["ideal_set_bits"])
+    assert restored_state["target"] == state["target"]
+
+
 def test_primary_gradient_protection():
     primary = torch.tensor([1.0, 0.0])
     auxiliary = torch.tensor([-2.0, 1.0])
@@ -235,6 +275,7 @@ if __name__ == "__main__":
     test_fixed_rate_and_curve_contracts()
     test_statistical_allocation_helpers()
     test_dynamic_pool_and_selection_objective()
+    test_shared_outer_state_roundtrip()
     test_primary_gradient_protection()
     test_joint_recovery_gradients()
     test_direct_cayley_descent_and_orthogonality()

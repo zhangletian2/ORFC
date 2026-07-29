@@ -54,13 +54,15 @@
 
 - Do not run the current `run_allocation_full.sh`; it still implements the old
   single-target/no-outer-refresh protocol.
-- First add a medium-duration paired gate that inherits the accepted
-  Top-256/active-16 objective, 300-image ideal calibration, 300-image outer
-  hard mining, fixed outer operational anchor and mutually disjoint inner and
-  validation slices.
-- Recalibrate the recovery weight after each outer refresh. The current short
-  path calibrates it only at initialization, which is insufficient for a long
-  run whose ideal table, active set and hard competitors change.
+- The fixed-outer 50-step gate is complete: overall and ideal-set distortion
+  improve, while the sampled remainder-range reduction is not significant.
+- Run `run_multi_outer_medium.sh` next. It inherits the accepted
+  Top-256/active-16 objective, shared 300-image initial outer state,
+  300-image later hard mining, fixed within-block operational anchors and
+  mutually disjoint inner and validation slices.
+- Recalibrate the recovery weight after every outer refresh; verify the saved
+  `remainder_weight_history` contains one finite positive entry per recovery
+  block and zero entries for primary-only.
 - Refresh the outer table and operational anchor periodically rather than on
   every inner epoch; record every anchor switch, auxiliary weight and
   primary/recovery gradient cosine.
