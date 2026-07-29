@@ -436,6 +436,12 @@ def _set_scales(state, scales):
     return state
 
 
+def _choose_auxiliary(args, omega, recovery, recovery_constraint):
+    if getattr(args, "auxiliary_objective", "recovery") == "remainder_range":
+        return omega, omega
+    return recovery, recovery_constraint
+
+
 def _objective_terms(distortion, state, args, remainder_weight):
     D = np.asarray(distortion, dtype=np.float64)
     complete = len(D) == len(state["full_phi"])
@@ -451,6 +457,7 @@ def _objective_terms(distortion, state, args, remainder_weight):
         scale * np.log(np.exp((low_e - low_e.max()) / scale).sum())
         + low_e.max())
     omega_raw = high + low - 2 * scale * math.log(len(e))
+    smooth_omega = omega_raw / state["omega_scale"]
     target_value = float(D[targets].min())
     margin = (
         float(D[competitors].min() - target_value)
@@ -463,9 +470,13 @@ def _objective_terms(distortion, state, args, remainder_weight):
     primary = operational_best if mode != "ideal_set" else candidate
     base = primary + (
         args.candidate_mean_weight * D.mean() / state["distortion_scale"])
+    auxiliary, _ = _choose_auxiliary(
+        args, smooth_omega, recovery, recovery)
     return {
-        "score": float(base + remainder_weight * recovery),
+        "score": float(base + remainder_weight * auxiliary),
         "base": float(base), "recovery": float(recovery),
+        "auxiliary": float(auxiliary),
+        "smooth_omega": float(smooth_omega),
         "omega": float(np.ptp(e)), "gap": float(state["gap"]),
         "sampled_omega_to_set_gap": float(
             np.ptp(e) / max(state["gap"], 1e-12)),
@@ -515,9 +526,13 @@ def _loss(codec, tail, batch, state, args, remainder_weight):
         if mode == "outer_operational_best" else normalized.min())
     primary = operational_best if mode != "ideal_set" else candidate
     base = primary + args.candidate_mean_weight * normalized.mean()
-    return base + remainder_weight * recovery, {
+    auxiliary, auxiliary_constraint = _choose_auxiliary(
+        args, omega, recovery, recovery_constraint)
+    return base + remainder_weight * auxiliary, {
         "base": base, "omega": omega, "recovery": recovery,
         "recovery_constraint": recovery_constraint,
+        "auxiliary": auxiliary,
+        "auxiliary_constraint": auxiliary_constraint,
         "candidate": candidate, "operational_best": operational_best,
         "empirical_margin": empirical_margin,
     }
@@ -529,10 +544,14 @@ def _outer_pair_recovery(normalized, state, args):
         state["hard_outside_local"], device=normalized.device)
     if not state["outer_recovery_active"] or not len(hard):
         return zero, zero
-    constraint = (
+    constraints = (
         normalized[state["target_local"]] - normalized[hard]
         + args.recovery_margin / state["distortion_scale"]
-    ).mean()
+    )
+    constraint = (
+        constraints.mean()
+        if getattr(args, "recovery_aggregate", "max") == "mean"
+        else constraints.max())
     return constraint, constraint
 
 
@@ -564,6 +583,8 @@ def _calibrate_remainder(codec, tail, batch, state, args, parameters, rotation):
     if args.remainder_grad_ratio == 0:
         return 0.0
     if (
+        getattr(args, "auxiliary_objective", "recovery") == "recovery"
+        and
         getattr(args, "outer_gated_recovery", False)
         and not state["outer_recovery_active"]
     ):
@@ -573,21 +594,21 @@ def _calibrate_remainder(codec, tail, batch, state, args, parameters, rotation):
         terms["base"], parameters, retain_graph=True, allow_unused=True))
     # Calibrate with the unhinged constraint.  An already satisfied first
     # minibatch must not silently disable the auxiliary for the whole run.
-    recovery = list(torch.autograd.grad(
-        terms["recovery_constraint"], parameters, allow_unused=True))
+    auxiliary = list(torch.autograd.grad(
+        terms["auxiliary_constraint"], parameters, allow_unused=True))
     base[0] = _tangent_gradient(rotation, base[0])
-    recovery[0] = _tangent_gradient(rotation, recovery[0])
+    auxiliary[0] = _tangent_gradient(rotation, auxiliary[0])
     def norm(values):
         terms = [
             value.square().sum() for value in values if value is not None]
         return (
             torch.sqrt(torch.stack(terms).sum()) if terms
             else torch.zeros((), device=rotation.device))
-    base_norm, remainder_norm = norm(base), norm(recovery)
+    base_norm, remainder_norm = norm(base), norm(auxiliary)
     codec.zero_grad(set_to_none=True)
     if args.remainder_grad_ratio > 0 and float(remainder_norm) <= 1e-12:
         raise RuntimeError(
-            "recovery constraint has zero calibration gradient")
+            "auxiliary objective has zero calibration gradient")
     return (
         args.remainder_grad_ratio * float(base_norm)
         / max(float(remainder_norm), 1e-12)
@@ -618,7 +639,7 @@ def _backward(terms, parameters, rotation, remainder_weight):
             parameter.grad = gradient
         return 0.0, False
     auxiliary = list(torch.autograd.grad(
-        terms["recovery"], parameters, allow_unused=True))
+        terms["auxiliary"], parameters, allow_unused=True))
     auxiliary[0] = _tangent_gradient(rotation, auxiliary[0])
     cosines, projected = [], False
     for parameter, base, extra in zip(parameters, primary, auxiliary):
@@ -974,6 +995,7 @@ def command_short(args):
                 "step": step + 1, "loss": float(loss),
                 "base": float(terms["base"]), "omega": float(terms["omega"]),
                 "recovery": float(terms["recovery"]),
+                "auxiliary": float(terms["auxiliary"]),
                 "recovery_constraint": float(
                     terms["recovery_constraint"]),
                 "outer_recovery_active": bool(
@@ -1159,6 +1181,8 @@ def command_short(args):
         "outer_mining_images": args.outer_mining_images,
         "candidate_mean_weight": args.candidate_mean_weight,
         "primary_target": args.primary_target,
+        "auxiliary_objective": args.auxiliary_objective,
+        "recovery_aggregate": args.recovery_aggregate,
         "recovery_margin": args.recovery_margin,
         "fixed_member_paired_delta": float(paired.mean()),
         "fixed_member_paired_delta_ci95": [
@@ -1220,6 +1244,11 @@ def parser():
     short.add_argument("--recovery-margin", type=float, default=0.0)
     short.add_argument("--outer-gated-recovery", action="store_true")
     short.add_argument("--recovery-pairs", type=int, default=1)
+    short.add_argument(
+        "--auxiliary-objective",
+        choices=("recovery", "remainder_range"), default="recovery")
+    short.add_argument(
+        "--recovery-aggregate", choices=("max", "mean"), default="max")
     short.add_argument("--candidate-mean-weight", type=float, default=0.0)
     short.add_argument(
         "--primary-target",

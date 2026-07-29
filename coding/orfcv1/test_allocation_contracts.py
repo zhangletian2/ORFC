@@ -11,7 +11,8 @@ import torch
 
 from cayley import CayleySGD, DirectOrthogonalTransform
 from allocation_train import (
-    _allocation_source, _backward, _curve_report, _dynamic_source,
+    _allocation_source, _backward, _choose_auxiliary, _curve_report,
+    _dynamic_source,
     _load_outer_state, _objective_terms, _protect_primary,
     _outer_pair_recovery, _save_outer_state, _select_state,
     _tangent_gradient, _validate_training_slices, _with_ideal_set,
@@ -224,10 +225,14 @@ def test_outer_gated_pair_ignores_minibatch_flip():
         "outer_recovery_active": True,
         "distortion_scale": 10.0,
     }
-    args = Namespace(recovery_margin=0.0)
+    args = Namespace(recovery_margin=0.0, recovery_aggregate="max")
     recovery, constraint = _outer_pair_recovery(
         torch.tensor([1.0, 3.0, 5.0]), state, args)
-    assert float(recovery) == float(constraint) == -3.0
+    assert float(recovery) == float(constraint) == -2.0
+    args.recovery_aggregate = "mean"
+    recovery, _ = _outer_pair_recovery(
+        torch.tensor([1.0, 3.0, 5.0]), state, args)
+    assert float(recovery) == -3.0
     state["outer_recovery_active"] = False
     recovery, constraint = _outer_pair_recovery(
         torch.tensor([1.0, 3.0, 5.0], requires_grad=True), state, args)
@@ -252,12 +257,43 @@ def test_joint_recovery_gradients():
     base = base + codebook.square().sum()
     recovery = -rotation[0, 1] - codebook.sum()
     _backward(
-        {"base": base, "recovery": recovery},
+        {"base": base, "auxiliary": recovery},
         [rotation, codebook], rotation, 0.5)
     assert rotation.grad is not None and codebook.grad is not None
     assert torch.allclose(
         rotation.t() @ rotation.grad + rotation.grad.t() @ rotation,
         torch.zeros(2), atol=1e-6)
+
+
+def test_remainder_range_is_a_distinct_auxiliary():
+    state = {
+        "allocations": np.zeros((3, 1), dtype=np.int64),
+        "phi": np.asarray([0.0, 1.0, 4.0]),
+        "target_set_local": np.asarray([0]),
+        "competitor_local": np.asarray([1, 2]),
+        "operational_best_local": 0,
+        "omega_scale": 4.0,
+        "distortion_scale": 10.0,
+        "outer_recovery_active": True,
+        "target_local": 0,
+        "hard_outside_local": np.asarray([1]),
+    }
+    args = Namespace(
+        allocation_chunk=1, pq_temperature=0.1, lse_temperature=0.1,
+        recovery_margin=0.0, outer_gated_recovery=True,
+        recovery_aggregate="max", primary_target="outer_operational_best",
+        candidate_mean_weight=0.0, auxiliary_objective="remainder_range")
+    D = torch.tensor([2.0, 3.0, 9.0], requires_grad=True)
+    omega_scale = args.lse_temperature * state["omega_scale"]
+    e = D.double() - torch.as_tensor(state["phi"])
+    omega = (
+        omega_scale * torch.logsumexp(e / omega_scale, 0)
+        + omega_scale * torch.logsumexp(-e / omega_scale, 0)
+        - 2 * omega_scale * np.log(len(e))) / state["omega_scale"]
+    recovery, constraint = _outer_pair_recovery(D / 10.0, state, args)
+    auxiliary, auxiliary_constraint = _choose_auxiliary(
+        args, omega, recovery, constraint)
+    assert auxiliary is omega and auxiliary_constraint is omega
 
 
 def test_direct_cayley_descent_and_orthogonality():
@@ -306,6 +342,7 @@ if __name__ == "__main__":
     test_outer_gated_pair_ignores_minibatch_flip()
     test_primary_gradient_protection()
     test_joint_recovery_gradients()
+    test_remainder_range_is_a_distinct_auxiliary()
     test_direct_cayley_descent_and_orthogonality()
     test_rotation_gradient_is_tangent()
     test_remainder_decomposition()
