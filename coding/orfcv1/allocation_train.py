@@ -486,10 +486,7 @@ def _objective_terms(distortion, state, args, remainder_weight):
     }
 
 
-def _loss(codec, tail, batch, state, args, remainder_weight):
-    D = _distortions(
-        codec, tail, batch, state["allocations"], args.allocation_chunk,
-        args.pq_temperature, True)
+def _loss_from_distortions(D, state, args, remainder_weight):
     phi = torch.as_tensor(state["phi"], device=D.device)
     e = D.double() - phi
     tau = args.lse_temperature
@@ -538,6 +535,14 @@ def _loss(codec, tail, batch, state, args, remainder_weight):
     }
 
 
+def _loss(codec, tail, batch, state, args, remainder_weight):
+    D = _distortions(
+        codec, tail, batch, state["allocations"], args.allocation_chunk,
+        args.pq_temperature, True)
+    return _loss_from_distortions(
+        D, state, args, remainder_weight)
+
+
 def _outer_pair_recovery(normalized, state, args):
     zero = normalized.sum() * 0
     hard = torch.as_tensor(
@@ -577,7 +582,7 @@ def _tangent_gradient(rotation, gradient):
     return gradient - value @ (0.5 * (product + product.t()))
 
 
-def _calibrate_remainder(codec, tail, batch, state, args, parameters, rotation):
+def _calibrate_remainder(codec, tail, batches, state, args, parameters, rotation):
     if args.remainder_grad_ratio < 0:
         return args.remainder_weight
     if args.remainder_grad_ratio == 0:
@@ -589,13 +594,49 @@ def _calibrate_remainder(codec, tail, batch, state, args, parameters, rotation):
         and not state["outer_recovery_active"]
     ):
         return 0.0
-    _, terms = _loss(codec, tail, batch, state, args, 0.0)
-    base = list(torch.autograd.grad(
-        terms["base"], parameters, retain_graph=True, allow_unused=True))
-    # Calibrate with the unhinged constraint.  An already satisfied first
-    # minibatch must not silently disable the auxiliary for the whole run.
-    auxiliary = list(torch.autograd.grad(
-        terms["auxiliary_constraint"], parameters, allow_unused=True))
+    if not batches:
+        raise ValueError("auxiliary calibration batches are empty")
+    total_images = sum(len(batch[0]) for batch in batches)
+    aggregate = None
+    # Differentiate the objective at the full calibration-set mean, while
+    # keeping each ViT-tail graph limited to one training-size microbatch.
+    with torch.no_grad():
+        for batch in batches:
+            D = _distortions(
+                codec, tail, batch, state["allocations"],
+                args.allocation_chunk, args.pq_temperature, True)
+            contribution = D.double() * len(batch[0])
+            aggregate = (
+                contribution if aggregate is None
+                else aggregate.add_(contribution))
+    aggregate = (aggregate / total_images).requires_grad_(True)
+    _, aggregate_terms = _loss_from_distortions(
+        aggregate, state, args, 0.0)
+    base_coefficient = torch.autograd.grad(
+        aggregate_terms["base"], aggregate, retain_graph=True)[0].detach()
+    auxiliary_coefficient = torch.autograd.grad(
+        aggregate_terms["auxiliary_constraint"], aggregate)[0].detach()
+    base, auxiliary = [None] * len(parameters), [None] * len(parameters)
+    # Exact chain rule for D = sum_b |b| D_b / total_images.
+    for batch in batches:
+        D = _distortions(
+            codec, tail, batch, state["allocations"], args.allocation_chunk,
+            args.pq_temperature, True).double()
+        fraction = len(batch[0]) / total_images
+        current_base = torch.autograd.grad(
+            fraction * torch.dot(D, base_coefficient),
+            parameters, retain_graph=True, allow_unused=True)
+        current_auxiliary = torch.autograd.grad(
+            fraction * torch.dot(D, auxiliary_coefficient),
+            parameters, allow_unused=True)
+        for total, current in (
+            (base, current_base), (auxiliary, current_auxiliary)):
+            for index, value in enumerate(current):
+                if value is not None:
+                    total[index] = (
+                        value.detach().clone() if total[index] is None
+                        else total[index].add_(value.detach()))
+        codec.zero_grad(set_to_none=True)
     base[0] = _tangent_gradient(rotation, base[0])
     auxiliary[0] = _tangent_gradient(rotation, auxiliary[0])
     def norm(values):
@@ -605,7 +646,6 @@ def _calibrate_remainder(codec, tail, batch, state, args, parameters, rotation):
             torch.sqrt(torch.stack(terms).sum()) if terms
             else torch.zeros((), device=rotation.device))
     base_norm, remainder_norm = norm(base), norm(auxiliary)
-    codec.zero_grad(set_to_none=True)
     if args.remainder_grad_ratio > 0 and float(remainder_norm) <= 1e-12:
         raise RuntimeError(
             "auxiliary objective has zero calibration gradient")
@@ -975,14 +1015,21 @@ def command_short(args):
     available = min(
         args.train_images, len(train_x) - args.train_image_offset)
     calibration_count = min(args.aux_calibration_images, available)
+    if calibration_count < 1:
+        raise ValueError("aux-calibration-images must select at least one image")
     calibration_rng = np.random.default_rng(args.seed + 1)
     calibration_ids = args.train_image_offset + calibration_rng.choice(
         available, calibration_count, replace=False)
-    calibration_batch = _sample(
-        train_x, train_y, calibration_count, calibration_rng,
-        device, args.norm_mode, calibration_ids)
+    calibration_batches = [
+        _sample(
+            train_x, train_y, len(ids), calibration_rng,
+            device, args.norm_mode, ids)
+        for ids in np.array_split(
+            calibration_ids,
+            math.ceil(calibration_count / min(args.images, calibration_count)))
+    ]
     remainder_weight = _calibrate_remainder(
-        codec, tail, calibration_batch, state, args, params, rotation)
+        codec, tail, calibration_batches, state, args, params, rotation)
     weight_history = [{
         "step": 0, "refresh": 0, "remainder_weight": remainder_weight}]
     history, active, refresh = [], [], 0
@@ -997,7 +1044,7 @@ def command_short(args):
                 calibration, args, refresh)
             state = _set_scales(state, training_scales)
             remainder_weight = _calibrate_remainder(
-                codec, tail, calibration_batch, state, args, params, rotation)
+                codec, tail, calibration_batches, state, args, params, rotation)
             if args.restart_scheduler_on_refresh:
                 rotation_scheduler, codebook_scheduler = make_schedulers(
                     reset=True)
@@ -1203,6 +1250,7 @@ def command_short(args):
         "batch_size": args.images, "learning_rate": args.lr,
         "rotation_learning_rate": rotation_lr,
         "aux_calibration_images": calibration_count,
+        "aux_calibration_batches": len(calibration_batches),
         "restart_scheduler_on_refresh": args.restart_scheduler_on_refresh,
         "outer_refresh_count": refresh,
         "rotation_optimizer": "CayleySGD",
