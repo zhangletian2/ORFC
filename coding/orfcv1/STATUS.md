@@ -152,3 +152,19 @@ training hinge is usually inactive because its local ordering flips. Only
 three of eleven logged recovery terms were nonzero. The next gate must train a
 fixed outer-mined inside/outside pair with an unhinged paired expectation, or
 estimate that expectation by accumulating multiple inner batches.
+
+The outer-gated working-set path is now implemented behind
+`--outer-gated-recovery`. Each outer pass selects up to `--recovery-pairs`
+violating outside allocations on the mining population; the inner block keeps
+those pairs fixed and optimizes their unhinged mean paired difference. Previous
+selected constraints are retained in a persistent workset and re-scored after
+later refreshes. The legacy minibatch-hinge path remains the default.
+
+`workset_outergate_smoke2_20260729T1205Z` completed two joint update steps with
+one refresh per step. The outer gate and four fixed pairs remained active at
+both steps, including the first minibatch where the local margin had the
+opposite sign and the legacy hinge would have been zero. Rotation and all six
+codebooks had nonzero gradients; the workset grew from 16 to 19 allocations,
+the menu remained monotone, and orthogonality error was \(1.09\times10^{-5}\).
+This is an implementation smoke only. The next effectiveness gate must use the
+accepted 300/300 outer split and independent 300-image audit.

@@ -13,7 +13,7 @@ from cayley import CayleySGD, DirectOrthogonalTransform
 from allocation_train import (
     _allocation_source, _backward, _curve_report, _dynamic_source,
     _load_outer_state, _objective_terms, _protect_primary,
-    _save_outer_state, _select_state,
+    _outer_pair_recovery, _save_outer_state, _select_state,
     _tangent_gradient, _validate_training_slices, _with_ideal_set,
 )
 from fixed_rate_remainder import (
@@ -193,6 +193,7 @@ def test_shared_outer_state_roundtrip():
         ideal_set_size=2)
     state = _select_state(source, distortion, calibration, args)
     state["mining_distortion"] = distortion
+    state["workset_allocations"] = source["allocations"][[0, 2]]
     with TemporaryDirectory() as directory:
         path = Path(directory) / "outer.npz"
         _save_outer_state(path, calibration, source, state)
@@ -205,7 +206,28 @@ def test_shared_outer_state_roundtrip():
     assert np.array_equal(
         restored_calibration["ideal_set_bits"],
         calibration["ideal_set_bits"])
+    assert np.array_equal(
+        restored_state["workset_allocations"],
+        state["workset_allocations"])
     assert restored_state["target"] == state["target"]
+
+
+def test_outer_gated_pair_ignores_minibatch_flip():
+    state = {
+        "target_local": 0,
+        "hard_outside_local": np.asarray([1, 2]),
+        "outer_recovery_active": True,
+        "distortion_scale": 10.0,
+    }
+    args = Namespace(recovery_margin=0.0)
+    recovery, constraint = _outer_pair_recovery(
+        torch.tensor([1.0, 3.0, 5.0]), state, args)
+    assert float(recovery) == float(constraint) == -3.0
+    state["outer_recovery_active"] = False
+    recovery, constraint = _outer_pair_recovery(
+        torch.tensor([1.0, 3.0, 5.0], requires_grad=True), state, args)
+    assert float(recovery) == float(constraint) == 0.0
+    assert recovery.requires_grad
 
 
 def test_primary_gradient_protection():
@@ -276,6 +298,7 @@ if __name__ == "__main__":
     test_statistical_allocation_helpers()
     test_dynamic_pool_and_selection_objective()
     test_shared_outer_state_roundtrip()
+    test_outer_gated_pair_ignores_minibatch_flip()
     test_primary_gradient_protection()
     test_joint_recovery_gradients()
     test_direct_cayley_descent_and_orthogonality()

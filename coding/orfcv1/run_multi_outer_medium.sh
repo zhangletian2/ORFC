@@ -11,6 +11,11 @@ CACHE=artifacts/dinov2_vitl14/cache
 STEPS=${STEPS:-50}
 REFRESH_STEPS=${REFRESH_STEPS:-10}
 STATE="$OUT/shared_initial_outer.npz"
+RECOVERY_MODE=()
+if [[ "${OUTER_GATED_RECOVERY:-0}" == 1 ]]; then
+  RECOVERY_MODE=(
+    --outer-gated-recovery --recovery-pairs "${RECOVERY_PAIRS:-4}")
+fi
 if (( REFRESH_STEPS < 1 || STEPS < REFRESH_STEPS )); then
   echo "require 1 <= REFRESH_STEPS <= STEPS" >&2
   exit 2
@@ -34,6 +39,7 @@ COMMON=(
   --primary-target outer_operational_best --candidate-mean-weight 0
   --recovery-margin 0 --rotation-lr 0.00001 --lr 0.00001
   --tau-start 0.01 --tau-end 0.01 --seed 42
+  "${RECOVERY_MODE[@]}"
 )
 
 mkdir -p "$OUT/logs"

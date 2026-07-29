@@ -320,6 +320,15 @@ def _select_state(source, distortion, calibration, args):
     outside = np.setdiff1d(np.arange(len(phi)), target_set)
     target = int(target_set[np.argmin(distortion[target_set])])
     operational_best = int(np.argmin(distortion))
+    ranked_outside = outside[np.argsort(distortion[outside])]
+    violating = ranked_outside[
+        distortion[ranked_outside]
+        < distortion[target] + getattr(args, "recovery_margin", 0.0)]
+    hard_outside = violating[:max(
+        1, int(getattr(args, "recovery_pairs", 1)))]
+    outer_recovery_active = bool(len(hard_outside))
+    if not len(hard_outside) and len(ranked_outside):
+        hard_outside = ranked_outside[:1]
     active_count = min(
         getattr(args, "ideal_batch_size", len(target_set)),
         len(target_set))
@@ -350,6 +359,7 @@ def _select_state(source, distortion, calibration, args):
     distortion_order = outside[np.argsort(distortion[outside])]
     selected.update(map(int, distortion_order[:edge]))
     selected.update(map(int, distortion_order[-edge:]))
+    selected.update(map(int, hard_outside))
     reference = None
     bits = calibration["mode_bits"][source["allocations"]]
     hits = np.flatnonzero(np.all(bits == args.reference_bit, axis=1))
@@ -384,6 +394,10 @@ def _select_state(source, distortion, calibration, args):
         "target_local": target_local,
         "target_set_local": target_set_local,
         "competitor_local": competitor_local,
+        "hard_outside": hard_outside,
+        "hard_outside_local": np.asarray([
+            local[int(index)] for index in hard_outside], dtype=int),
+        "outer_recovery_active": outer_recovery_active,
         "minimizer_local": np.asarray(
             [local[int(index)] for index in minimizers]),
         "gap": gap,
@@ -482,10 +496,14 @@ def _loss(codec, tail, batch, state, args, remainder_weight):
     candidate = normalized[targets].min()
     if len(competitors):
         outside = normalized[competitors].min()
-        recovery_constraint = (
-            candidate - outside
-            + args.recovery_margin / state["distortion_scale"])
-        recovery = torch.relu(recovery_constraint)
+        if getattr(args, "outer_gated_recovery", False):
+            recovery, recovery_constraint = _outer_pair_recovery(
+                normalized, state, args)
+        else:
+            recovery_constraint = (
+                candidate - outside
+                + args.recovery_margin / state["distortion_scale"])
+            recovery = torch.relu(recovery_constraint)
         empirical_margin = D[competitors].min() - D[targets].min()
     else:
         recovery = candidate.new_zeros(())
@@ -503,6 +521,19 @@ def _loss(codec, tail, batch, state, args, remainder_weight):
         "candidate": candidate, "operational_best": operational_best,
         "empirical_margin": empirical_margin,
     }
+
+
+def _outer_pair_recovery(normalized, state, args):
+    zero = normalized.sum() * 0
+    hard = torch.as_tensor(
+        state["hard_outside_local"], device=normalized.device)
+    if not state["outer_recovery_active"] or not len(hard):
+        return zero, zero
+    constraint = (
+        normalized[state["target_local"]] - normalized[hard]
+        + args.recovery_margin / state["distortion_scale"]
+    ).mean()
+    return constraint, constraint
 
 
 def _joint_parameters(codec):
@@ -531,6 +562,11 @@ def _calibrate_remainder(codec, tail, batch, state, args, parameters, rotation):
     if args.remainder_grad_ratio < 0:
         return args.remainder_weight
     if args.remainder_grad_ratio == 0:
+        return 0.0
+    if (
+        getattr(args, "outer_gated_recovery", False)
+        and not state["outer_recovery_active"]
+    ):
         return 0.0
     _, terms = _loss(codec, tail, batch, state, args, 0.0)
     base = list(torch.autograd.grad(
@@ -676,6 +712,12 @@ def _state_report(state):
         "active_ideal_set_indices": state["active_target_set"].tolist(),
         "active_ideal_set_allocations": state["allocations"][
             state["target_set_local"]].tolist(),
+        "outer_recovery_active": bool(state["outer_recovery_active"]),
+        "hard_outside_indices": state["hard_outside"].tolist(),
+        "hard_outside_allocations": state["allocations"][
+            state["hard_outside_local"]].tolist(),
+        "workset_size": int(len(state.get(
+            "workset_allocations", state["allocations"]))),
         "minimizers": state["minimizers"].tolist(),
         "gap": float(state["gap"]),
         "selected": state["selected"].tolist(),
@@ -724,7 +766,8 @@ def _refresh_training_state(
     anchors = audit["allocations"]
     if previous is not None:
         anchors = np.unique(np.concatenate([
-            anchors, previous["allocations"]]), axis=0)
+            anchors, previous.get(
+                "workset_allocations", previous["allocations"])]), axis=0)
     anchors = np.unique(np.concatenate([
         anchors, _ideal_anchor_modes(calibration)]), axis=0)
     source = _dynamic_source(
@@ -737,6 +780,12 @@ def _refresh_training_state(
         codec, tail, train_x, train_y, source["allocations"], mine_args)
     state = _select_state(source, distortion, calibration, args)
     state["mining_distortion"] = distortion
+    prior = (
+        previous.get("workset_allocations", previous["allocations"])
+        if previous is not None else np.empty(
+            (0, source["allocations"].shape[1]), dtype=np.int64))
+    state["workset_allocations"] = np.unique(np.concatenate([
+        prior, state["allocations"]]), axis=0)
     return calibration, source, state
 
 
@@ -751,6 +800,8 @@ def _save_outer_state(path, calibration, source, state):
         "format_version": np.asarray(1),
         "allocations": source["allocations"],
         "mining_distortion": state["mining_distortion"],
+        "workset_allocations": state.get(
+            "workset_allocations", state["allocations"]),
     })
     np.savez_compressed(path, **payload)
 
@@ -765,6 +816,10 @@ def _load_outer_state(path, args):
         }
         allocations = np.asarray(saved["allocations"]).copy()
         distortion = np.asarray(saved["mining_distortion"]).copy()
+        workset = np.asarray(
+            saved["workset_allocations"]
+            if "workset_allocations" in saved.files else allocations
+        ).copy()
     if len(calibration["ideal_set_bits"]) != args.ideal_set_size:
         raise ValueError("shared outer-state ideal-set size does not match")
     source = _allocation_source(allocations, calibration)
@@ -772,6 +827,7 @@ def _load_outer_state(path, args):
         raise ValueError("shared outer-state distortion shape does not match")
     state = _select_state(source, distortion, calibration, args)
     state["mining_distortion"] = distortion
+    state["workset_allocations"] = workset
     return calibration, source, state
 
 
@@ -918,6 +974,12 @@ def command_short(args):
                 "step": step + 1, "loss": float(loss),
                 "base": float(terms["base"]), "omega": float(terms["omega"]),
                 "recovery": float(terms["recovery"]),
+                "recovery_constraint": float(
+                    terms["recovery_constraint"]),
+                "outer_recovery_active": bool(
+                    state["outer_recovery_active"]),
+                "recovery_pair_count": int(len(
+                    state["hard_outside_local"])),
                 "candidate": float(terms["candidate"]),
                 "operational_best": float(terms["operational_best"]),
                 "empirical_margin": float(terms["empirical_margin"]),
@@ -998,6 +1060,8 @@ def command_short(args):
     final_dynamic_D = final_dynamic_matrix.mean(1)
     final_dynamic_state = _select_state(
         training_source, final_dynamic_D, calibration, args)
+    final_dynamic_state["workset_allocations"] = state.get(
+        "workset_allocations", state["allocations"])
     final_dynamic_state = _set_scales(
         final_dynamic_state, training_scales)
     final_terms = _objective_terms(
@@ -1041,7 +1105,9 @@ def command_short(args):
         fixed_audit_target_index=target,
         fixed_audit_target_indices=audit_state["target_set"],
         final_dynamic_target_index=final_dynamic_state["target"],
-        final_dynamic_target_indices=final_dynamic_state["target_set"])
+        final_dynamic_target_indices=final_dynamic_state["target_set"],
+        final_workset_allocations=state.get(
+            "workset_allocations", state["allocations"]))
     _write(args.output, {
         "before": before, "after": after, "menu": curve_report,
         "initial_dynamic": initial_dynamic_report,
@@ -1067,7 +1133,12 @@ def command_short(args):
         "ideal_set_size": int(len(calibration["ideal_set_bits"])),
         "ideal_batch_size": args.ideal_batch_size,
         "ideal_set_definition": "exact_top_k_phi",
-        "recovery_objective": "empirical_best_outside_minus_best_inside",
+        "recovery_objective": (
+            "outer_gated_paired_expectation"
+            if args.outer_gated_recovery
+            else "minibatch_hinged_best_outside_minus_best_inside"),
+        "outer_gated_recovery": args.outer_gated_recovery,
+        "recovery_pairs": args.recovery_pairs,
         "epochs": args.epochs, "train_images": args.train_images,
         "batch_size": args.images, "learning_rate": args.lr,
         "rotation_learning_rate": rotation_lr,
@@ -1147,6 +1218,8 @@ def parser():
     short.add_argument("--tie-rtol", type=float, default=1e-8)
     short.add_argument("--lse-temperature", type=float, default=0.1)
     short.add_argument("--recovery-margin", type=float, default=0.0)
+    short.add_argument("--outer-gated-recovery", action="store_true")
+    short.add_argument("--recovery-pairs", type=int, default=1)
     short.add_argument("--candidate-mean-weight", type=float, default=0.0)
     short.add_argument(
         "--primary-target",
