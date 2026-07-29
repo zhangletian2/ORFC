@@ -205,6 +205,84 @@ def bootstrap_remainder_range(
     return result
 
 
+def paired_contract_statistics(
+    distortion, quad_phi, analytic_phi, bootstraps=1000,
+    batch_size=32, seed=42,
+):
+    """Audit the unified per-image contract with paired resampling.
+
+    Arrays use shape ``[allocations, images]``.  Every bootstrap resamples the
+    same images for ``D``, ``Phi_quad`` and ``Phi_ana`` and reselects both the
+    remainder extrema and the sampled analytic optimum.
+    """
+    D, Q, A = (
+        np.asarray(value, dtype=np.float64)
+        for value in (distortion, quad_phi, analytic_phi)
+    )
+    if D.ndim != 2 or Q.shape != D.shape or A.shape != D.shape:
+        raise ValueError("D, Phi_quad and Phi_ana must share shape [A,N]")
+    structural, rate = D - Q, Q - A
+    total = D - A
+
+    def metrics(indices=None):
+        arrays = (structural, rate, total, A)
+        means = [
+            value.mean(1) if indices is None else value[:, indices].mean(2)
+            for value in arrays
+        ]
+        if indices is None:
+            s, m, e, phi = means
+            order = np.argsort(phi)
+            gap = float(phi[order[1]] - phi[order[0]]) if len(phi) > 1 else np.inf
+            omega = float(np.ptp(e))
+            return np.asarray([np.ptp(s), np.ptp(m), omega, gap, gap - omega])
+        s, m, e, phi = means
+        order = np.argsort(phi, axis=0)
+        columns = np.arange(phi.shape[1])
+        gap = (
+            phi[order[1], columns] - phi[order[0], columns]
+            if len(phi) > 1 else np.full(phi.shape[1], np.inf)
+        )
+        omega = np.ptp(e, axis=0)
+        return np.stack([
+            np.ptp(s, axis=0), np.ptp(m, axis=0), omega, gap, gap - omega])
+
+    names = (
+        "structural_range", "rate_model_mismatch_range",
+        "analytic_remainder_range", "sampled_analytic_gap",
+        "sampled_recovery_margin",
+    )
+    point = metrics()
+    samples = []
+    if bootstraps > 0 and D.shape[1] > 1:
+        rng = np.random.default_rng(seed)
+        for start in range(0, bootstraps, batch_size):
+            count = min(batch_size, bootstraps - start)
+            indices = rng.integers(
+                0, D.shape[1], size=(count, D.shape[1]))
+            samples.append(metrics(indices))
+    draws = np.concatenate(samples, axis=1) if samples else point[:, None]
+    result = {
+        f"{name}_point": float(point[index])
+        for index, name in enumerate(names)
+    }
+    result.update({
+        f"{name}_ci95": np.quantile(
+            draws[index], [0.025, 0.975]).tolist()
+        for index, name in enumerate(names)
+    })
+    result.update({
+        "contract_bootstrap_count": int(bootstraps),
+        "contract_extrema_reselected": True,
+        "contract_analytic_optimum_reselected": True,
+        "sampled_recovery_condition_point": bool(point[-1] > 0),
+        "sampled_recovery_condition_confident": bool(
+            result["analytic_remainder_range_ci95"][1]
+            < result["sampled_analytic_gap_ci95"][0]),
+    })
+    return result
+
+
 def decompose_output_vectors(phi, group_response, output_delta):
     """Split one output distortion into analytic, menu, cross and nonlinear terms.
 
@@ -407,12 +485,18 @@ def evaluate_fixed_rate_decomposition(
     jvp_chunk=8,
     rate_tolerance=1e-8,
     ideal_cost_table=None,
+    mode_bits=None,
+    reference_bit=None,
+    bootstrap_count=1000,
+    bootstrap_batch=32,
+    bootstrap_seed=42,
 ):
-    """Measure ``D=Phi+M+C+N`` for realised multi-mode PQ errors.
+    """Measure the unified ``D``, quadratic and analytic ideal contracts.
 
-    ``M`` is the realised self-quadratic/menu mismatch, ``C`` is quadratic
-    cross-group coupling and ``N`` is finite-amplitude nonlinear propagation.
-    Central finite differences estimate the local group responses.
+    The primary exact split is ``D=Phi_quad+E_struct``.  With a reference mode,
+    the common exponential model adds
+    ``D=Phi_ana+E_rate+E_struct``.  Central finite differences estimate every
+    per-image, per-group, per-mode local response under the current codec.
     """
     if jvp_eps <= 0 or jvp_chunk < 1:
         raise ValueError("jvp_eps and jvp_chunk must be positive")
@@ -421,7 +505,7 @@ def evaluate_fixed_rate_decomposition(
     allocations = np.asarray(allocations, dtype=np.int64)
     rates, totals, target = validate_fixed_total_rate(
         allocations, cost_table, tolerance=rate_tolerance)
-    phi = allocation_phi(
+    calibrated_phi = allocation_phi(
         allocations, cost_table, c_g, codec.pq.d, ideal_cost_table)
     keys = (
         "distortion", "self_quad", "paired_quad", "menu", "cross",
@@ -434,6 +518,19 @@ def evaluate_fixed_rate_decomposition(
     codec.eval()
     groups = codec.pq.G
     modes_count = len(codec.pq.quantizers)
+    mode_bits = (
+        np.log2(codec.pq.mode_sizes)
+        if mode_bits is None else np.asarray(mode_bits, dtype=np.float64))
+    if mode_bits.shape != (modes_count,):
+        raise ValueError("mode_bits must match the multi-mode PQ menu")
+    if reference_bit is None:
+        reference_bit = float(mode_bits[len(mode_bits) // 2])
+    matches = np.flatnonzero(np.isclose(mode_bits, reference_bit))
+    if len(matches) != 1:
+        raise ValueError("reference_bit must identify exactly one mode")
+    reference_mode = int(matches[0])
+    quad_cost_per_image = np.empty(
+        (len(features_array), groups, modes_count), np.float64)
 
     for image_index in range(len(features_array)):
         x = torch.from_numpy(np.array(
@@ -471,6 +568,8 @@ def evaluate_fixed_rate_decomposition(
             modes_count, groups, *teacher.shape[1:])
         response_bank *= magnitude.reshape(
             modes_count, groups, *([1] * (teacher.ndim - 1)))
+        quad_cost_per_image[image_index] = (
+            response_bank.flatten(2).square().sum(2).t().cpu().numpy())
 
         bank_g = bank.permute(3, 0, 1, 2, 4)
         group_index = torch.arange(groups, device=device)[None, :]
@@ -489,38 +588,77 @@ def evaluate_fixed_rate_decomposition(
                 response = response_bank[
                     mode_row, torch.arange(groups, device=device)]
                 parts = decompose_output_vectors(
-                    phi[start + offset], response.unsqueeze(0),
+                    calibrated_phi[start + offset], response.unsqueeze(0),
                     delta[offset:offset + 1])
                 for key in keys:
                     values[key][start + offset, image_index] = (
                         parts[key].item())
 
-    means = {key: array.mean(1) for key, array in values.items()}
-    remainder = (
-        values["menu"] + values["cross"] + values["nonlinear"])
+    quad_phi = np.stack([
+        quad_cost_per_image[:, np.arange(groups), modes].sum(1)
+        for modes in allocations])
+    scales = np.exp2(-2.0 * mode_bits / codec.pq.d)
+    c_per_image = quad_cost_per_image[
+        :, :, reference_mode] / scales[reference_mode]
+    analytic_phi = np.stack([
+        (c_per_image * scales[modes][None]).sum(1)
+        for modes in allocations])
+    structural = values["distortion"] - quad_phi
+    rate_mismatch = quad_phi - analytic_phi
+    analytic_remainder = values["distortion"] - analytic_phi
+    calibration_drift = quad_phi - calibrated_phi[:, None]
+    calibrated_remainder = values["distortion"] - calibrated_phi[:, None]
+    quad_lookup_error = quad_phi - values["self_quad"]
+    structural_component_error = structural - (
+        values["cross"] + values["nonlinear"])
     reconstruction_error = values["distortion"] - (
-        phi[:, None] + remainder)
+        analytic_phi + rate_mismatch + structural)
     relative_error = np.abs(reconstruction_error) / np.maximum(
         np.abs(values["distortion"]), 1.0)
+    quad_lookup_relative = np.abs(quad_lookup_error) / np.maximum(
+        np.abs(quad_phi), 1.0)
+    structural_component_relative = np.abs(
+        structural_component_error) / np.maximum(
+            np.abs(values["distortion"]), 1.0)
+    contract_components = {
+        "rate_model_mismatch": rate_mismatch,
+        "cross": values["cross"],
+        "nonlinear": values["nonlinear"],
+    }
     component_ranges = {
-        key: float(np.ptp(means[key]))
-        for key in ("menu", "cross", "nonlinear")
+        key: float(np.ptp(value.mean(1)))
+        for key, value in contract_components.items()
     }
     summary = {
+        "measurement_contract": "paired_unified_v1",
         "n_allocations": int(len(allocations)),
         "n_images": int(len(features_array)),
         "target_rate": target,
-        "ideal_model": (
+        "calibrated_ideal_model": (
             "discrete_table"
             if ideal_cost_table is not None else "common_exponential"),
+        "analytic_model": "reference_mode_common_exponential",
+        "reference_bit": float(reference_bit),
         "max_rate_error": float(np.abs(totals - target).max()),
         "jvp_eps": float(jvp_eps),
         "component_mean": {
-            key: float(means[key].mean())
-            for key in ("menu", "cross", "nonlinear")
+            key: float(value.mean())
+            for key, value in contract_components.items()
         },
         "component_range": component_ranges,
-        "remainder_range": float(np.ptp(remainder.mean(1))),
+        "structural_remainder_range": float(np.ptp(structural.mean(1))),
+        "rate_model_mismatch_range": float(np.ptp(rate_mismatch.mean(1))),
+        "analytic_remainder_range": float(
+            np.ptp(analytic_remainder.mean(1))),
+        "calibration_drift_range": float(
+            np.ptp(calibration_drift.mean(1))),
+        "max_abs_quad_lookup_error": float(
+            np.abs(quad_lookup_error).max()),
+        "max_rel_quad_lookup_error": float(quad_lookup_relative.max()),
+        "max_abs_structural_component_error": float(
+            np.abs(structural_component_error).max()),
+        "max_rel_structural_component_error": float(
+            structural_component_relative.max()),
         "dominant_component_by_range": max(
             component_ranges, key=component_ranges.get),
         "max_abs_decomposition_error": float(
@@ -532,9 +670,23 @@ def evaluate_fixed_rate_decomposition(
             np.abs(values["nonlinear"]) >
             values["nonlinear_bound"] + 1e-5)),
     }
+    summary.update(paired_contract_statistics(
+        values["distortion"], quad_phi, analytic_phi,
+        bootstraps=bootstrap_count, batch_size=bootstrap_batch,
+        seed=bootstrap_seed))
     arrays = {
         "allocations": allocations, "rates": rates, "total_rates": totals,
-        "phi": phi, "remainder": remainder,
-        "decomposition_error": reconstruction_error, **values,
+        "calibrated_phi": calibrated_phi,
+        "quad_cost_per_image": quad_cost_per_image,
+        "quad_phi": quad_phi, "analytic_phi": analytic_phi,
+        "structural_remainder": structural,
+        "rate_model_mismatch": rate_mismatch,
+        "analytic_remainder": analytic_remainder,
+        "calibration_drift": calibration_drift,
+        "calibrated_remainder": calibrated_remainder,
+        "quad_lookup_error": quad_lookup_error,
+        "structural_component_error": structural_component_error,
+        "decomposition_error": reconstruction_error,
+        "current_c_per_image": c_per_image, **values,
     }
     return summary, arrays

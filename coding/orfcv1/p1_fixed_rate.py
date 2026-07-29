@@ -320,6 +320,7 @@ def command_calibrate(args):
             q_per_image_by_bit=q_by_bit,
             cost_table=costs, mode_bits=mode_bits,
             rate_dimension=codec.pq.d,
+            reference_bit=ref,
             coefficient_kind="central_jvp_actual_residual",
             image_offset=args.image_offset)
         dump_json(out / f"calibration_R{budget}.json", {
@@ -334,6 +335,7 @@ def command_calibrate(args):
             "coefficient_bits": list(probe_bits), **stability,
             "ideal_model": args.ideal_model,
             "rate_dimension": codec.pq.d,
+            "reference_bit": ref,
             "coefficient_kind": "central_jvp_actual_residual",
             "image_offset": args.image_offset, "codec": args.codec,
         })
@@ -448,20 +450,39 @@ def command_decompose(args):
     for budget in csv_ints(args.budgets):
         calibration = np.load(
             out / f"calibration_R{budget}.npz", allow_pickle=False)
+        if "reference_bit" in calibration.files:
+            reference_bit = int(calibration["reference_bit"])
+        else:
+            distance = np.square(
+                calibration["c_by_bit"] - calibration["c_g"][None]).mean(1)
+            reference_bit = int(
+                calibration["coefficient_bits"][distance.argmin()])
         summary, arrays = evaluate_fixed_rate_decomposition(
             features, teachers, codec, tail, calibration["allocations"],
             calibration["cost_table"], calibration["c_g"], args.norm_mode,
             device, allocation_chunk=args.allocation_chunk,
             jvp_eps=args.jvp_eps, jvp_chunk=args.jvp_chunk,
+            mode_bits=calibration["mode_bits"],
+            reference_bit=reference_bit,
+            bootstrap_count=args.bootstrap_count,
+            bootstrap_batch=args.bootstrap_batch,
+            bootstrap_seed=args.seed + 2000,
             ideal_cost_table=(
                 calibration["ideal_cost_table"]
                 if "ideal_cost_table" in calibration.files else None))
-        summary.update({"arm": args.arm, "budget": budget})
+        summary.update({
+            "arm": args.arm, "budget": budget,
+            "allocation_scope": "sampled_lower_bound",
+            "ideal_terms_recomputed_for_current_codec": True,
+            "complete_and_ideal_terms_paired_by_image": True,
+        })
         np.savez_compressed(out / f"decomposition_R{budget}.npz", **arrays)
         dump_json(out / f"decomposition_R{budget}.json", summary)
         print(
-            f"R={budget}: remainder={summary['remainder_range']:.6g}, "
-            f"dominant={summary['dominant_component_by_range']}")
+            f"R={budget}: structural="
+            f"{summary['structural_range_point']:.6g}, analytic="
+            f"{summary['analytic_remainder_range_point']:.6g}, "
+            f"recovery={summary['sampled_recovery_condition_confident']}")
 
 
 def command_audit(args):
@@ -563,6 +584,8 @@ def parser():
     p.add_argument("--allocation-chunk", type=int, default=4)
     p.add_argument("--jvp-eps", type=float, default=0.01)
     p.add_argument("--jvp-chunk", type=int, default=8)
+    p.add_argument("--bootstrap-count", type=int, default=1000)
+    p.add_argument("--bootstrap-batch", type=int, default=32)
     p = sub.add_parser("audit")
     p.add_argument("--run-dir", required=True)
     p.add_argument("--arms", default="identity,opq,orfc,response")

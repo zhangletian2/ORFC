@@ -20,7 +20,7 @@ from allocation_train import (
 )
 from fixed_rate_remainder import (
     allocation_phi, bootstrap_remainder_range, decompose_output_vectors,
-    validate_fixed_total_rate,
+    paired_contract_statistics, validate_fixed_total_rate,
 )
 from ideal_set_statistics import _solve_batch, _suffix_counts
 from p1_fixed_rate import (
@@ -347,6 +347,22 @@ def test_remainder_decomposition():
     assert float(parts["nonlinear"]) == 0.0
 
 
+def test_paired_unified_measurement_contract():
+    analytic = np.asarray([
+        [1., 1., 1., 1.], [3., 3., 3., 3.], [4., 4., 4., 4.]])
+    quad = analytic + np.asarray([[0.], [1.], [-1.]])
+    distortion = quad + np.asarray([[0.], [2.], [-2.]])
+    result = paired_contract_statistics(
+        distortion, quad, analytic, bootstraps=20, batch_size=5)
+    assert result["structural_range_point"] == 4.0
+    assert result["rate_model_mismatch_range_point"] == 2.0
+    assert result["analytic_remainder_range_point"] == 6.0
+    assert result["sampled_analytic_gap_point"] == 2.0
+    assert result["sampled_recovery_margin_point"] == -4.0
+    assert result["structural_range_ci95"] == [4.0, 4.0]
+    assert not result["sampled_recovery_condition_confident"]
+
+
 if __name__ == "__main__":
     test_fixed_ideal_candidate_binding()
     test_top2_matches_brute_force()
@@ -361,4 +377,5 @@ if __name__ == "__main__":
     test_direct_cayley_descent_and_orthogonality()
     test_rotation_gradient_is_tangent()
     test_remainder_decomposition()
+    test_paired_unified_measurement_contract()
     print("PASS: allocation contracts")
