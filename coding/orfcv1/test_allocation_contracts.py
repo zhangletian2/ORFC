@@ -17,7 +17,7 @@ from allocation_train import (
     _tangent_gradient, _validate_training_slices, _with_ideal_set,
 )
 from fixed_rate_remainder import (
-    decompose_output_vectors, validate_fixed_total_rate,
+    allocation_phi, decompose_output_vectors, validate_fixed_total_rate,
 )
 from ideal_set_statistics import _solve_batch, _suffix_counts
 from p1_fixed_rate import (
@@ -95,6 +95,11 @@ def test_fixed_rate_and_curve_contracts():
     passed = _curve_report([3, 4, 5], [9.0, 6.0, 4.0], 0.0)
     failed = _curve_report([3, 4, 5], [9.0, 10.0, 4.0], 0.0)
     assert passed["monotonic"] and not failed["monotonic"]
+    allocations = np.asarray([[0, 2], [1, 1], [2, 0]])
+    table = np.asarray([[3., 2., 1.], [1., 2., 4.]])
+    phi = allocation_phi(
+        allocations, costs, np.ones(2), 1, ideal_cost_table=table)
+    assert phi.tolist() == [7.0, 4.0, 2.0]
 
 
 def test_statistical_allocation_helpers():

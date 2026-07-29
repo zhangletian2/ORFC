@@ -137,6 +137,20 @@ def ideal_phi(c_g, rates, rate_dimension=1):
     ).sum(axis=1)
 
 
+def allocation_phi(
+    allocations, cost_table, c_g, rate_dimension, ideal_cost_table=None,
+):
+    """Evaluate the one canonical separable ideal model for allocations."""
+    rates = allocation_rates(allocations, cost_table)
+    if ideal_cost_table is None:
+        return ideal_phi(c_g, rates, rate_dimension=rate_dimension)
+    table = np.asarray(ideal_cost_table, dtype=np.float64)
+    if table.shape != np.asarray(cost_table).shape:
+        raise ValueError("ideal_cost_table must match cost_table")
+    groups = np.arange(table.shape[0])[None, :]
+    return table[groups, np.asarray(allocations, dtype=np.int64)].sum(axis=1)
+
+
 def decompose_output_vectors(phi, group_response, output_delta):
     """Split one output distortion into analytic, menu, cross and nonlinear terms.
 
@@ -219,14 +233,8 @@ def evaluate_fixed_rate_remainder(
     allocations = np.asarray(allocations, dtype=np.int64)
     rates, totals, target = validate_fixed_total_rate(
         allocations, cost_table, tolerance=rate_tolerance)
-    if ideal_cost_table is None:
-        phi = ideal_phi(c_g, rates, rate_dimension=codec.pq.d)
-    else:
-        table = np.asarray(ideal_cost_table, dtype=np.float64)
-        if table.shape != cost_table.shape:
-            raise ValueError("ideal_cost_table must match cost_table")
-        groups = np.arange(table.shape[0])[None, :]
-        phi = table[groups, allocations].sum(axis=1)
+    phi = allocation_phi(
+        allocations, cost_table, c_g, codec.pq.d, ideal_cost_table)
     n_alloc, n_images = allocations.shape[0], len(features_array)
     distortion = np.empty((n_alloc, n_images), dtype=np.float64)
 
@@ -347,6 +355,7 @@ def evaluate_fixed_rate_decomposition(
     jvp_eps=0.01,
     jvp_chunk=8,
     rate_tolerance=1e-8,
+    ideal_cost_table=None,
 ):
     """Measure ``D=Phi+M+C+N`` for realised multi-mode PQ errors.
 
@@ -361,7 +370,8 @@ def evaluate_fixed_rate_decomposition(
     allocations = np.asarray(allocations, dtype=np.int64)
     rates, totals, target = validate_fixed_total_rate(
         allocations, cost_table, tolerance=rate_tolerance)
-    phi = ideal_phi(c_g, rates, rate_dimension=codec.pq.d)
+    phi = allocation_phi(
+        allocations, cost_table, c_g, codec.pq.d, ideal_cost_table)
     keys = (
         "distortion", "self_quad", "paired_quad", "menu", "cross",
         "nonlinear", "cross_bound", "nonlinear_bound",
@@ -449,6 +459,9 @@ def evaluate_fixed_rate_decomposition(
         "n_allocations": int(len(allocations)),
         "n_images": int(len(features_array)),
         "target_rate": target,
+        "ideal_model": (
+            "discrete_table"
+            if ideal_cost_table is not None else "common_exponential"),
         "max_rate_error": float(np.abs(totals - target).max()),
         "jvp_eps": float(jvp_eps),
         "component_mean": {

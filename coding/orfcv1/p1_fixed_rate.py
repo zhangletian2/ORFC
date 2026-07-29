@@ -452,7 +452,10 @@ def command_decompose(args):
             features, teachers, codec, tail, calibration["allocations"],
             calibration["cost_table"], calibration["c_g"], args.norm_mode,
             device, allocation_chunk=args.allocation_chunk,
-            jvp_eps=args.jvp_eps, jvp_chunk=args.jvp_chunk)
+            jvp_eps=args.jvp_eps, jvp_chunk=args.jvp_chunk,
+            ideal_cost_table=(
+                calibration["ideal_cost_table"]
+                if "ideal_cost_table" in calibration.files else None))
         summary.update({"arm": args.arm, "budget": budget})
         np.savez_compressed(out / f"decomposition_R{budget}.npz", **arrays)
         dump_json(out / f"decomposition_R{budget}.json", summary)
