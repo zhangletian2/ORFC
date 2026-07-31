@@ -483,10 +483,39 @@ def menu_cycle_allocations(anchor, permutation):
     return out
 
 
+# W-I3 compares hard indices on dev-500 and on a fixed prefix of train-fit.  The
+# prefix is one evaluation batch exactly, so the check runs through the same
+# kernel path as every other tail call (engine.assert_uniform_shape's reason for
+# existing), and it is a *prefix* of the frozen split rather than a sample, so
+# there is no second seed to keep aligned between the arms.
+WI_PROBE_IMAGES = EVAL_IMAGE_BATCH          # 100
+
+
 # ------------------------------------------------------------- inner loop ---
 TRAIN_SEED = 20261102
 LOG_EVERY = 25
 REVIVE_EVERY = 50          # revival covers m_t union a_s, same rule in both arms
+
+# How often the train-val trajectory that G1 and G2 read is measured.  The plan
+# says "the mean of the last 25 steps" and "a 25-step sliding mean" without
+# saying how often train-val is evaluated, so the cadence is fixed here, before
+# any arm runs, rather than being decided while looking at a curve.
+#
+# It cannot be every step.  train-val is 500 images; a training step at batch 64
+# costs (1 + 2) x 64 = 192 forward-equivalents, so a per-step val evaluation
+# would cost 500/192 = 2.6x the training itself and the experiment would be
+# mostly measurement.  At VAL_EVERY = 25 the overhead is 10%, and a full run of
+# N_inner ~ 5k steps yields ~200 points -- enough for a 25-point sliding window
+# to mean something and for G2's "argmin in the last tenth" to have ~20 points
+# of resolution in the region it tests.
+#
+# So "the last 25 steps" is read throughout as "the last 25 *measurements*",
+# i.e. the last 25 x VAL_EVERY steps of training.  Both arms use the same
+# cadence and the same train-val split, so the comparison is unaffected by the
+# choice; what the choice sets is the resolution of the stability gate, and it
+# is set here rather than after seeing whether a run passed.
+VAL_EVERY = 25
+VAL_TAIL_POINTS = 25       # "the last 25 steps" == the last 25 measurements
 CODEBOOK_MOMENTUM = 0.0
 CAYLEY_FIXED_POINT_ITERATIONS = 5
 CAYLEY_REORTH_EVERY = 100
