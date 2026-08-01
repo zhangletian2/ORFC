@@ -211,9 +211,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     if bits != tuple(anchor.mode_bits):
         raise SystemExit(f"INVALID_EXPERIMENT: menu {bits} != {anchor.mode_bits}")
     policy = FixedBudgetAllocationPolicy(C.GROUPS, bits, anchor.rate).to(device)
-    if policy_gradient == "dp_st":
-        with torch.no_grad():
-            policy.logits[:, anchor.uniform_mode].fill_(1e-6)
+    with torch.no_grad():
+        policy.logits[:, anchor.uniform_mode].fill_(1e-6)
     policy_optimizer = torch.optim.Adam([policy.logits], lr=float(policy_lr))
     rotation_optimizer, book_optimizer = build_optimizers(
         codec, lr_u, lr_theta, book_optimizer_name)
@@ -275,12 +274,11 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     initial_entropy = float(policy.build(temperature).entropy().detach())
     scale = initial_distortion
     initial_orth = frozen.orthogonality_error(codec)
-    trace, validation = [], [{"step": 0, "uniform": initial_distortion}]
-    if policy_gradient == "dp_st":
-        validation = [joint_validation(
-            codec, tail, val, policy.build(temperature), 0,
-            C.STAGE1_VAL_SAMPLES)]
-        validation[0]["uniform"] = initial_distortion
+    trace = []
+    validation = [joint_validation(
+        codec, tail, val, policy.build(temperature), 0,
+        C.STAGE1_VAL_SAMPLES)]
+    validation[0]["uniform"] = initial_distortion
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
         torch.cuda.synchronize(device)
