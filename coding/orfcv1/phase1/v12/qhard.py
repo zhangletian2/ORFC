@@ -2,6 +2,7 @@
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from opq import batch_inv_normalize_gpu
 
@@ -9,8 +10,8 @@ from . import config as C
 from ..v11.qhard import revive_dead_codewords
 
 
-def quantise(codec, y, allocations):
-    """Quantise several allocations with one rotation and distance bank."""
+def quantise(codec, y, allocations, marginals=None, codeword_temperature=0.0):
+    """Hard PQ forward with optional DP/codeword surrogate backward."""
     allocations = torch.as_tensor(
         allocations, dtype=torch.long, device=y.device)
     if allocations.ndim == 1:
@@ -21,33 +22,52 @@ def quantise(codec, y, allocations):
     z = y.reshape(b * tokens, dim) @ rotation
     sub = z.reshape(-1, pq.G, pq.d).permute(1, 0, 2)
     banks, labels = [], []
+    soft_codewords = float(codeword_temperature) > 0
     for quantizer in pq.quantizers:
         book = quantizer.codebooks
-        with torch.no_grad():
-            index = torch.cdist(
-                sub.detach(), book.detach()).square().argmin(dim=-1)
-        banks.append(torch.gather(
-            book, 1, index.unsqueeze(-1).expand(-1, -1, pq.d)))
+        distances = torch.cdist(sub, book).square()
+        index = distances.detach().argmin(dim=-1)
+        if soft_codewords:
+            soft = torch.softmax(-distances / float(codeword_temperature), -1)
+            hard = F.one_hot(index, book.shape[1]).to(soft.dtype)
+            weights = hard.detach() + soft - soft.detach()
+            banks.append(torch.einsum("gnk,gkd->gnd", weights, book))
+        else:
+            banks.append(torch.gather(
+                book, 1, index.unsqueeze(-1).expand(-1, -1, pq.d)))
         labels.append(index)
     bank, labels = torch.stack(banks), torch.stack(labels)
     groups = torch.arange(pq.G, device=y.device)
-    chosen = bank[allocations, groups[None]]
+    if marginals is None:
+        chosen = bank[allocations, groups[None]]
+    else:
+        marginals = torch.as_tensor(marginals, device=y.device, dtype=bank.dtype)
+        if marginals.shape != (pq.G, len(pq.quantizers)):
+            raise ValueError("marginals must have shape [groups, modes]")
+        hard = F.one_hot(allocations, len(pq.quantizers)).to(bank.dtype)
+        hard_chosen = torch.einsum("sgm,mgnc->sgnc", hard, bank)
+        soft_chosen = torch.einsum("gm,mgnc->gnc", marginals, bank)
+        chosen = hard_chosen.detach() + soft_chosen[None] - soft_chosen.detach()[None]
     z_hat = chosen.permute(0, 2, 1, 3).reshape(
         allocations.shape[0], b * tokens, dim)
-    z_hat = z_hat + (z[None] - z.detach()[None])
+    if not soft_codewords:
+        z_hat = z_hat + (z[None] - z.detach()[None])
     decoded = z_hat @ rotation.t()
     selected_labels = labels[allocations, groups[None]]
     return decoded.reshape(-1, tokens, dim), selected_labels
 
 
-def distortions(codec, tail, y, mu, std, teacher, allocations):
+def distortions(codec, tail, y, mu, std, teacher, allocations,
+                marginals=None, codeword_temperature=0.0):
     """Hard tail distortion ``[allocations, images]`` in one tail call."""
     allocations = torch.as_tensor(
         allocations, dtype=torch.long, device=y.device)
     if allocations.ndim == 1:
         allocations = allocations[None]
     count = int(allocations.shape[0])
-    decoded, labels = quantise(codec, y, allocations)
+    decoded, labels = quantise(
+        codec, y, allocations, marginals=marginals,
+        codeword_temperature=codeword_temperature)
     b = y.shape[0]
     expanded_mu = mu[None].expand(count, *mu.shape).reshape(
         count * b, *mu.shape[1:])

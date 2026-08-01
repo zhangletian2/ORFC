@@ -191,7 +191,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         policy_samples=C.POLICY_SAMPLES,
         temperature=C.DEFAULT_TEMPERATURE,
         entropy_weight=C.DEFAULT_ENTROPY_WEIGHT, images=None, log=print,
-        book_optimizer="adam", grad_clip=1.0):
+        book_optimizer="adam", grad_clip=1.0,
+        policy_gradient="reinforce", codeword_temperature=0.0):
     started = time.time()
     run_id = C.ensure_run_id(run_id)
     out = C.output_dir(anchor, run_id)
@@ -209,6 +210,9 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     if bits != tuple(anchor.mode_bits):
         raise SystemExit(f"INVALID_EXPERIMENT: menu {bits} != {anchor.mode_bits}")
     policy = FixedBudgetAllocationPolicy(C.GROUPS, bits, anchor.rate).to(device)
+    if policy_gradient == "dp_st":
+        with torch.no_grad():
+            policy.logits[:, anchor.uniform_mode].fill_(1e-6)
     policy_optimizer = torch.optim.Adam([policy.logits], lr=float(policy_lr))
     rotation_optimizer, book_optimizer = build_optimizers(
         codec, lr_u, lr_theta, book_optimizer_name)
@@ -236,8 +240,12 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     if total < 1:
         raise ValueError("training requires at least one step")
     policy_samples = int(policy_samples)
-    if policy_samples < 2:
+    if policy_samples < 2 and policy_gradient == "reinforce":
         raise ValueError("leave-one-out policy gradient requires >=2 samples")
+    if policy_gradient not in ("reinforce", "dp_st"):
+        raise ValueError("policy_gradient must be reinforce or dp_st")
+    if policy_gradient == "dp_st" and not codeword_temperature > 0:
+        raise ValueError("dp_st requires a positive codeword temperature")
     train_iterator = iter(train_loader)
     generator = torch.Generator(device=device).manual_seed(C.POLICY_SEED)
     policy_coverage = torch.zeros(
@@ -253,6 +261,11 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     scale = initial_distortion
     initial_orth = frozen.orthogonality_error(codec)
     trace, validation = [], [{"step": 0, "uniform": initial_distortion}]
+    if policy_gradient == "dp_st":
+        validation = [joint_validation(
+            codec, tail, val, policy.build(temperature), 0,
+            C.STAGE1_VAL_SAMPLES)]
+        validation[0]["uniform"] = initial_distortion
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
         torch.cuda.synchronize(device)
@@ -272,6 +285,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
             y, mu, std = batch_normalize_gpu(x, mode=C.NORM_MODE)
         distribution = policy.build(temperature, validate=False)
         allocations = distribution.sample(policy_samples, generator=generator)
+        marginals = (distribution.marginals()
+                     if policy_gradient == "dp_st" else None)
         budget_violations.add_(
             (policy.actual_rate(allocations) != anchor.rate).sum())
         add_coverage(policy_coverage, allocations)
@@ -283,14 +298,21 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         policy_optimizer.zero_grad(set_to_none=True)
 
         per_image, labels = qhard.distortions(
-            codec, tail, y, mu, std, teacher, allocations)
+            codec, tail, y, mu, std, teacher, allocations,
+            marginals=marginals,
+            codeword_temperature=(codeword_temperature
+                                  if policy_gradient == "dp_st" else 0.0))
         per_allocation = per_image.mean(dim=1)
         codec_loss = per_allocation.mean() / scale
-        log_probability = distribution.log_prob(allocations, validate=False)
-        detached = per_allocation.detach()
-        baseline = (detached.sum() - detached) / (len(detached) - 1)
-        advantage = (detached - baseline) / scale
-        policy_loss = (advantage * log_probability).mean()
+        if policy_gradient == "reinforce":
+            log_probability = distribution.log_prob(
+                allocations, validate=False)
+            detached = per_allocation.detach()
+            baseline = (detached.sum() - detached) / (len(detached) - 1)
+            advantage = (detached - baseline) / scale
+            policy_loss = (advantage * log_probability).mean()
+        else:
+            policy_loss = codec_loss.new_zeros(())
         entropy = distribution.entropy()
         entropy_coefficient = C.cosine_lr(
             step, schedule_total, float(entropy_weight), floor_ratio=0.0)
@@ -407,6 +429,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     joint = {
         "contract": "one continuous exact-budget trajectory jointly updates "
                     "U, every sampled PQ mode, and the allocation policy",
+        "policy_gradient": policy_gradient,
+        "codeword_temperature": float(codeword_temperature),
         "single_continuous_trajectory": True,
         "gradient_coverage": gradient_coverage.cpu().tolist(),
         "gradient_coverage_min": int(gradient_coverage.min()),
@@ -471,6 +495,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                "book_optimizer": book_optimizer_name,
                "grad_clip": grad_clip,
                "temperature": temperature, "entropy_weight": entropy_weight,
+               "policy_gradient": policy_gradient,
+               "codeword_temperature": float(codeword_temperature),
                "initial_distortion": initial_distortion,
                "hard_parity_initial": initial_parity,
                "hard_parity_final": final_parity,
@@ -504,6 +530,9 @@ def main(argv=None):
     parser.add_argument("--temperature", type=float, default=C.DEFAULT_TEMPERATURE)
     parser.add_argument("--entropy-weight", type=float,
                         default=C.DEFAULT_ENTROPY_WEIGHT)
+    parser.add_argument("--policy-gradient", choices=("reinforce", "dp_st"),
+                        default="reinforce")
+    parser.add_argument("--codeword-temperature", type=float, default=0.0)
     parser.add_argument("--images", type=int, default=None, help="probe only")
     args = parser.parse_args(argv)
     result = run(C.ANCHOR_BY_NAME[args.anchor], args.run_id,
@@ -512,7 +541,9 @@ def main(argv=None):
                  policy_lr=args.policy_lr, policy_samples=args.policy_samples,
                  temperature=args.temperature,
                  entropy_weight=args.entropy_weight, images=args.images,
-                 book_optimizer=args.book_optimizer, grad_clip=args.grad_clip)
+                 book_optimizer=args.book_optimizer, grad_clip=args.grad_clip,
+                 policy_gradient=args.policy_gradient,
+                 codeword_temperature=args.codeword_temperature)
     print(json.dumps({"anchor": result["anchor"], "seconds": result["seconds"],
                       "validation": result["validation"],
                       "policy": result["policy"],
