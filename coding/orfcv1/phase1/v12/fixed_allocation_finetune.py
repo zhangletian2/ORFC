@@ -29,19 +29,27 @@ def temperature_at(step, total, start, end):
 def run(anchor, source, run_id, device, epochs=20, steps=None,
         batch=C.DEFAULT_BATCH, lr_u=C.DEFAULT_LR_U,
         lr_theta=C.DEFAULT_LR_THETA, tau_start=0.5, tau_end=0.005,
-        num_workers=C.DATALOADER_WORKERS, log=print):
+        num_workers=C.DATALOADER_WORKERS, optimizer_mode="cayley_sgd",
+        uniform=False, log=print):
     source = Path(source)
     out = C.output_dir(anchor, run_id)
     if out.exists() and any(out.iterdir()):
         raise SystemExit(f"{out} is non-empty; refusing to overwrite")
-    for name in ("codec.pt", "allocation.npy", "train.json"):
-        if not (source / name).exists():
-            raise FileNotFoundError(source / name)
+    if not (source / "codec.pt").exists():
+        raise FileNotFoundError(source / "codec.pt")
     out.mkdir(parents=True, exist_ok=True)
     engine.configure_precision(C.ALLOW_TF32)
 
     codec = load_codec_v1(source / "codec.pt", device=device)
-    allocation = torch.from_numpy(np.load(source / "allocation.npy")).long().to(device)
+    allocation_path = source / "allocation.npy"
+    if allocation_path.exists() and not uniform:
+        allocation = torch.from_numpy(np.load(allocation_path)).long().to(device)
+    elif uniform:
+        allocation = torch.as_tensor(
+            engine.uniform_allocation(anchor), dtype=torch.long, device=device)
+    else:
+        raise FileNotFoundError(
+            f"{allocation_path}; pass --uniform for the anchor's uniform allocation")
     bits = joint.actual_mode_bits(codec)
     if allocation.numel() != C.GROUPS:
         raise SystemExit("INVALID_EXPERIMENT: allocation group count")
@@ -49,10 +57,24 @@ def run(anchor, source, run_id, device, epochs=20, steps=None,
     if rate != anchor.rate:
         raise SystemExit(f"INVALID_EXPERIMENT: rate {rate} != {anchor.rate}")
     joint.make_trainable(codec)
-    initial_rotation = codec.transform.rotation.detach().clone()
+    initial_rotation = codec.transform.get_rotation().detach().clone()
     initial_books = [q.codebooks.detach().clone() for q in codec.pq.quantizers]
-    rotation_opt, book_opt = joint.build_optimizers(
-        codec, lr_u, lr_theta, book_optimizer="adam")
+    if optimizer_mode == "orfc_adam":
+        if not hasattr(codec.transform, "triu_params"):
+            raise SystemExit(
+                "INVALID_EXPERIMENT: ORFC Adam requires Cayley triu parameters")
+        if lr_u != lr_theta:
+            raise SystemExit("INVALID_EXPERIMENT: ORFC Adam requires lr_U == lr_theta")
+        codec_opt = torch.optim.Adam(
+            list(codec.transform.parameters())
+            + [q.codebooks for q in codec.pq.quantizers], lr=lr_theta)
+        rotation_opt = book_opt = None
+    elif optimizer_mode == "cayley_sgd":
+        rotation_opt, book_opt = joint.build_optimizers(
+            codec, lr_u, lr_theta, book_optimizer="adam")
+        codec_opt = None
+    else:
+        raise ValueError(f"unknown optimizer mode {optimizer_mode!r}")
 
     tail = tail_mod.build_tail(C.LAYER, device)
     train_paths = C.load_split("train_fit")
@@ -75,7 +97,7 @@ def run(anchor, source, run_id, device, epochs=20, steps=None,
     initial_parity = qhard.selfcheck(codec, tail, val, allocation)
     initial_mse = joint.validate(codec, tail, val, allocation)
     initial_orth = frozen.orthogonality_error(codec)
-    scale = initial_mse
+    scale = 1.0 if optimizer_mode == "orfc_adam" else initial_mse
     validation = [{"step": 0, "hard_mse": initial_mse}]
     trace = []
     iterator = iter(loader)
@@ -91,21 +113,30 @@ def run(anchor, source, run_id, device, epochs=20, steps=None,
         teacher = teacher_host.index_select(0, rows).to(device, non_blocking=True)
         with torch.no_grad():
             y, mu, std = batch_normalize_gpu(x, mode=C.NORM_MODE)
-        tau = temperature_at(step, total, tau_start, tau_end)
-        for optimizer, base in ((rotation_opt, lr_u), (book_opt, lr_theta)):
-            lr = C.cosine_lr(step - 1, total, base)
-            for group in optimizer.param_groups:
-                group["lr"] = lr
-            optimizer.zero_grad(set_to_none=True)
+        epoch_index = (step - 1) // per_epoch
+        if optimizer_mode == "orfc_adam":
+            tau = joint.codeword_tau(epoch_index + 1, epochs, tau_start, tau_end)
+            joint.set_lr(codec_opt, epoch_index, epochs, lr_theta)
+            codec_opt.zero_grad(set_to_none=True)
+        else:
+            tau = temperature_at(step, total, tau_start, tau_end)
+            for optimizer, base in ((rotation_opt, lr_u), (book_opt, lr_theta)):
+                lr = C.cosine_lr(step - 1, total, base)
+                for group in optimizer.param_groups:
+                    group["lr"] = lr
+                optimizer.zero_grad(set_to_none=True)
         per_image, labels = qhard.distortions(
             codec, tail, y, mu, std, teacher, allocation[None],
             codeword_temperature=tau)
         loss = per_image.mean() / scale
         loss.backward()
         torch.nn.utils.clip_grad_norm_(codec.parameters(), 1.0)
-        rotation_opt.step()
-        book_opt.step()
-        if step % C.REVIVE_EVERY == 0:
+        if optimizer_mode == "orfc_adam":
+            codec_opt.step()
+        else:
+            rotation_opt.step()
+            book_opt.step()
+        if optimizer_mode != "orfc_adam" and step % C.REVIVE_EVERY == 0:
             qhard.revive_dead_codewords(codec, y, allocation, labels[0])
         trace.append([step, float(per_image.mean().detach()), tau])
         if step % C.VAL_EVERY == 0 or step == total:
@@ -129,6 +160,8 @@ def run(anchor, source, run_id, device, epochs=20, steps=None,
         "plan": "fixed-allocation temperature isolation",
         "anchor": anchor.name, "rate": anchor.rate, "source": str(source),
         "allocation": allocation.cpu().tolist(), "epochs": float(epochs),
+        "optimizer_mode": optimizer_mode,
+        "loss_scale": float(scale),
         "steps": total, "batch": int(batch), "lr_U": float(lr_u),
         "lr_theta": float(lr_theta), "tau_start": float(tau_start),
         "tau_end": float(tau_end), "initial_hard_mse": initial_mse,
@@ -137,10 +170,11 @@ def run(anchor, source, run_id, device, epochs=20, steps=None,
         "hard_parity_initial": initial_parity, "hard_parity_final": final_parity,
         "orthogonality_initial": initial_orth, "orthogonality_final": final_orth,
         "rotation_relative_drift": float(
-            (codec.transform.rotation.detach() - initial_rotation).norm()
+            (codec.transform.get_rotation().detach() - initial_rotation).norm()
             / initial_rotation.norm()),
         "selected_book_drift_min": float(book_drift[selected].min()),
         "selected_book_drift_max": float(book_drift[selected].max()),
+        "unselected_book_drift_max": float(book_drift[~selected].max()),
         "validation": validation, "trace": trace,
         "training_seconds": time.time() - started}
     save_codec_v1(codec, out / "codec.pt")
@@ -162,13 +196,18 @@ def main():
     parser.add_argument("--lr-theta", type=float, default=C.DEFAULT_LR_THETA)
     parser.add_argument("--tau-start", type=float, default=0.5)
     parser.add_argument("--tau-end", type=float, default=0.005)
+    parser.add_argument("--optimizer-mode",
+                        choices=("cayley_sgd", "orfc_adam"),
+                        default="cayley_sgd")
+    parser.add_argument("--uniform", action="store_true")
     parser.add_argument("--num-workers", type=int, default=C.DATALOADER_WORKERS)
     args = parser.parse_args()
     payload = run(C.ANCHOR_BY_NAME[args.anchor], args.source,
                   args.run_id, torch.device(args.device), epochs=args.epochs,
                   steps=args.steps, batch=args.batch, lr_u=args.lr_u,
                   lr_theta=args.lr_theta, tau_start=args.tau_start,
-                  tau_end=args.tau_end, num_workers=args.num_workers)
+                  tau_end=args.tau_end, num_workers=args.num_workers,
+                  optimizer_mode=args.optimizer_mode, uniform=args.uniform)
     print(json.dumps(payload, indent=2))
 
 

@@ -36,6 +36,7 @@ OPQ_ITERS = BASE.OPQ_ITERS
 OPQ_KMEANS_ITERS = BASE.OPQ_KMEANS_ITERS
 OPQ_SEED = BASE.OPQ_SEED
 OPQ_ORTH_TOL = BASE.OPQ_ORTH_TOL
+CAYLEY_ORTH_ABS_TOL = 2e-3  # float32 ||U^T U-I||_F at D=1024
 CODEBOOK_KMEANS_ITERS = BASE.CODEBOOK_KMEANS_ITERS
 CODEBOOK_SEED = BASE.CODEBOOK_SEED
 
@@ -86,8 +87,11 @@ def cosine_lr(step, total, base, floor_ratio=LR_FLOOR_RATIO):
     return float(base) * (floor_ratio + (1.0 - floor_ratio) * cosine)
 
 
-def init_dir(anchor):
-    return V12 / "init" / anchor.name
+def init_dir(anchor, parameterization="direct"):
+    roots = {"direct": "init", "orfc_cayley": "init_orfc_adam"}
+    if parameterization not in roots:
+        raise ValueError(f"unknown transform parameterization {parameterization!r}")
+    return V12 / roots[parameterization] / anchor.name
 
 
 def output_dir(anchor, run_id):

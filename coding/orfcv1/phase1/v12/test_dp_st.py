@@ -7,6 +7,7 @@ import torch.nn as nn
 
 from .allocation_policy import FixedBudgetAllocationPolicy
 from .qhard import quantise
+from soft_pq import OrthogonalTransform
 
 
 class _Transform(nn.Module):
@@ -60,6 +61,19 @@ class DPSTContracts(unittest.TestCase):
         for quantizer in codec.pq.quantizers:
             per_group = quantizer.codebooks.grad.square().sum((1, 2))
             self.assertTrue(bool((per_group > 0).all()))
+
+    def test_orfc_cayley_parameter_receives_codeword_st_gradient(self):
+        torch.manual_seed(9)
+        codec = _Codec(2, (2, 4, 8), 2)
+        codec.transform = OrthogonalTransform(4)
+        y = torch.randn(2, 3, 4)
+        allocation = torch.tensor([[1, 1]])
+        reconstructed, _ = quantise(
+            codec, y, allocation, codeword_temperature=0.5)
+        reconstructed.square().mean().backward()
+        self.assertGreater(float(codec.transform.triu_params.grad.norm()), 0)
+        torch.testing.assert_close(reconstructed, quantise(
+            codec, y, allocation)[0])
 
 
 if __name__ == "__main__":

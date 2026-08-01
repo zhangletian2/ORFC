@@ -49,7 +49,8 @@ def actual_mode_bits(codec):
 
 
 def make_trainable(codec):
-    codec.transform.rotation.requires_grad_(True)
+    for parameter in codec.transform.parameters():
+        parameter.requires_grad_(True)
     for quantizer in codec.pq.quantizers:
         quantizer.codebooks.requires_grad_(True)
 
@@ -74,6 +75,28 @@ def set_lrs(rotation, books, policy, step, total, lr_u, lr_theta, lr_policy):
         value = C.cosine_lr(step, total, base)
         for group in optimizer.param_groups:
             group["lr"] = value
+
+
+def set_lr(optimizer, step, total, base):
+    value = C.cosine_lr(step, total, base)
+    for group in optimizer.param_groups:
+        group["lr"] = value
+
+
+def transform_grad_norm(codec):
+    gradients = [p.grad.norm() for p in codec.transform.parameters()
+                 if p.grad is not None]
+    return float(torch.stack(gradients).norm()) if gradients else 0.0
+
+
+def codeword_tau(step, total, start, end):
+    end = start if end is None else end
+    if start == end:
+        return float(start)
+    if start <= 0 or end <= 0:
+        raise ValueError("annealed codeword temperatures must be positive")
+    progress = (step - 1) / max(total - 1, 1)
+    return float(start * (end / start) ** progress)
 
 
 def add_coverage(table, allocations):
@@ -193,6 +216,7 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         entropy_weight=C.DEFAULT_ENTROPY_WEIGHT, images=None, log=print,
         book_optimizer="adam", grad_clip=1.0,
         policy_gradient="reinforce", codeword_temperature=0.0,
+        codeword_temperature_end=None, optimizer_mode="cayley_sgd",
         num_workers=C.DATALOADER_WORKERS):
     started = time.time()
     run_id = C.ensure_run_id(run_id)
@@ -202,9 +226,13 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     out.mkdir(parents=True, exist_ok=True)
     engine.configure_precision(C.ALLOW_TF32)
 
-    codec, metadata = init_mod.load_checked(anchor, device)
+    parameterization = ("orfc_cayley" if optimizer_mode == "orfc_adam"
+                        else "direct")
+    codec, metadata = init_mod.load_checked(
+        anchor, device, parameterization=parameterization,
+        require_full=images is None)
     make_trainable(codec)
-    initial_rotation = codec.transform.rotation.detach().clone()
+    initial_rotation = codec.transform.get_rotation().detach().clone()
     initial_books = [q.codebooks.detach().clone() for q in codec.pq.quantizers]
     book_optimizer_name = book_optimizer
     bits = actual_mode_bits(codec)
@@ -214,8 +242,23 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     with torch.no_grad():
         policy.logits[:, anchor.uniform_mode].fill_(1e-6)
     policy_optimizer = torch.optim.Adam([policy.logits], lr=float(policy_lr))
-    rotation_optimizer, book_optimizer = build_optimizers(
-        codec, lr_u, lr_theta, book_optimizer_name)
+    codec_optimizer = None
+    if optimizer_mode == "orfc_adam":
+        if not hasattr(codec.transform, "triu_params"):
+            raise ValueError("orfc_adam requires ORFC Cayley triu parameters")
+        if book_optimizer_name != "adam":
+            raise ValueError("orfc_adam requires the Adam codebook optimizer")
+        if float(lr_u) != float(lr_theta):
+            raise ValueError("orfc_adam requires one shared lr for U and codebooks")
+        parameters = list(codec.transform.parameters()) + [
+            q.codebooks for q in codec.pq.quantizers]
+        codec_optimizer = torch.optim.Adam(parameters, lr=float(lr_theta))
+        rotation_optimizer = book_optimizer = None
+    elif optimizer_mode == "cayley_sgd":
+        rotation_optimizer, book_optimizer = build_optimizers(
+            codec, lr_u, lr_theta, book_optimizer_name)
+    else:
+        raise ValueError(f"unknown optimizer mode {optimizer_mode!r}")
 
     tail = tail_mod.build_tail(C.LAYER, device)
     train_paths = C.load_split("train_fit")
@@ -260,6 +303,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         raise ValueError("policy_gradient must be reinforce or dp_st")
     if policy_gradient == "dp_st" and not codeword_temperature > 0:
         raise ValueError("dp_st requires a positive codeword temperature")
+    if optimizer_mode == "orfc_adam" and policy_gradient != "reinforce":
+        raise ValueError("orfc_adam validation currently requires reinforce")
     train_iterator = iter(train_loader)
     generator = torch.Generator(device=device).manual_seed(C.POLICY_SEED)
     policy_coverage = torch.zeros(
@@ -312,18 +357,35 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
             (policy.actual_rate(allocations) != anchor.rate).sum())
         add_coverage(policy_coverage, allocations)
 
-        set_lrs(rotation_optimizer, book_optimizer, policy_optimizer,
-                step - 1, schedule_total, lr_u, lr_theta, policy_lr)
-        rotation_optimizer.zero_grad(set_to_none=True)
-        book_optimizer.zero_grad(set_to_none=True)
+        if codec_optimizer is None:
+            set_lrs(rotation_optimizer, book_optimizer, policy_optimizer,
+                    step - 1, schedule_total, lr_u, lr_theta, policy_lr)
+            rotation_optimizer.zero_grad(set_to_none=True)
+            book_optimizer.zero_grad(set_to_none=True)
+        else:
+            # Match ORFC exactly: one Adam learning rate, held constant inside
+            # an epoch and advanced by CosineAnnealingLR at epoch boundaries.
+            epoch_index = (step - 1) // per_epoch
+            set_lr(codec_optimizer, epoch_index, int(epochs), lr_theta)
+            set_lr(policy_optimizer, step - 1, schedule_total, policy_lr)
+            codec_optimizer.zero_grad(set_to_none=True)
         policy_optimizer.zero_grad(set_to_none=True)
 
+        if optimizer_mode == "orfc_adam":
+            current_codeword_tau = codeword_tau(
+                epoch_index + 1, int(epochs), codeword_temperature,
+                codeword_temperature_end)
+        else:
+            current_codeword_tau = codeword_tau(
+                step, total, codeword_temperature, codeword_temperature_end)
         per_image, labels = qhard.distortions(
             codec, tail, y, mu, std, teacher, allocations,
             marginals=marginals,
-            codeword_temperature=codeword_temperature)
+            codeword_temperature=current_codeword_tau)
         per_allocation = per_image.mean(dim=1)
-        codec_loss = per_allocation.mean() / scale
+        codec_loss = per_allocation.mean()
+        if optimizer_mode != "orfc_adam":
+            codec_loss = codec_loss / scale
         if policy_gradient == "reinforce":
             log_probability = distribution.log_prob(
                 allocations, validate=False)
@@ -348,12 +410,15 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                     gradient_coverage[:, mode].add_(active)
                     gradient_coverage_window[:, mode].add_(active)
 
-        rotation_optimizer.step()
-        book_optimizer.step()
+        if codec_optimizer is None:
+            rotation_optimizer.step()
+            book_optimizer.step()
+        else:
+            codec_optimizer.step()
         policy_optimizer.step()
         with torch.no_grad():
             policy.logits.sub_(policy.logits.mean(dim=1, keepdim=True))
-        if step % C.REVIVE_EVERY == 0:
+        if optimizer_mode != "orfc_adam" and step % C.REVIVE_EVERY == 0:
             for modes, selected in zip(allocations, labels):
                 qhard.revive_dead_codewords(codec, y, modes, selected)
 
@@ -363,6 +428,7 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
             current = policy.build(temperature)
             record = joint_validation(
                 codec, tail, val, current, step, C.STAGE1_VAL_SAMPLES)
+            record["codeword_temperature"] = current_codeword_tau
             record["gradient_coverage_window_min"] = int(
                 gradient_coverage_window.min())
             gradient_coverage_window.zero_()
@@ -385,6 +451,7 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                 f"sample_gap={record['map_vs_sample_mean']:.1f} "
                 f"H={record['entropy']:.3f} "
                 f"pmax={record['marginal_max_mean']:.3f} "
+                f"tau={current_codeword_tau:.5f} "
                 f"dMAP={record['map_hamming_from_previous']} "
                 f"stable={record['map_stable_run']}")
         if step == 1 or step % C.LOG_EVERY == 0 or step == total:
@@ -393,8 +460,7 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                               for q in codec.pq.quantizers
                               if q.codebooks.grad is not None]
             last_gradient_norms = {
-                "U": float(codec.transform.rotation.grad.norm())
-                     if codec.transform.rotation.grad is not None else 0.0,
+                "U": transform_grad_norm(codec),
                 "codebooks": float(torch.stack(book_gradients).norm())
                              if book_gradients else 0.0,
                 "policy": float(policy.logits.grad.norm())
@@ -437,8 +503,9 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
             torch.finfo(initial.dtype).eps)
         book_drift.append(delta / base)
     book_drift = torch.stack(book_drift, dim=1)
+    final_rotation = codec.transform.get_rotation().detach()
     rotation_drift = float(
-        (codec.transform.rotation.detach() - initial_rotation).norm()
+        (final_rotation - initial_rotation).norm()
         / initial_rotation.norm().clamp_min(
             torch.finfo(initial_rotation.dtype).eps))
     recent = validation[-C.STAGE1_STABILITY_POINTS:]
@@ -446,14 +513,24 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
               all(item["map_allocation"] == recent[-1]["map_allocation"]
                   for item in recent))
     uniform_modes = torch.full_like(final_map, anchor.uniform_mode)
-    final_lrs = {"U": rotation_optimizer.param_groups[0]["lr"],
-                 "codebooks": book_optimizer.param_groups[0]["lr"],
-                 "policy": policy_optimizer.param_groups[0]["lr"]}
+    if codec_optimizer is None:
+        final_lrs = {"U": rotation_optimizer.param_groups[0]["lr"],
+                     "codebooks": book_optimizer.param_groups[0]["lr"]}
+    else:
+        final_lrs = {"U": codec_optimizer.param_groups[0]["lr"],
+                     "codebooks": codec_optimizer.param_groups[0]["lr"]}
+    final_lrs["policy"] = policy_optimizer.param_groups[0]["lr"]
     joint = {
         "contract": "one continuous exact-budget trajectory jointly updates "
                     "U, every sampled PQ mode, and the allocation policy",
         "policy_gradient": policy_gradient,
         "codeword_temperature": float(codeword_temperature),
+        "codeword_temperature_end": float(
+            codeword_temperature if codeword_temperature_end is None
+            else codeword_temperature_end),
+        "optimizer_mode": optimizer_mode,
+        "codec_loss_scale": "raw" if optimizer_mode == "orfc_adam"
+                            else "initial_distortion",
         "single_continuous_trajectory": True,
         "gradient_coverage": gradient_coverage.cpu().tolist(),
         "gradient_coverage_min": int(gradient_coverage.min()),
@@ -515,11 +592,15 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                "schedule_epochs": int(epochs),
                "lr_U": lr_u, "lr_theta": lr_theta, "policy_lr": policy_lr,
                "policy_samples": policy_samples,
+               "optimizer_mode": optimizer_mode,
                "book_optimizer": book_optimizer_name,
                "grad_clip": grad_clip,
                "temperature": temperature, "entropy_weight": entropy_weight,
                "policy_gradient": policy_gradient,
                "codeword_temperature": float(codeword_temperature),
+               "codeword_temperature_end": float(
+                   codeword_temperature if codeword_temperature_end is None
+                   else codeword_temperature_end),
                "initial_distortion": initial_distortion,
                "hard_parity_initial": initial_parity,
                "hard_parity_final": final_parity,
@@ -557,6 +638,9 @@ def main(argv=None):
     parser.add_argument("--policy-gradient", choices=("reinforce", "dp_st"),
                         default="reinforce")
     parser.add_argument("--codeword-temperature", type=float, default=0.0)
+    parser.add_argument("--codeword-temperature-end", type=float, default=None)
+    parser.add_argument("--optimizer-mode", choices=("cayley_sgd", "orfc_adam"),
+                        default="cayley_sgd")
     parser.add_argument("--images", type=int, default=None, help="probe only")
     args = parser.parse_args(argv)
     result = run(C.ANCHOR_BY_NAME[args.anchor], args.run_id,
@@ -568,6 +652,8 @@ def main(argv=None):
                  book_optimizer=args.book_optimizer, grad_clip=args.grad_clip,
                  policy_gradient=args.policy_gradient,
                  codeword_temperature=args.codeword_temperature,
+                 codeword_temperature_end=args.codeword_temperature_end,
+                 optimizer_mode=args.optimizer_mode,
                  num_workers=args.num_workers)
     print(json.dumps({"anchor": result["anchor"], "seconds": result["seconds"],
                       "validation": result["validation"],
