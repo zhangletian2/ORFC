@@ -35,14 +35,17 @@ def make_trainable(codec):
         quantizer.codebooks.requires_grad_(True)
 
 
-def build_optimizers(codec, lr_u, lr_theta):
+def build_optimizers(codec, lr_u, lr_theta, book_optimizer="sgd"):
     rotation = CayleySGD(
         [codec.transform.rotation], lr=float(lr_u),
         fixed_point_iterations=C.CAYLEY_FIXED_POINT_ITERATIONS,
         reorthogonalize_every=C.CAYLEY_REORTH_EVERY)
-    books = torch.optim.SGD(
-        [q.codebooks for q in codec.pq.quantizers], lr=float(lr_theta),
-        momentum=C.CODEBOOK_MOMENTUM)
+    parameters = [q.codebooks for q in codec.pq.quantizers]
+    if book_optimizer == "adam":
+        books = torch.optim.Adam(parameters, lr=float(lr_theta))
+    else:
+        books = torch.optim.SGD(parameters, lr=float(lr_theta),
+                                momentum=C.CODEBOOK_MOMENTUM)
     return rotation, books
 
 
@@ -98,7 +101,9 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         batch=C.DEFAULT_BATCH, lr_u=C.DEFAULT_LR_U,
         lr_theta=C.DEFAULT_LR_THETA, policy_lr=C.DEFAULT_POLICY_LR,
         temperature=C.DEFAULT_TEMPERATURE,
-        entropy_weight=C.DEFAULT_ENTROPY_WEIGHT, images=None, log=print):
+        entropy_weight=C.DEFAULT_ENTROPY_WEIGHT, images=None, log=print,
+        book_optimizer="sgd", grad_clip=0.0,
+        coverage_weight=C.COVERAGE_WEIGHT):
     started = time.time()
     run_id = C.ensure_run_id(run_id)
     out = C.output_dir(anchor, run_id)
@@ -109,12 +114,14 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
 
     codec, metadata = init_mod.load_checked(anchor, device)
     make_trainable(codec)
+    book_optimizer_name = book_optimizer
     bits = actual_mode_bits(codec)
     if bits != tuple(anchor.mode_bits):
         raise SystemExit(f"INVALID_EXPERIMENT: menu {bits} != {anchor.mode_bits}")
     policy = FixedBudgetAllocationPolicy(C.GROUPS, bits, anchor.rate).to(device)
     policy_optimizer = torch.optim.Adam([policy.logits], lr=float(policy_lr))
-    rotation_optimizer, book_optimizer = build_optimizers(codec, lr_u, lr_theta)
+    rotation_optimizer, book_optimizer = build_optimizers(
+        codec, lr_u, lr_theta, book_optimizer_name)
 
     tail = tail_mod.build_tail(C.LAYER, device)
     train_paths = C.load_split("train_fit")
@@ -179,7 +186,7 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         codec.transform.rotation.requires_grad_(False)
         support_mean, support_labels = hard_distortion(
             codec, tail, y, mu, std, teacher, support)
-        (C.COVERAGE_WEIGHT * support_mean / scale).backward()
+        (coverage_weight * support_mean / scale).backward()
         codec.transform.rotation.requires_grad_(True)
 
         per_allocation = torch.stack(means)
@@ -191,6 +198,9 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
             step, schedule_total, float(entropy_weight))
         policy_loss = policy_loss - entropy_coefficient * entropy / C.GROUPS
         policy_loss.backward()
+
+        if grad_clip > 0:
+            torch.nn.utils.clip_grad_norm_(codec.parameters(), float(grad_clip))
 
         rotation_optimizer.step()
         book_optimizer.step()
@@ -242,15 +252,17 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                out / "policy.pt")
     np.save(out / "allocation.npy", final_map.cpu().numpy())
     (out / "policy_summary.json").write_text(json.dumps(summary, indent=2))
-    payload = {"plan": "v12", "anchor": anchor.name, "rate": anchor.rate,
+    payload = {"plan": "v13", "anchor": anchor.name, "rate": anchor.rate,
                "run_id": run_id, "init": metadata, "images": resident.count,
                "val_images": val.count, "batch": batch, "epochs": float(total / per_epoch),
                "steps": total, "steps_per_epoch": per_epoch,
                "schedule_steps": schedule_total,
                "schedule_epochs": int(epochs),
                "lr_U": lr_u, "lr_theta": lr_theta, "policy_lr": policy_lr,
+               "book_optimizer": book_optimizer_name,
+               "grad_clip": grad_clip,
                "temperature": temperature, "entropy_weight": entropy_weight,
-               "coverage_weight": C.COVERAGE_WEIGHT,
+               "coverage_weight": coverage_weight,
                "initial_distortion": initial_distortion,
                "hard_parity_initial": initial_parity,
                "hard_parity_final": final_parity,
@@ -275,6 +287,11 @@ def main(argv=None):
     parser.add_argument("--batch", type=int, default=C.DEFAULT_BATCH)
     parser.add_argument("--lr-u", type=float, default=C.DEFAULT_LR_U)
     parser.add_argument("--lr-theta", type=float, default=C.DEFAULT_LR_THETA)
+    parser.add_argument("--book-optimizer", choices=("sgd", "adam"),
+                        default="sgd")
+    parser.add_argument("--grad-clip", type=float, default=0.0)
+    parser.add_argument("--coverage-weight", type=float,
+                        default=C.COVERAGE_WEIGHT)
     parser.add_argument("--policy-lr", type=float, default=C.DEFAULT_POLICY_LR)
     parser.add_argument("--temperature", type=float, default=C.DEFAULT_TEMPERATURE)
     parser.add_argument("--entropy-weight", type=float,
@@ -285,7 +302,9 @@ def main(argv=None):
                  torch.device(args.device), epochs=args.epochs, steps=args.steps,
                  batch=args.batch, lr_u=args.lr_u, lr_theta=args.lr_theta,
                  policy_lr=args.policy_lr, temperature=args.temperature,
-                 entropy_weight=args.entropy_weight, images=args.images)
+                 entropy_weight=args.entropy_weight, images=args.images,
+                 book_optimizer=args.book_optimizer, grad_clip=args.grad_clip,
+                 coverage_weight=args.coverage_weight)
     print(json.dumps({"anchor": result["anchor"], "seconds": result["seconds"],
                       "validation": result["validation"],
                       "policy": result["policy"]}, indent=2))
