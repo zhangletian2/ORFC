@@ -11,6 +11,54 @@ import torch.nn as nn
 from torch.optim import Optimizer
 
 
+class AnchoredCayleyTransform(nn.Module):
+    """ORFC Cayley chart re-centred at an arbitrary orthogonal matrix."""
+
+    def __init__(self, dimension):
+        super().__init__()
+        self.D = int(dimension)
+        self.triu_params = nn.Parameter(
+            torch.zeros(self.D * (self.D - 1) // 2))
+        indices = torch.triu_indices(self.D, self.D, offset=1)
+        self.register_buffer("_triu_row", indices[0])
+        self.register_buffer("_triu_col", indices[1])
+        self.register_buffer("base_rotation", torch.eye(self.D))
+
+    def get_rotation(self):
+        skew = torch.zeros(
+            self.D, self.D, device=self.triu_params.device,
+            dtype=self.triu_params.dtype)
+        skew[self._triu_row, self._triu_col] = self.triu_params
+        skew = skew - skew.t()
+        identity = torch.eye(
+            self.D, device=skew.device, dtype=skew.dtype)
+        local = torch.linalg.solve(identity - skew, identity + skew)
+        return self.base_rotation @ local
+
+    def encode(self, x):
+        return x @ self.get_rotation()
+
+    def decode(self, x):
+        return x @ self.get_rotation().t()
+
+    @torch.no_grad()
+    def init_from_opq(self, rotation):
+        value = torch.as_tensor(
+            rotation, device=self.base_rotation.device,
+            dtype=self.base_rotation.dtype)
+        if value.shape != (self.D, self.D):
+            raise ValueError(f"rotation must have shape {(self.D, self.D)}")
+        self.base_rotation.copy_(value)
+        self.triu_params.zero_()
+
+    @torch.no_grad()
+    def orth_error(self):
+        rotation = self.get_rotation()
+        identity = torch.eye(
+            self.D, device=rotation.device, dtype=rotation.dtype)
+        return (rotation.t() @ rotation - identity).norm().item()
+
+
 class DirectOrthogonalTransform(nn.Module):
     """Store the effective rotation directly on the orthogonal manifold."""
 

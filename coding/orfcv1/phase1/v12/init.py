@@ -7,11 +7,10 @@ import time
 import numpy as np
 import torch
 
-from cayley import DirectOrthogonalTransform
+from cayley import AnchoredCayleyTransform, DirectOrthogonalTransform
 from codec_v1 import FeatureCodecV1, load_codec_v1, save_codec_v1
 from multimode_pq import MultiModeSoftPQ
 from opq import batch_normalize_gpu
-from soft_pq import OrthogonalTransform
 
 from . import config as C
 from .. import kmeans
@@ -41,8 +40,8 @@ def build(anchor, device, max_images=None, parameterization="direct", log=print)
         raise SystemExit(f"INVALID_EXPERIMENT: OPQ orthogonality {orth:.3e}")
 
     if parameterization == "orfc_cayley":
-        transform = OrthogonalTransform(C.GROUPS * C.DIM).to(device)
-        transform.init_from_opq(rotation.detach().cpu().numpy())
+        transform = AnchoredCayleyTransform(C.GROUPS * C.DIM).to(device)
+        transform.init_from_opq(rotation)
     elif parameterization == "direct":
         transform = DirectOrthogonalTransform(C.GROUPS * C.DIM).to(device)
         transform.init_from_opq(rotation)

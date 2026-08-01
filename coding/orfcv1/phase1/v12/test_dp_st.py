@@ -7,7 +7,7 @@ import torch.nn as nn
 
 from .allocation_policy import FixedBudgetAllocationPolicy
 from .qhard import quantise
-from soft_pq import OrthogonalTransform
+from cayley import AnchoredCayleyTransform
 
 
 class _Transform(nn.Module):
@@ -65,7 +65,7 @@ class DPSTContracts(unittest.TestCase):
     def test_orfc_cayley_parameter_receives_codeword_st_gradient(self):
         torch.manual_seed(9)
         codec = _Codec(2, (2, 4, 8), 2)
-        codec.transform = OrthogonalTransform(4)
+        codec.transform = AnchoredCayleyTransform(4)
         y = torch.randn(2, 3, 4)
         allocation = torch.tensor([[1, 1]])
         reconstructed, _ = quantise(

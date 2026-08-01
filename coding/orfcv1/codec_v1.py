@@ -21,7 +21,7 @@ from soft_pq import (
     SoftPQ, OrthogonalTransform, FeatureTransform, FeatureCodec,
     FrozenTail, save_codec as _save_codec_base, load_codec as _load_codec_base,
 )
-from cayley import DirectOrthogonalTransform
+from cayley import AnchoredCayleyTransform, DirectOrthogonalTransform
 from multimode_pq import MultiModeSoftPQ
 
 
@@ -333,6 +333,8 @@ def load_codec_v1(path, device='cuda'):
         ttype = meta.get('transform_type')
         if ttype == 'OrthogonalTransform':
             transform = OrthogonalTransform(meta['D'])
+        elif ttype == 'AnchoredCayleyTransform':
+            transform = AnchoredCayleyTransform(meta['D'])
         elif ttype == 'DirectOrthogonalTransform':
             transform = DirectOrthogonalTransform(meta['D'])
         elif ttype == 'FeatureTransform':
