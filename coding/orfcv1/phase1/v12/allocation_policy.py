@@ -77,20 +77,19 @@ def _log_dp_rows(scores, costs, budget, reverse=False):
     masks = [tuple(index == 0 for index in range(budget + 1))]
     previous, previous_mask = rows[0], masks[0]
     for group in sequence:
-        values, mask = [], []
-        for rate in range(budget + 1):
-            terms = [previous[rate - cost] + scores[group, mode]
-                     for mode, cost in enumerate(costs)
-                     if cost <= rate and previous_mask[rate - cost]]
-            mask.append(bool(terms))
-            if not terms:
-                values.append(_constant(float("-inf"), scores))
-            elif len(terms) == 1:
-                values.append(terms[0])
-            else:
-                values.append(torch.logsumexp(torch.stack(terms), dim=0))
-        previous = torch.stack(values)
-        previous_mask = tuple(mask)
+        candidates = []
+        for mode, cost in enumerate(costs):
+            shifted = previous.new_full((budget + 1,), float("-inf"))
+            shifted[cost:] = previous[:budget + 1 - cost] + scores[group, mode]
+            candidates.append(shifted)
+        candidates = torch.stack(candidates)
+        previous_mask = tuple(
+            any(cost <= rate and masks[-1][rate - cost] for cost in costs)
+            for rate in range(budget + 1))
+        reachable = torch.tensor(previous_mask, device=scores.device)
+        current = previous.new_full((budget + 1,), float("-inf"))
+        current[reachable] = torch.logsumexp(candidates[:, reachable], dim=0)
+        previous = current
         rows.append(previous)
         masks.append(previous_mask)
     if reverse:
@@ -128,21 +127,20 @@ class FixedBudgetDistribution:
         for group in range(self.groups):
             row = []
             for mode, cost in enumerate(self.shifted_costs):
-                terms = []
-                for prefix in range(self.shifted_budget - cost + 1):
-                    suffix = self.shifted_budget - prefix - cost
+                prefixes = [
+                    prefix for prefix in range(self.shifted_budget - cost + 1)
                     if (self.forward_mask[group][prefix]
-                            and self.backward_mask[group + 1][suffix]):
-                        terms.append(self.forward[group][prefix]
-                                     + self.scores[group, mode]
-                                     + self.backward[group + 1][suffix]
-                                     - log_z)
-                if not terms:
+                        and self.backward_mask[group + 1][
+                            self.shifted_budget - prefix - cost])]
+                if not prefixes:
                     row.append(_constant(0.0, self.scores))
-                elif len(terms) == 1:
-                    row.append(torch.exp(terms[0]))
                 else:
-                    row.append(torch.exp(torch.logsumexp(torch.stack(terms), 0)))
+                    prefix = torch.tensor(prefixes, device=self.scores.device)
+                    suffix = self.shifted_budget - prefix - cost
+                    terms = (self.forward[group][prefix]
+                             + self.scores[group, mode]
+                             + self.backward[group + 1][suffix] - log_z)
+                    row.append(torch.exp(torch.logsumexp(terms, 0)))
             output.append(torch.stack(row))
         return torch.stack(output)
 
@@ -150,7 +148,7 @@ class FixedBudgetDistribution:
         probabilities = self.marginals()
         return self.log_partition() - (probabilities * self.scores).sum()
 
-    def log_prob(self, allocations):
+    def log_prob(self, allocations, validate=True):
         allocations = torch.as_tensor(
             allocations, dtype=torch.long, device=self.scores.device)
         squeeze = allocations.ndim == 1
@@ -159,12 +157,13 @@ class FixedBudgetDistribution:
         if allocations.ndim != 2 or allocations.shape[1] != self.groups:
             raise ValueError(
                 f"allocations must have shape [N, {self.groups}] or [{self.groups}]")
-        if bool(((allocations < 0) | (allocations >= self.modes)).any()):
+        if validate and bool(
+                ((allocations < 0) | (allocations >= self.modes)).any()):
             raise ValueError("allocation contains an invalid mode index")
         cost_tensor = torch.as_tensor(
             self.shifted_costs, device=allocations.device, dtype=torch.long)
         totals = cost_tensor[allocations].sum(dim=1)
-        if bool((totals != self.shifted_budget).any()):
+        if validate and bool((totals != self.shifted_budget).any()):
             bad = totals[totals != self.shifted_budget][0].item()
             raise ValueError(
                 f"allocation has shifted cost {bad}, expected {self.shifted_budget}")
@@ -180,26 +179,25 @@ class FixedBudgetDistribution:
             raise ValueError("count must be positive")
         samples = torch.empty(
             count, self.groups, dtype=torch.long, device=self.scores.device)
-        for sample_index in range(count):
-            remaining = self.shifted_budget
-            for group in range(self.groups):
-                modes, values = [], []
-                for mode, cost in enumerate(self.shifted_costs):
-                    suffix = remaining - cost
-                    if suffix >= 0 and self.backward_mask[group + 1][suffix]:
-                        modes.append(mode)
-                        values.append(self.scores[group, mode]
-                                      + self.backward[group + 1][suffix])
-                if not modes:
-                    raise RuntimeError("DP sampler reached an impossible state")
-                probabilities = torch.softmax(torch.stack(values), dim=0)
-                chosen_index = int(torch.multinomial(
-                    probabilities, 1, generator=generator).item())
-                chosen_mode = modes[chosen_index]
-                samples[sample_index, group] = chosen_mode
-                remaining -= self.shifted_costs[chosen_mode]
-            if remaining != 0:
-                raise RuntimeError(f"DP sampler ended with remaining budget {remaining}")
+        costs = torch.tensor(
+            self.shifted_costs, device=self.scores.device, dtype=torch.long)
+        masks = torch.tensor(
+            self.backward_mask, device=self.scores.device, dtype=torch.bool)
+        remaining = torch.full(
+            (count,), self.shifted_budget, device=self.scores.device,
+            dtype=torch.long)
+        for group in range(self.groups):
+            suffix = remaining[:, None] - costs[None, :]
+            clamped = suffix.clamp(min=0, max=self.shifted_budget)
+            valid = (suffix >= 0) & masks[group + 1][clamped]
+            values = (self.scores[group][None, :]
+                      + self.backward[group + 1][clamped])
+            probabilities = torch.softmax(
+                values.masked_fill(~valid, float("-inf")), dim=1)
+            chosen = torch.multinomial(
+                probabilities, 1, generator=generator).squeeze(1)
+            samples[:, group] = chosen
+            remaining.sub_(costs[chosen])
         return samples
 
     @torch.no_grad()
@@ -255,11 +253,11 @@ class FixedBudgetAllocationPolicy(nn.Module):
                     f"init_logits must have shape {(self.groups, len(costs))}")
         self.logits = nn.Parameter(initial.clone())
 
-    def build(self, temperature=1.0):
+    def build(self, temperature=1.0, validate=True):
         temperature = float(temperature)
         if not math.isfinite(temperature) or not temperature > 0:
             raise ValueError("temperature must be finite and positive")
-        if not bool(torch.isfinite(self.logits).all()):
+        if validate and not bool(torch.isfinite(self.logits).all()):
             raise ValueError("policy logits must be finite")
         # Training centers each row after an optimizer step.  Keep the raw
         # logits here so log_partition retains its literal mathematical value

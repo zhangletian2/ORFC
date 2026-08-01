@@ -86,15 +86,15 @@ class CayleySGD(Optimizer):
                 gradient, current = parameter.grad, parameter
                 skew = gradient @ current.t() - current @ gradient.t()
                 bound = skew.abs().sum(0).max()
-                step_size = min(
-                    group["lr"], float(1.0 / (bound + group["eps"])))
+                step_size = (bound + group["eps"]).reciprocal().clamp(
+                    max=group["lr"])
                 updated = current - step_size * (skew @ current)
                 for _ in range(group["iterations"]):
                     updated = current - 0.5 * step_size * (
                         skew @ (current + updated))
                 state = self.state[parameter]
                 state["step"] = state.get("step", 0) + 1
-                state["last_step_size"] = step_size
+                state["last_step_size"] = step_size.detach()
                 interval = group["reorthogonalize_every"]
                 if interval > 0 and state["step"] % interval == 0:
                     updated = self._project_qr(updated)

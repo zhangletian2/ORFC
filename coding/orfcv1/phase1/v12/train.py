@@ -7,9 +7,11 @@ import time
 
 import numpy as np
 import torch
+from torch.utils.data import DataLoader, Dataset
 
 from cayley import CayleySGD
 from codec_v1 import save_codec_v1
+from opq import batch_normalize_gpu
 
 from . import config as C
 from . import init as init_mod
@@ -17,7 +19,25 @@ from .allocation_policy import FixedBudgetAllocationPolicy
 from .. import engine, frozen
 from .. import tail as tail_mod
 from ..v11 import qhard
-from ..v11.train import BatchStream, MenuStream, gather
+from ..v11.train import MenuStream
+
+
+class CachedFeatureDataset(Dataset):
+    """Memory-mapped blk features; teachers stay in a separate CPU cache."""
+
+    def __init__(self, features, rows, max_images=None):
+        self.features = np.load(features, mmap_mode="r")
+        self.rows = np.asarray(rows, dtype=np.int64)
+        if max_images is not None:
+            self.rows = self.rows[:max_images]
+
+    def __len__(self):
+        return len(self.rows)
+
+    def __getitem__(self, index):
+        row = self.rows[index]
+        feature = torch.from_numpy(np.array(self.features[row], copy=True))
+        return int(row), feature
 
 
 def actual_mode_bits(codec):
@@ -58,11 +78,11 @@ def set_lrs(rotation, books, policy, step, total, lr_u, lr_theta, lr_policy):
 
 
 def add_coverage(table, allocations):
-    rows = torch.as_tensor(allocations).detach().cpu().numpy()
+    rows = torch.as_tensor(allocations, device=table.device, dtype=torch.long)
     if rows.ndim == 1:
         rows = rows[None]
-    for row in rows:
-        table[np.arange(row.size), row] += 1
+    index = rows.t().contiguous()
+    table.scatter_add_(1, index, torch.ones_like(index, dtype=table.dtype))
 
 
 def hard_distortion(codec, tail, y, mu, std, teacher, modes):
@@ -91,9 +111,9 @@ def snapshot(policy, temperature, policy_coverage, support_coverage):
             "marginals": marginals.cpu().tolist(),
             "marginal_min": float(marginals.min()),
             "expected_rate": float((marginals * bits).sum()),
-            "policy_coverage": policy_coverage.tolist(),
+            "policy_coverage": policy_coverage.cpu().tolist(),
             "policy_coverage_min": int(policy_coverage.min()),
-            "support_coverage": support_coverage.tolist(),
+            "support_coverage": support_coverage.cpu().tolist(),
             "support_coverage_min": int(support_coverage.min())}
 
 
@@ -102,7 +122,7 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         lr_theta=C.DEFAULT_LR_THETA, policy_lr=C.DEFAULT_POLICY_LR,
         temperature=C.DEFAULT_TEMPERATURE,
         entropy_weight=C.DEFAULT_ENTROPY_WEIGHT, images=None, log=print,
-        book_optimizer="sgd", grad_clip=0.0,
+        book_optimizer="adam", grad_clip=1.0,
         coverage_weight=C.COVERAGE_WEIGHT):
     started = time.time()
     run_id = C.ensure_run_id(run_id)
@@ -126,21 +146,32 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     tail = tail_mod.build_tail(C.LAYER, device)
     train_paths = C.load_split("train_fit")
     tail_mod.check_layer(C.LAYER, train_paths[0], train_paths[1])
-    resident = engine.ResidentSet(*train_paths[:3], device, max_images=images)
+    train_set = CachedFeatureDataset(
+        train_paths[0], train_paths[2], max_images=images)
+    teacher_cache = np.load(train_paths[1], mmap_mode="r")
     val_paths = C.load_split("train_val")
     val = engine.ResidentSet(*val_paths[:3], device,
                              max_images=None if images is None else min(images, C.N_VAL))
     batch = int(batch)
-    per_epoch = max(1, resident.count // batch)
+    loader_generator = torch.Generator().manual_seed(C.TRAIN_SEED)
+    train_loader = DataLoader(
+        train_set, batch_size=batch, shuffle=True, drop_last=True,
+        num_workers=2, pin_memory=True, persistent_workers=True,
+        prefetch_factor=4, generator=loader_generator)
+    per_epoch = len(train_loader)
+    if per_epoch == 0:
+        raise ValueError(f"batch {batch} exceeds {len(train_set)} training images")
     schedule_total = int(epochs) * per_epoch
     total = int(steps) if steps is not None else schedule_total
     if total < 1:
         raise ValueError("training requires at least one step")
-    stream = BatchStream(resident.count, batch, C.TRAIN_SEED)
+    train_iterator = iter(train_loader)
     generator = torch.Generator(device=device).manual_seed(C.POLICY_SEED)
     support_stream = MenuStream(anchor, seed=C.COVERAGE_SEED)
-    policy_coverage = np.zeros((C.GROUPS, len(bits)), dtype=np.int64)
-    support_coverage = np.zeros_like(policy_coverage)
+    policy_coverage = torch.zeros(
+        C.GROUPS, len(bits), dtype=torch.long, device=device)
+    support_coverage = torch.zeros_like(policy_coverage)
+    budget_violations = torch.zeros((), dtype=torch.long, device=device)
 
     uniform = torch.as_tensor(engine.uniform_allocation(anchor), device=device)
     initial_parity = qhard.selfcheck(codec, tail, val, uniform)
@@ -154,15 +185,24 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     training_started = time.time()
 
     for step in range(1, total + 1):
-        index = stream.next().to(device)
-        y, mu, std, teacher = gather(resident, index)
-        distribution = policy.build(temperature)
+        try:
+            rows, x = next(train_iterator)
+        except StopIteration:
+            train_iterator = iter(train_loader)
+            rows, x = next(train_iterator)
+        teacher = torch.from_numpy(
+            np.asarray(teacher_cache[rows.numpy()], dtype=np.float32))
+        x = x.float().to(device, non_blocking=True)
+        teacher = teacher.float().to(device, non_blocking=True)
+        with torch.no_grad():
+            y, mu, std = batch_normalize_gpu(x, mode=C.NORM_MODE)
+        distribution = policy.build(temperature, validate=False)
         allocations = distribution.sample(C.POLICY_SAMPLES, generator=generator)
-        if not bool((policy.actual_rate(allocations) == anchor.rate).all()):
-            raise SystemExit("INVALID_EXPERIMENT: policy sample violated budget")
+        budget_violations.add_(
+            (policy.actual_rate(allocations) != anchor.rate).sum())
         _, support_np = support_stream.allocation(step)
         support = torch.as_tensor(support_np, dtype=torch.long, device=device)
-        if int(policy.actual_rate(support)) != anchor.rate:
+        if sum(bits[int(mode)] for mode in support_np) != anchor.rate:
             raise SystemExit("INVALID_EXPERIMENT: support allocation violated budget")
         add_coverage(policy_coverage, allocations)
         add_coverage(support_coverage, support)
@@ -190,7 +230,7 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         codec.transform.rotation.requires_grad_(True)
 
         per_allocation = torch.stack(means)
-        log_probability = distribution.log_prob(allocations)
+        log_probability = distribution.log_prob(allocations, validate=False)
         advantage = (per_allocation[0] - per_allocation[1]) / scale
         policy_loss = 0.5 * advantage * (log_probability[0] - log_probability[1])
         entropy = distribution.entropy()
@@ -212,10 +252,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                 qhard.revive_dead_codewords(codec, y, modes, selected)
             qhard.revive_dead_codewords(codec, y, support, support_labels)
 
-        trace.append({"step": step, "policy_mean": float(per_allocation.mean()),
-                      "support_mean": float(support_mean.detach()),
-                      "policy_loss": float(policy_loss.detach()),
-                      "entropy": float(entropy.detach())})
+        trace.append((step, per_allocation.mean().detach(), support_mean.detach(),
+                      policy_loss.detach(), entropy.detach()))
         if step % C.VAL_EVERY == 0 or step == total:
             current = policy.build(temperature)
             allocation = current.map_allocation()
@@ -229,7 +267,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         if step == 1 or step % C.LOG_EVERY == 0:
             log(f"[{anchor.name}] {step}/{total} D={float(per_allocation.mean()):.1f} "
                 f"support={float(support_mean):.1f} H={float(entropy):.3f} "
-                f"coverage={support_coverage.min()}..{support_coverage.max()}")
+                f"coverage={int(support_coverage.min())}.."
+                f"{int(support_coverage.max())}")
 
     if device.type == "cuda":
         torch.cuda.synchronize(device)
@@ -237,6 +276,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     peak_memory_gb = (torch.cuda.max_memory_allocated(device) / 2 ** 30
                       if device.type == "cuda" else 0.0)
     summary = snapshot(policy, temperature, policy_coverage, support_coverage)
+    if int(budget_violations) != 0:
+        raise SystemExit("INVALID_EXPERIMENT: policy sample violated budget")
     final_map = torch.tensor(summary["map_allocation"], device=device)
     if summary["map_rate"] != anchor.rate or summary["support_coverage_min"] == 0:
         raise SystemExit("INVALID_EXPERIMENT: final rate or support coverage failed")
@@ -252,8 +293,11 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                out / "policy.pt")
     np.save(out / "allocation.npy", final_map.cpu().numpy())
     (out / "policy_summary.json").write_text(json.dumps(summary, indent=2))
-    payload = {"plan": "v13", "anchor": anchor.name, "rate": anchor.rate,
-               "run_id": run_id, "init": metadata, "images": resident.count,
+    trace = [{"step": item[0], "policy_mean": float(item[1]),
+              "support_mean": float(item[2]), "policy_loss": float(item[3]),
+              "entropy": float(item[4])} for item in trace]
+    payload = {"plan": "v13.1", "anchor": anchor.name, "rate": anchor.rate,
+               "run_id": run_id, "init": metadata, "images": len(train_set),
                "val_images": val.count, "batch": batch, "epochs": float(total / per_epoch),
                "steps": total, "steps_per_epoch": per_epoch,
                "schedule_steps": schedule_total,
@@ -288,8 +332,8 @@ def main(argv=None):
     parser.add_argument("--lr-u", type=float, default=C.DEFAULT_LR_U)
     parser.add_argument("--lr-theta", type=float, default=C.DEFAULT_LR_THETA)
     parser.add_argument("--book-optimizer", choices=("sgd", "adam"),
-                        default="sgd")
-    parser.add_argument("--grad-clip", type=float, default=0.0)
+                        default="adam")
+    parser.add_argument("--grad-clip", type=float, default=1.0)
     parser.add_argument("--coverage-weight", type=float,
                         default=C.COVERAGE_WEIGHT)
     parser.add_argument("--policy-lr", type=float, default=C.DEFAULT_POLICY_LR)
