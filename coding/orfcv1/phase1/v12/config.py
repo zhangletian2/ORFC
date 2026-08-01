@@ -49,6 +49,7 @@ DEFAULT_EPOCHS = 100
 DEFAULT_LR_U = 1e-3
 DEFAULT_LR_THETA = 3e-4
 DEFAULT_BATCH = 32
+LR_FLOOR_RATIO = 0.01
 LOG_EVERY = 25
 VAL_EVERY = 100
 REVIVE_EVERY = 50
@@ -75,9 +76,13 @@ def load_split(name):
     return feature, teacher, np.arange(count, dtype=np.int64), []
 
 
-def cosine_lr(step, total, base):
+def cosine_lr(step, total, base, floor_ratio=LR_FLOOR_RATIO):
     t = min(max(int(step), 0), int(total))
-    return float(base) * 0.5 * (1.0 + np.cos(np.pi * t / float(total)))
+    floor_ratio = float(floor_ratio)
+    if not 0 <= floor_ratio <= 1:
+        raise ValueError("floor_ratio must lie in [0, 1]")
+    cosine = 0.5 * (1.0 + np.cos(np.pi * t / float(total)))
+    return float(base) * (floor_ratio + (1.0 - floor_ratio) * cosine)
 
 
 def init_dir(anchor):

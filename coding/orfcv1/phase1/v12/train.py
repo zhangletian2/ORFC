@@ -1,4 +1,4 @@
-"""Joint hard-tail training of U, all PQ modes, and an exact-budget policy."""
+"""One continuous joint training trajectory for U, PQ modes, and allocation."""
 
 import argparse
 import json
@@ -100,7 +100,55 @@ def validate(codec, tail, resident, allocation):
     return float(validate_many(codec, tail, resident, allocation)[0])
 
 
-def stage1_validation(codec, tail, resident, distribution, step, samples):
+def fixed_rate_neighbors(policy, allocation):
+    """All adjacent donor/receiver moves that preserve the exact bit budget."""
+    base = np.asarray(torch.as_tensor(allocation).cpu(), dtype=np.int64)
+    bits = tuple(int(value) for value in policy.bit_costs)
+    candidates, moves = [], []
+    for donor, donor_mode in enumerate(base):
+        if donor_mode == 0:
+            continue
+        released = bits[donor_mode] - bits[donor_mode - 1]
+        for receiver, receiver_mode in enumerate(base):
+            if donor == receiver or receiver_mode + 1 == len(bits):
+                continue
+            required = bits[receiver_mode + 1] - bits[receiver_mode]
+            if released != required:
+                continue
+            candidate = base.copy()
+            candidate[donor] -= 1
+            candidate[receiver] += 1
+            candidates.append(candidate)
+            moves.append((donor, receiver))
+    matrix = (np.stack(candidates) if candidates else
+              np.empty((0, len(base)), dtype=np.int64))
+    return matrix, moves
+
+
+@torch.no_grad()
+def local_neighbor_audit(codec, tail, resident, policy, allocation):
+    neighbors, moves = fixed_rate_neighbors(policy, allocation)
+    if len(neighbors) == 0:
+        return {"neighbor_count": 0,
+                "map_distortion": validate(codec, tail, resident, allocation),
+                "best_neighbor_distortion": None, "best_neighbor_gain": 0.0,
+                "best_move": None, "local_tolerance": 0.0,
+                "locally_optimal": True}
+    base = np.asarray(torch.as_tensor(allocation).cpu(), dtype=np.int64)[None]
+    values = validate_many(codec, tail, resident, np.concatenate((base, neighbors)))
+    winner = int(np.argmin(values[1:]))
+    gain = float(values[0] - values[winner + 1])
+    tolerance = float(abs(values[0]) * C.REPLAY_REL_TOL)
+    return {"neighbor_count": int(len(neighbors)),
+            "map_distortion": float(values[0]),
+            "best_neighbor_distortion": float(values[winner + 1]),
+            "best_neighbor_gain": gain,
+            "best_move": list(moves[winner]),
+            "local_tolerance": tolerance,
+            "locally_optimal": bool(gain <= tolerance)}
+
+
+def joint_validation(codec, tail, resident, distribution, step, samples):
     allocation = distribution.map_allocation()
     generator = torch.Generator(device=allocation.device).manual_seed(
         C.STAGE1_VAL_SEED + int(step))
@@ -195,6 +243,7 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     policy_coverage = torch.zeros(
         C.GROUPS, len(bits), dtype=torch.long, device=device)
     gradient_coverage = torch.zeros_like(policy_coverage)
+    gradient_coverage_window = torch.zeros_like(policy_coverage)
     budget_violations = torch.zeros((), dtype=torch.long, device=device)
 
     uniform = torch.as_tensor(engine.uniform_allocation(anchor), device=device)
@@ -244,9 +293,16 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         policy_loss = (advantage * log_probability).mean()
         entropy = distribution.entropy()
         entropy_coefficient = C.cosine_lr(
-            step, schedule_total, float(entropy_weight))
+            step, schedule_total, float(entropy_weight), floor_ratio=0.0)
         policy_loss = policy_loss - entropy_coefficient * entropy / C.GROUPS
         (codec_loss + policy_loss).backward()
+        book_gradients = [q.codebooks.grad.norm() for q in codec.pq.quantizers
+                          if q.codebooks.grad is not None]
+        last_gradient_norms = {
+            "U": float(codec.transform.rotation.grad.norm()),
+            "codebooks": float(torch.stack(book_gradients).norm())
+                         if book_gradients else 0.0,
+            "policy": float(policy.logits.grad.norm())}
 
         if grad_clip > 0:
             torch.nn.utils.clip_grad_norm_(codec.parameters(), float(grad_clip))
@@ -254,8 +310,9 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
             for mode, quantizer in enumerate(codec.pq.quantizers):
                 gradient = quantizer.codebooks.grad
                 if gradient is not None:
-                    gradient_coverage[:, mode].add_(
-                        gradient.square().sum(dim=(1, 2)).gt(0))
+                    active = gradient.square().sum(dim=(1, 2)).gt(0)
+                    gradient_coverage[:, mode].add_(active)
+                    gradient_coverage_window[:, mode].add_(active)
 
         rotation_optimizer.step()
         book_optimizer.step()
@@ -270,8 +327,11 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                       policy_loss.detach(), entropy.detach()))
         if step % C.VAL_EVERY == 0 or step == total:
             current = policy.build(temperature)
-            record = stage1_validation(
+            record = joint_validation(
                 codec, tail, val, current, step, C.STAGE1_VAL_SAMPLES)
+            record["gradient_coverage_window_min"] = int(
+                gradient_coverage_window.min())
+            gradient_coverage_window.zero_()
             previous = next((item for item in reversed(validation)
                              if "map_allocation" in item), None)
             if previous is None:
@@ -316,13 +376,15 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         raise SystemExit("INVALID_EXPERIMENT: orthogonality drift")
 
     final_distribution = policy.build(temperature)
-    final_record = stage1_validation(
+    final_record = joint_validation(
         codec, tail, val, final_distribution, total,
         C.STAGE1_FINAL_SAMPLES)
-    for key in ("map_hamming_from_previous", "map_stable_run"):
+    for key in ("map_hamming_from_previous", "map_stable_run",
+                "gradient_coverage_window_min"):
         if key in validation[-1]:
             final_record[key] = validation[-1][key]
     validation[-1] = final_record
+    neighbor_audit = local_neighbor_audit(codec, tail, val, policy, final_map)
     book_drift = []
     for initial, quantizer in zip(initial_books, codec.pq.quantizers):
         delta = (quantizer.codebooks.detach() - initial).flatten(1).norm(dim=1)
@@ -339,9 +401,13 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
               all(item["map_allocation"] == recent[-1]["map_allocation"]
                   for item in recent))
     uniform_modes = torch.full_like(final_map, anchor.uniform_mode)
-    stage1 = {
-        "contract": "explore exact-budget allocations; prepare every mode; "
-                    "finish at a stable, lower-distortion hard MAP allocation",
+    final_lrs = {"U": rotation_optimizer.param_groups[0]["lr"],
+                 "codebooks": book_optimizer.param_groups[0]["lr"],
+                 "policy": policy_optimizer.param_groups[0]["lr"]}
+    joint = {
+        "contract": "one continuous exact-budget trajectory jointly updates "
+                    "U, every sampled PQ mode, and the allocation policy",
+        "single_continuous_trajectory": True,
         "gradient_coverage": gradient_coverage.cpu().tolist(),
         "gradient_coverage_min": int(gradient_coverage.min()),
         "codebook_relative_drift": book_drift.cpu().tolist(),
@@ -357,16 +423,31 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
             initial_distortion - final_record["map_distortion"]),
         "map_better_than_sample_mean": bool(
             final_record["map_distortion"] <= final_record["sample_mean"]),
+        "final_learning_rates": final_lrs,
+        "lr_floor_ratio": C.LR_FLOOR_RATIO,
+        "final_gradient_norms": last_gradient_norms,
+        "last_window_gradient_coverage_min": final_record[
+            "gradient_coverage_window_min"],
+        "all_variables_active_at_end": bool(
+            all(value > 0 and math.isfinite(value)
+                for value in (*final_lrs.values(),
+                              *last_gradient_norms.values()))
+            and final_record["gradient_coverage_window_min"] > 0),
+        "local_neighbor_audit": neighbor_audit,
     }
-    stage1["passed"] = bool(
-        stage1["gradient_coverage_min"] > 0
-        and stage1["codebook_relative_drift_min"] > 0
-        and stage1["rotation_relative_drift"] > 0
-        and stage1["entropy_decreased"]
-        and stage1["map_is_nonuniform"]
-        and stage1["map_stable_last_n"]
-        and stage1["map_gain_vs_initial_uniform"] > 0
-        and stage1["map_better_than_sample_mean"])
+    joint["protocol_valid"] = bool(
+        joint["gradient_coverage_min"] > 0
+        and joint["codebook_relative_drift_min"] > 0
+        and joint["rotation_relative_drift"] > 0
+        and joint["all_variables_active_at_end"])
+    joint["discrete_local_exit_reached"] = bool(
+        joint["protocol_valid"]
+        and joint["entropy_decreased"]
+        and joint["map_is_nonuniform"]
+        and joint["map_stable_last_n"]
+        and joint["map_gain_vs_initial_uniform"] > 0
+        and joint["map_better_than_sample_mean"]
+        and neighbor_audit["locally_optimal"])
 
     save_codec_v1(codec, out / "codec.pt")
     torch.save({"policy_state": policy.state_dict(), "groups": policy.groups,
@@ -378,7 +459,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     trace = [{"step": item[0], "policy_mean": float(item[1]),
               "policy_loss": float(item[2]), "entropy": float(item[3])}
              for item in trace]
-    payload = {"plan": "v13.1", "anchor": anchor.name, "rate": anchor.rate,
+    payload = {"plan": "continuous_joint_v1", "anchor": anchor.name,
+               "rate": anchor.rate,
                "run_id": run_id, "init": metadata, "images": len(train_set),
                "val_images": val.count, "batch": batch, "epochs": float(total / per_epoch),
                "steps": total, "steps_per_epoch": per_epoch,
@@ -395,7 +477,7 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                "orthogonality_initial": initial_orth,
                "orthogonality_final": final_orth,
                "validation": validation, "policy": summary,
-               "stage1": stage1,
+               "joint_training": joint,
                "trace": trace, "training_seconds": training_seconds,
                "peak_memory_gb": peak_memory_gb,
                "seconds": time.time() - started}
@@ -433,7 +515,8 @@ def main(argv=None):
                  book_optimizer=args.book_optimizer, grad_clip=args.grad_clip)
     print(json.dumps({"anchor": result["anchor"], "seconds": result["seconds"],
                       "validation": result["validation"],
-                      "policy": result["policy"]}, indent=2))
+                      "policy": result["policy"],
+                      "joint_training": result["joint_training"]}, indent=2))
 
 
 if __name__ == "__main__":

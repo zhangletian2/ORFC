@@ -1,4 +1,4 @@
-"""Mechanical verification of a completed v12 development run."""
+"""Mechanical verification of a completed continuous joint-training run."""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ def verify(anchor, run_id, samples=4096):
             and record["hard_parity_final"]["rel_gap"] <= C.REPLAY_REL_TOL
             and record["orthogonality_final"] - record["orthogonality_initial"]
                 <= C.ORTH_TOL
-            and record.get("stage1", {}).get("passed", False)),
+            and record.get("joint_training", {}).get("protocol_valid", False)),
         "anchor": anchor.name,
         "run_id": run_id,
         "sample_count": int(samples),
@@ -62,7 +62,7 @@ def verify(anchor, run_id, samples=4096):
         "expected_rate": expected_rate,
         "marginal_row_sum_max_error": float((marginals.sum(1) - 1).abs().max()),
         "map_matches_disk": True,
-        "stage1": record.get("stage1"),
+        "joint_training": record.get("joint_training"),
     }
     (root / "verify.json").write_text(json.dumps(payload, indent=2))
     if not payload["passed"]:
