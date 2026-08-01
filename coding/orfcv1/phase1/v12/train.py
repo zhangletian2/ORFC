@@ -91,12 +91,40 @@ def hard_distortion(codec, tail, y, mu, std, teacher, modes):
 
 
 @torch.no_grad()
-def validate(codec, tail, resident, allocation):
+def validate_many(codec, tail, resident, allocations):
+    allocations = torch.as_tensor(allocations)
+    if allocations.ndim == 1:
+        allocations = allocations[None]
     matrix = engine.evaluate_allocations(
-        codec, tail, resident, allocation.detach().cpu().numpy()[None],
+        codec, tail, resident, allocations.detach().cpu().numpy(),
         image_batch=C.EVAL_IMAGE_BATCH, pair_budget=C.EVAL_PAIR_BUDGET,
         per_image=True)
-    return float(matrix[0].mean())
+    return matrix.mean(axis=1)
+
+
+def validate(codec, tail, resident, allocation):
+    return float(validate_many(codec, tail, resident, allocation)[0])
+
+
+def stage1_validation(codec, tail, resident, distribution, step, samples):
+    allocation = distribution.map_allocation()
+    generator = torch.Generator(device=allocation.device).manual_seed(
+        C.STAGE1_VAL_SEED + int(step))
+    draws = distribution.sample(int(samples), generator=generator)
+    values = validate_many(codec, tail, resident,
+                           torch.cat((allocation[None], draws), dim=0))
+    marginals = distribution.marginals().detach()
+    return {"step": int(step), "map_distortion": float(values[0]),
+            "sample_mean": float(values[1:].mean()),
+            "sample_min": float(values[1:].min()),
+            "sample_max": float(values[1:].max()),
+            "map_vs_sample_mean": float(values[0] - values[1:].mean()),
+            "map_allocation": allocation.cpu().tolist(),
+            "entropy": float(distribution.entropy().detach()),
+            "marginal_min": float(marginals.min()),
+            "marginal_max_mean": float(marginals.max(1).values.mean()),
+            "logit_rms": float(
+                distribution.scores.square().mean().sqrt().detach())}
 
 
 def snapshot(policy, temperature, policy_coverage, support_coverage):
@@ -134,6 +162,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
 
     codec, metadata = init_mod.load_checked(anchor, device)
     make_trainable(codec)
+    initial_rotation = codec.transform.rotation.detach().clone()
+    initial_books = [q.codebooks.detach().clone() for q in codec.pq.quantizers]
     book_optimizer_name = book_optimizer
     bits = actual_mode_bits(codec)
     if bits != tuple(anchor.mode_bits):
@@ -171,11 +201,13 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     policy_coverage = torch.zeros(
         C.GROUPS, len(bits), dtype=torch.long, device=device)
     support_coverage = torch.zeros_like(policy_coverage)
+    gradient_coverage = torch.zeros_like(policy_coverage)
     budget_violations = torch.zeros((), dtype=torch.long, device=device)
 
     uniform = torch.as_tensor(engine.uniform_allocation(anchor), device=device)
     initial_parity = qhard.selfcheck(codec, tail, val, uniform)
     initial_distortion = validate(codec, tail, val, uniform)
+    initial_entropy = float(policy.build(temperature).entropy().detach())
     scale = initial_distortion
     initial_orth = frozen.orthogonality_error(codec)
     trace, validation = [], [{"step": 0, "uniform": initial_distortion}]
@@ -241,6 +273,12 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
 
         if grad_clip > 0:
             torch.nn.utils.clip_grad_norm_(codec.parameters(), float(grad_clip))
+        with torch.no_grad():
+            for mode, quantizer in enumerate(codec.pq.quantizers):
+                gradient = quantizer.codebooks.grad
+                if gradient is not None:
+                    gradient_coverage[:, mode].add_(
+                        gradient.square().sum(dim=(1, 2)).gt(0))
 
         rotation_optimizer.step()
         book_optimizer.step()
@@ -256,11 +294,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                       policy_loss.detach(), entropy.detach()))
         if step % C.VAL_EVERY == 0 or step == total:
             current = policy.build(temperature)
-            allocation = current.map_allocation()
-            record = {"step": step,
-                      "map_distortion": validate(codec, tail, val, allocation),
-                      "entropy": float(current.entropy().detach()),
-                      "marginal_min": float(current.marginals().min().detach())}
+            record = stage1_validation(
+                codec, tail, val, current, step, C.STAGE1_VAL_SAMPLES)
             validation.append(record)
             log(f"[{anchor.name}] validation step={step} "
                 f"MAP={record['map_distortion']:.1f} H={record['entropy']:.3f}")
@@ -285,6 +320,56 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     final_orth = frozen.orthogonality_error(codec)
     if final_orth - initial_orth > C.ORTH_TOL:
         raise SystemExit("INVALID_EXPERIMENT: orthogonality drift")
+
+    final_distribution = policy.build(temperature)
+    final_record = stage1_validation(
+        codec, tail, val, final_distribution, total,
+        C.STAGE1_FINAL_SAMPLES)
+    validation[-1] = final_record
+    book_drift = []
+    for initial, quantizer in zip(initial_books, codec.pq.quantizers):
+        delta = (quantizer.codebooks.detach() - initial).flatten(1).norm(dim=1)
+        base = initial.flatten(1).norm(dim=1).clamp_min(
+            torch.finfo(initial.dtype).eps)
+        book_drift.append(delta / base)
+    book_drift = torch.stack(book_drift, dim=1)
+    rotation_drift = float(
+        (codec.transform.rotation.detach() - initial_rotation).norm()
+        / initial_rotation.norm().clamp_min(
+            torch.finfo(initial_rotation.dtype).eps))
+    recent = validation[-C.STAGE1_STABILITY_POINTS:]
+    stable = (len(recent) == C.STAGE1_STABILITY_POINTS and
+              all(item["map_allocation"] == recent[-1]["map_allocation"]
+                  for item in recent))
+    uniform_modes = torch.full_like(final_map, anchor.uniform_mode)
+    stage1 = {
+        "contract": "explore exact-budget allocations; prepare every mode; "
+                    "finish at a stable, lower-distortion hard MAP allocation",
+        "gradient_coverage": gradient_coverage.cpu().tolist(),
+        "gradient_coverage_min": int(gradient_coverage.min()),
+        "codebook_relative_drift": book_drift.cpu().tolist(),
+        "codebook_relative_drift_min": float(book_drift.min()),
+        "rotation_relative_drift": rotation_drift,
+        "policy_entropy_initial": initial_entropy,
+        "policy_entropy_final": final_record["entropy"],
+        "entropy_decreased": bool(final_record["entropy"] < initial_entropy),
+        "map_is_nonuniform": bool(not torch.equal(final_map, uniform_modes)),
+        "map_stable_last_n": bool(stable),
+        "stability_points": C.STAGE1_STABILITY_POINTS,
+        "map_gain_vs_initial_uniform": float(
+            initial_distortion - final_record["map_distortion"]),
+        "map_better_than_sample_mean": bool(
+            final_record["map_distortion"] <= final_record["sample_mean"]),
+    }
+    stage1["passed"] = bool(
+        stage1["gradient_coverage_min"] > 0
+        and stage1["codebook_relative_drift_min"] > 0
+        and stage1["rotation_relative_drift"] > 0
+        and stage1["entropy_decreased"]
+        and stage1["map_is_nonuniform"]
+        and stage1["map_stable_last_n"]
+        and stage1["map_gain_vs_initial_uniform"] > 0
+        and stage1["map_better_than_sample_mean"])
 
     save_codec_v1(codec, out / "codec.pt")
     torch.save({"policy_state": policy.state_dict(), "groups": policy.groups,
@@ -313,6 +398,7 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                "orthogonality_initial": initial_orth,
                "orthogonality_final": final_orth,
                "validation": validation, "policy": summary,
+               "stage1": stage1,
                "trace": trace, "training_seconds": training_seconds,
                "peak_memory_gb": peak_memory_gb,
                "seconds": time.time() - started}
