@@ -39,10 +39,18 @@ def run(anchor, run_id, arm, device, steps=8000, schedule_steps=15600,
 
     train_paths = C.load_split("train_fit")
     train_set = CachedFeatureDataset(train_paths[0], train_paths[2], images)
-    teachers = np.load(train_paths[1], mmap_mode="r")
+    teacher_host = torch.from_numpy(np.load(train_paths[1])).float()
+    if device.type == "cuda":
+        teacher_host = teacher_host.pin_memory()
+    batch = int(batch)
+    teacher_staging = torch.empty(
+        (batch, *teacher_host.shape[1:]),
+        dtype=teacher_host.dtype,
+        pin_memory=(device.type == "cuda"))
     generator = torch.Generator().manual_seed(C.TRAIN_SEED)
-    loader = DataLoader(train_set, batch_size=int(batch), shuffle=True,
-                        drop_last=True, num_workers=2, pin_memory=True,
+    loader = DataLoader(train_set, batch_size=batch, shuffle=True,
+                        drop_last=True, num_workers=C.DATALOADER_WORKERS,
+                        pin_memory=(device.type == "cuda"),
                         persistent_workers=True, prefetch_factor=4,
                         generator=generator)
     iterator = iter(loader)
@@ -62,10 +70,11 @@ def run(anchor, run_id, arm, device, steps=8000, schedule_steps=15600,
         except StopIteration:
             iterator = iter(loader)
             rows, x = next(iterator)
-        teacher = torch.from_numpy(
-            np.asarray(teachers[rows.numpy()], dtype=np.float32))
         x = x.float().to(device, non_blocking=True)
-        teacher = teacher.float().to(device, non_blocking=True)
+        rows_cpu = rows if rows.device.type == "cpu" else rows.cpu()
+        n = int(rows_cpu.shape[0])
+        torch.index_select(teacher_host, 0, rows_cpu, out=teacher_staging[:n])
+        teacher = teacher_staging[:n].to(device, non_blocking=True)
         with torch.no_grad():
             y, mu, std = batch_normalize_gpu(x, mode=C.NORM_MODE)
         distribution = policy.build(C.DEFAULT_TEMPERATURE, validate=False)

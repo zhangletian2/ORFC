@@ -63,39 +63,102 @@ def _constant(value, reference):
     return reference.new_tensor(float(value))
 
 
-def _log_dp_rows(scores, costs, budget, reverse=False):
-    """Return log-DP rows and Python reachability masks.
+def _reachability_mask(costs, budget, groups, device):
+    """Reachable shifted rates after ``k`` group transitions, ``k = 0..groups``."""
+    mask = torch.zeros(groups + 1, budget + 1, dtype=torch.bool, device=device)
+    mask[0, 0] = True
+    for step in range(groups):
+        for cost in costs:
+            if cost <= budget:
+                mask[step + 1, cost:] |= mask[step, :budget + 1 - cost]
+    return mask
 
-    Only reachable states enter ``logsumexp``.  This avoids the undefined
-    gradient of ``logsumexp([-inf, ... , -inf])`` at unreachable states.
-    """
+
+def _dp_step(previous, scores_g, costs, budget, reachable):
+    """One group transition; only reachable rates enter ``logsumexp``."""
+    modes = scores_g.shape[0]
+    candidates = previous.new_full((modes, budget + 1), float("-inf"))
+    for mode, cost in enumerate(costs):
+        candidates[mode, cost:] = previous[:budget + 1 - cost] + scores_g[mode]
+    current = previous.new_full((budget + 1,), float("-inf"))
+    current = current.clone()
+    current[reachable] = torch.logsumexp(candidates[:, reachable], dim=0)
+    return current
+
+
+def _compute_dp_tables(scores, costs, budget, reach_forward, reach_backward):
+    """Static ``[G+1, B+1]`` forward/backward log-DP tables."""
     groups, _ = scores.shape
-    sequence = range(groups - 1, -1, -1) if reverse else range(groups)
-    initial = [_constant(float("-inf"), scores) for _ in range(budget + 1)]
-    initial[0] = _constant(0.0, scores)
-    rows = [torch.stack(initial)]
-    masks = [tuple(index == 0 for index in range(budget + 1))]
-    previous, previous_mask = rows[0], masks[0]
-    for group in sequence:
-        candidates = []
-        for mode, cost in enumerate(costs):
-            shifted = previous.new_full((budget + 1,), float("-inf"))
-            shifted[cost:] = previous[:budget + 1 - cost] + scores[group, mode]
-            candidates.append(shifted)
-        candidates = torch.stack(candidates)
-        previous_mask = tuple(
-            any(cost <= rate and masks[-1][rate - cost] for cost in costs)
-            for rate in range(budget + 1))
-        reachable = torch.tensor(previous_mask, device=scores.device)
-        current = previous.new_full((budget + 1,), float("-inf"))
-        current[reachable] = torch.logsumexp(candidates[:, reachable], dim=0)
-        previous = current
-        rows.append(previous)
-        masks.append(previous_mask)
-    if reverse:
-        rows = list(reversed(rows))
-        masks = list(reversed(masks))
-    return rows, masks
+    forward_rows = [scores.new_full((budget + 1,), float("-inf"))]
+    forward_rows[0] = forward_rows[0].clone()
+    forward_rows[0][0] = 0.0
+    for group in range(groups):
+        forward_rows.append(_dp_step(
+            forward_rows[-1], scores[group], costs, budget,
+            reach_forward[group + 1]))
+    forward = torch.stack(forward_rows)
+
+    backward_rows = [scores.new_full((budget + 1,), float("-inf"))]
+    backward_rows[0] = backward_rows[0].clone()
+    backward_rows[0][0] = 0.0
+    # Walk groups from the end; ``reach_backward[g] == reach_forward[G - g]``.
+    for group in range(groups - 1, -1, -1):
+        backward_rows.append(_dp_step(
+            backward_rows[-1], scores[group], costs, budget,
+            reach_backward[group]))
+    backward = torch.stack(list(reversed(backward_rows)))
+    return forward, backward
+
+
+def _compute_marginals(scores, forward, backward, forward_mask, backward_mask,
+                       costs, budget):
+    """Vectorized per-group mode marginals under the exact-budget DP."""
+    log_z = forward[-1, budget]
+    groups, modes = scores.shape
+    prefixes = torch.arange(budget + 1, device=scores.device)
+    suffix = budget - prefixes[None, None, :] - costs[None, :, None]
+    suffix_clamped = suffix.clamp(min=0, max=budget)
+    forward_ok = forward_mask[:-1, None, :]
+    backward_at = torch.gather(
+        backward_mask[1:, None, :].expand(groups, modes, budget + 1),
+        2,
+        suffix_clamped.expand(groups, modes, budget + 1))
+    valid = (suffix >= 0) & forward_ok & backward_at
+    backward_term = torch.gather(
+        backward[1:, None, :].expand(groups, modes, budget + 1),
+        2,
+        suffix_clamped.expand(groups, modes, budget + 1))
+    terms = (forward[:-1, None, :]
+             + scores[:, :, None]
+             + backward_term
+             - log_z)
+    terms = terms.masked_fill(~valid, float("-inf"))
+    return torch.exp(torch.logsumexp(terms, dim=-1))
+
+
+_COMPUTE_DP_TABLES = _compute_dp_tables
+_COMPUTE_MARGINALS = _compute_marginals
+
+
+def _enable_compiled_marginals():
+    """Best-effort compile for the dense marginal gather (optional).
+
+    Full DP tables stay eager: reachable-state ``index`` has dynamic shape and
+    breaks ``torch.compile`` on this stack while remaining required for safe
+    ``logsumexp`` gradients.
+    """
+    global _COMPUTE_MARGINALS
+    compile_fn = getattr(torch, "compile", None)
+    if compile_fn is None:
+        return
+    try:
+        _COMPUTE_MARGINALS = compile_fn(
+            _compute_marginals, fullgraph=False, dynamic=False)
+    except Exception:
+        _COMPUTE_MARGINALS = _compute_marginals
+
+
+_enable_compiled_marginals()
 
 
 @dataclass
@@ -105,10 +168,11 @@ class FixedBudgetDistribution:
     scores: torch.Tensor
     shifted_costs: tuple
     shifted_budget: int
-    forward: list
-    forward_mask: list
-    backward: list
-    backward_mask: list
+    forward: torch.Tensor
+    forward_mask: torch.Tensor
+    backward: torch.Tensor
+    backward_mask: torch.Tensor
+    _cost_tensor: torch.Tensor
 
     @property
     def groups(self):
@@ -119,33 +183,17 @@ class FixedBudgetDistribution:
         return int(self.scores.shape[1])
 
     def log_partition(self):
-        return self.forward[-1][self.shifted_budget]
+        return self.forward[-1, self.shifted_budget]
 
     def marginals(self):
-        log_z = self.log_partition()
-        output = []
-        for group in range(self.groups):
-            row = []
-            for mode, cost in enumerate(self.shifted_costs):
-                prefixes = [
-                    prefix for prefix in range(self.shifted_budget - cost + 1)
-                    if (self.forward_mask[group][prefix]
-                        and self.backward_mask[group + 1][
-                            self.shifted_budget - prefix - cost])]
-                if not prefixes:
-                    row.append(_constant(0.0, self.scores))
-                else:
-                    prefix = torch.tensor(prefixes, device=self.scores.device)
-                    suffix = self.shifted_budget - prefix - cost
-                    terms = (self.forward[group][prefix]
-                             + self.scores[group, mode]
-                             + self.backward[group + 1][suffix] - log_z)
-                    row.append(torch.exp(torch.logsumexp(terms, 0)))
-            output.append(torch.stack(row))
-        return torch.stack(output)
+        return _COMPUTE_MARGINALS(
+            self.scores, self.forward, self.backward,
+            self.forward_mask, self.backward_mask,
+            self._cost_tensor, self.shifted_budget)
 
-    def entropy(self):
-        probabilities = self.marginals()
+    def entropy(self, probabilities=None):
+        if probabilities is None:
+            probabilities = self.marginals()
         return self.log_partition() - (probabilities * self.scores).sum()
 
     def log_prob(self, allocations, validate=True):
@@ -160,9 +208,7 @@ class FixedBudgetDistribution:
         if validate and bool(
                 ((allocations < 0) | (allocations >= self.modes)).any()):
             raise ValueError("allocation contains an invalid mode index")
-        cost_tensor = torch.as_tensor(
-            self.shifted_costs, device=allocations.device, dtype=torch.long)
-        totals = cost_tensor[allocations].sum(dim=1)
+        totals = self._cost_tensor[allocations].sum(dim=1)
         if validate and bool((totals != self.shifted_budget).any()):
             bad = totals[totals != self.shifted_budget][0].item()
             raise ValueError(
@@ -179,10 +225,8 @@ class FixedBudgetDistribution:
             raise ValueError("count must be positive")
         samples = torch.empty(
             count, self.groups, dtype=torch.long, device=self.scores.device)
-        costs = torch.tensor(
-            self.shifted_costs, device=self.scores.device, dtype=torch.long)
-        masks = torch.tensor(
-            self.backward_mask, device=self.scores.device, dtype=torch.bool)
+        costs = self._cost_tensor
+        masks = self.backward_mask
         remaining = torch.full(
             (count,), self.shifted_budget, device=self.scores.device,
             dtype=torch.long)
@@ -252,6 +296,16 @@ class FixedBudgetAllocationPolicy(nn.Module):
                 raise ValueError(
                     f"init_logits must have shape {(self.groups, len(costs))}")
         self.logits = nn.Parameter(initial.clone())
+        # Reachability depends only on (groups, costs, budget); cache once.
+        reach = _reachability_mask(
+            shifted, budget, self.groups, torch.device("cpu"))
+        self.register_buffer("_reach_forward", reach, persistent=False)
+        self.register_buffer(
+            "_reach_backward", torch.flip(reach, dims=(0,)), persistent=False)
+        self.register_buffer(
+            "_shifted_cost_tensor",
+            torch.as_tensor(shifted, dtype=torch.long),
+            persistent=False)
 
     def build(self, temperature=1.0, validate=True):
         temperature = float(temperature)
@@ -259,24 +313,34 @@ class FixedBudgetAllocationPolicy(nn.Module):
             raise ValueError("temperature must be finite and positive")
         if validate and not bool(torch.isfinite(self.logits).all()):
             raise ValueError("policy logits must be finite")
+        # Constructor already proved the budget is reachable; skip the CUDA
+        # syncing ``bool(mask)`` check on the training hot path.
+        if validate and not bool(
+                self._reach_forward[-1, self.shifted_budget]):
+            raise RuntimeError("fixed budget unexpectedly became unreachable")
         # Training centers each row after an optimizer step.  Keep the raw
         # logits here so log_partition retains its literal mathematical value
         # for arbitrary user-supplied logits and remains testable by enumeration.
         scores = self.logits / temperature
-        forward, forward_mask = _log_dp_rows(
-            scores, self.shifted_costs, self.shifted_budget, reverse=False)
-        backward, backward_mask = _log_dp_rows(
-            scores, self.shifted_costs, self.shifted_budget, reverse=True)
-        if not forward_mask[-1][self.shifted_budget]:
-            raise RuntimeError("fixed budget unexpectedly became unreachable")
+        reach_forward = self._reach_forward
+        reach_backward = self._reach_backward
+        if reach_forward.device != scores.device:
+            reach_forward = reach_forward.to(device=scores.device, non_blocking=True)
+            reach_backward = reach_backward.to(
+                device=scores.device, non_blocking=True)
+        forward, backward = _COMPUTE_DP_TABLES(
+            scores, self.shifted_costs, self.shifted_budget,
+            reach_forward, reach_backward)
         return FixedBudgetDistribution(
             scores=scores,
             shifted_costs=self.shifted_costs,
             shifted_budget=self.shifted_budget,
             forward=forward,
-            forward_mask=forward_mask,
+            forward_mask=reach_forward,
             backward=backward,
-            backward_mask=backward_mask,
+            backward_mask=reach_backward,
+            _cost_tensor=self._shifted_cost_tensor.to(
+                device=scores.device, non_blocking=True),
         )
 
     def actual_rate(self, allocations):

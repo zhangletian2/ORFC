@@ -192,7 +192,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         temperature=C.DEFAULT_TEMPERATURE,
         entropy_weight=C.DEFAULT_ENTROPY_WEIGHT, images=None, log=print,
         book_optimizer="adam", grad_clip=1.0,
-        policy_gradient="reinforce", codeword_temperature=0.0):
+        policy_gradient="reinforce", codeword_temperature=0.0,
+        num_workers=C.DATALOADER_WORKERS):
     started = time.time()
     run_id = C.ensure_run_id(run_id)
     out = C.output_dir(anchor, run_id)
@@ -222,16 +223,30 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     tail_mod.check_layer(C.LAYER, train_paths[0], train_paths[1])
     train_set = CachedFeatureDataset(
         train_paths[0], train_paths[2], max_images=images)
-    teacher_cache = np.load(train_paths[1], mmap_mode="r")
+    # Full teacher table in pinned host RAM.  Fancy indexing would allocate an
+    # unpinned temporary and defeat non_blocking H2D, so gathers go through a
+    # preallocated pinned staging buffer instead.
+    teacher_host = torch.from_numpy(np.load(train_paths[1])).float()
+    if device.type == "cuda":
+        teacher_host = teacher_host.pin_memory()
     val_paths = C.load_split("train_val")
     val = engine.ResidentSet(*val_paths[:3], device,
                              max_images=None if images is None else min(images, C.N_VAL))
     batch = int(batch)
+    num_workers = max(0, int(num_workers))
+    teacher_staging = torch.empty(
+        (batch, *teacher_host.shape[1:]),
+        dtype=teacher_host.dtype,
+        pin_memory=(device.type == "cuda"))
     loader_generator = torch.Generator().manual_seed(C.TRAIN_SEED)
-    train_loader = DataLoader(
-        train_set, batch_size=batch, shuffle=True, drop_last=True,
-        num_workers=2, pin_memory=True, persistent_workers=True,
-        prefetch_factor=4, generator=loader_generator)
+    loader_kwargs = dict(
+        batch_size=batch, shuffle=True, drop_last=True,
+        num_workers=num_workers, pin_memory=(device.type == "cuda"),
+        generator=loader_generator)
+    if num_workers > 0:
+        loader_kwargs.update(
+            persistent_workers=True, prefetch_factor=4)
+    train_loader = DataLoader(train_set, **loader_kwargs)
     per_epoch = len(train_loader)
     if per_epoch == 0:
         raise ValueError(f"batch {batch} exceeds {len(train_set)} training images")
@@ -270,6 +285,7 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         torch.cuda.reset_peak_memory_stats(device)
         torch.cuda.synchronize(device)
     training_started = time.time()
+    last_gradient_norms = {"U": 0.0, "codebooks": 0.0, "policy": 0.0}
 
     for step in range(1, total + 1):
         try:
@@ -277,16 +293,23 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         except StopIteration:
             train_iterator = iter(train_loader)
             rows, x = next(train_iterator)
-        teacher = torch.from_numpy(
-            np.asarray(teacher_cache[rows.numpy()], dtype=np.float32))
         x = x.float().to(device, non_blocking=True)
-        teacher = teacher.float().to(device, non_blocking=True)
+        # Gather into pinned staging first; teacher_host[rows] would allocate an
+        # unpinned temporary and force a synchronous H2D despite non_blocking.
+        rows_cpu = rows if rows.device.type == "cpu" else rows.cpu()
+        n = int(rows_cpu.shape[0])
+        torch.index_select(teacher_host, 0, rows_cpu, out=teacher_staging[:n])
+        teacher = teacher_staging[:n].to(device, non_blocking=True)
         with torch.no_grad():
             y, mu, std = batch_normalize_gpu(x, mode=C.NORM_MODE)
         distribution = policy.build(temperature, validate=False)
         allocations = distribution.sample(policy_samples, generator=generator)
-        marginals = (distribution.marginals()
-                     if policy_gradient == "dp_st" else None)
+        if policy_gradient == "dp_st":
+            marginals = distribution.marginals()
+            entropy = distribution.entropy(marginals)
+        else:
+            marginals = None
+            entropy = distribution.entropy()
         budget_violations.add_(
             (policy.actual_rate(allocations) != anchor.rate).sum())
         add_coverage(policy_coverage, allocations)
@@ -300,8 +323,7 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         per_image, labels = qhard.distortions(
             codec, tail, y, mu, std, teacher, allocations,
             marginals=marginals,
-            codeword_temperature=(codeword_temperature
-                                  if policy_gradient == "dp_st" else 0.0))
+            codeword_temperature=codeword_temperature)
         per_allocation = per_image.mean(dim=1)
         codec_loss = per_allocation.mean() / scale
         if policy_gradient == "reinforce":
@@ -313,18 +335,10 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
             policy_loss = (advantage * log_probability).mean()
         else:
             policy_loss = codec_loss.new_zeros(())
-        entropy = distribution.entropy()
         entropy_coefficient = C.cosine_lr(
             step, schedule_total, float(entropy_weight), floor_ratio=0.0)
         policy_loss = policy_loss - entropy_coefficient * entropy / C.GROUPS
         (codec_loss + policy_loss).backward()
-        book_gradients = [q.codebooks.grad.norm() for q in codec.pq.quantizers
-                          if q.codebooks.grad is not None]
-        last_gradient_norms = {
-            "U": float(codec.transform.rotation.grad.norm()),
-            "codebooks": float(torch.stack(book_gradients).norm())
-                         if book_gradients else 0.0,
-            "policy": float(policy.logits.grad.norm())}
 
         if grad_clip > 0:
             torch.nn.utils.clip_grad_norm_(codec.parameters(), float(grad_clip))
@@ -375,7 +389,18 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                 f"pmax={record['marginal_max_mean']:.3f} "
                 f"dMAP={record['map_hamming_from_previous']} "
                 f"stable={record['map_stable_run']}")
-        if step == 1 or step % C.LOG_EVERY == 0:
+        if step == 1 or step % C.LOG_EVERY == 0 or step == total:
+            # Defer host sync of grad norms to log cadence only.
+            book_gradients = [q.codebooks.grad.norm()
+                              for q in codec.pq.quantizers
+                              if q.codebooks.grad is not None]
+            last_gradient_norms = {
+                "U": float(codec.transform.rotation.grad.norm())
+                     if codec.transform.rotation.grad is not None else 0.0,
+                "codebooks": float(torch.stack(book_gradients).norm())
+                             if book_gradients else 0.0,
+                "policy": float(policy.logits.grad.norm())
+                          if policy.logits.grad is not None else 0.0}
             log(f"[{anchor.name}] {step}/{total} D={float(per_allocation.mean()):.1f} "
                 f"H={float(entropy):.3f} "
                 f"coverage={int(policy_coverage.min())}.."
@@ -520,6 +545,7 @@ def main(argv=None):
     parser.add_argument("--epochs", type=int, default=C.DEFAULT_EPOCHS)
     parser.add_argument("--steps", type=int, default=None, help="probe override")
     parser.add_argument("--batch", type=int, default=C.DEFAULT_BATCH)
+    parser.add_argument("--num-workers", type=int, default=C.DATALOADER_WORKERS)
     parser.add_argument("--lr-u", type=float, default=C.DEFAULT_LR_U)
     parser.add_argument("--lr-theta", type=float, default=C.DEFAULT_LR_THETA)
     parser.add_argument("--book-optimizer", choices=("sgd", "adam"),
@@ -543,7 +569,8 @@ def main(argv=None):
                  entropy_weight=args.entropy_weight, images=args.images,
                  book_optimizer=args.book_optimizer, grad_clip=args.grad_clip,
                  policy_gradient=args.policy_gradient,
-                 codeword_temperature=args.codeword_temperature)
+                 codeword_temperature=args.codeword_temperature,
+                 num_workers=args.num_workers)
     print(json.dumps({"anchor": result["anchor"], "seconds": result["seconds"],
                       "validation": result["validation"],
                       "policy": result["policy"],
