@@ -18,8 +18,7 @@ from . import init as init_mod
 from .allocation_policy import FixedBudgetAllocationPolicy
 from .. import engine, frozen
 from .. import tail as tail_mod
-from ..v11 import qhard
-from ..v11.train import MenuStream
+from . import qhard
 
 
 class CachedFeatureDataset(Dataset):
@@ -85,11 +84,6 @@ def add_coverage(table, allocations):
     table.scatter_add_(1, index, torch.ones_like(index, dtype=table.dtype))
 
 
-def hard_distortion(codec, tail, y, mu, std, teacher, modes):
-    value, labels = qhard.distortion(codec, tail, y, mu, std, teacher, modes)
-    return value.mean(), labels
-
-
 @torch.no_grad()
 def validate_many(codec, tail, resident, allocations):
     allocations = torch.as_tensor(allocations)
@@ -127,7 +121,7 @@ def stage1_validation(codec, tail, resident, distribution, step, samples):
                 distribution.scores.square().mean().sqrt().detach())}
 
 
-def snapshot(policy, temperature, policy_coverage, support_coverage):
+def snapshot(policy, temperature, policy_coverage):
     distribution = policy.build(temperature)
     marginals = distribution.marginals().detach()
     allocation = distribution.map_allocation()
@@ -140,18 +134,16 @@ def snapshot(policy, temperature, policy_coverage, support_coverage):
             "marginal_min": float(marginals.min()),
             "expected_rate": float((marginals * bits).sum()),
             "policy_coverage": policy_coverage.cpu().tolist(),
-            "policy_coverage_min": int(policy_coverage.min()),
-            "support_coverage": support_coverage.cpu().tolist(),
-            "support_coverage_min": int(support_coverage.min())}
+            "policy_coverage_min": int(policy_coverage.min())}
 
 
 def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         batch=C.DEFAULT_BATCH, lr_u=C.DEFAULT_LR_U,
         lr_theta=C.DEFAULT_LR_THETA, policy_lr=C.DEFAULT_POLICY_LR,
+        policy_samples=C.POLICY_SAMPLES,
         temperature=C.DEFAULT_TEMPERATURE,
         entropy_weight=C.DEFAULT_ENTROPY_WEIGHT, images=None, log=print,
-        book_optimizer="adam", grad_clip=1.0,
-        coverage_weight=C.COVERAGE_WEIGHT):
+        book_optimizer="adam", grad_clip=1.0):
     started = time.time()
     run_id = C.ensure_run_id(run_id)
     out = C.output_dir(anchor, run_id)
@@ -195,12 +187,13 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     total = int(steps) if steps is not None else schedule_total
     if total < 1:
         raise ValueError("training requires at least one step")
+    policy_samples = int(policy_samples)
+    if policy_samples < 2:
+        raise ValueError("leave-one-out policy gradient requires >=2 samples")
     train_iterator = iter(train_loader)
     generator = torch.Generator(device=device).manual_seed(C.POLICY_SEED)
-    support_stream = MenuStream(anchor, seed=C.COVERAGE_SEED)
     policy_coverage = torch.zeros(
         C.GROUPS, len(bits), dtype=torch.long, device=device)
-    support_coverage = torch.zeros_like(policy_coverage)
     gradient_coverage = torch.zeros_like(policy_coverage)
     budget_violations = torch.zeros((), dtype=torch.long, device=device)
 
@@ -229,15 +222,10 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         with torch.no_grad():
             y, mu, std = batch_normalize_gpu(x, mode=C.NORM_MODE)
         distribution = policy.build(temperature, validate=False)
-        allocations = distribution.sample(C.POLICY_SAMPLES, generator=generator)
+        allocations = distribution.sample(policy_samples, generator=generator)
         budget_violations.add_(
             (policy.actual_rate(allocations) != anchor.rate).sum())
-        _, support_np = support_stream.allocation(step)
-        support = torch.as_tensor(support_np, dtype=torch.long, device=device)
-        if sum(bits[int(mode)] for mode in support_np) != anchor.rate:
-            raise SystemExit("INVALID_EXPERIMENT: support allocation violated budget")
         add_coverage(policy_coverage, allocations)
-        add_coverage(support_coverage, support)
 
         set_lrs(rotation_optimizer, book_optimizer, policy_optimizer,
                 step - 1, schedule_total, lr_u, lr_theta, policy_lr)
@@ -245,31 +233,20 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         book_optimizer.zero_grad(set_to_none=True)
         policy_optimizer.zero_grad(set_to_none=True)
 
-        means, labels = [], []
-        for modes in allocations:
-            mean, selected = hard_distortion(codec, tail, y, mu, std, teacher, modes)
-            (0.5 * mean / scale).backward()
-            means.append(mean.detach())
-            labels.append(selected)
-
-        # A legal support allocation is used on every step.  It updates only
-        # codebooks, so all modes track the changing rotated feature space
-        # without steering U or the allocation policy.
-        codec.transform.rotation.requires_grad_(False)
-        support_mean, support_labels = hard_distortion(
-            codec, tail, y, mu, std, teacher, support)
-        (coverage_weight * support_mean / scale).backward()
-        codec.transform.rotation.requires_grad_(True)
-
-        per_allocation = torch.stack(means)
+        per_image, labels = qhard.distortions(
+            codec, tail, y, mu, std, teacher, allocations)
+        per_allocation = per_image.mean(dim=1)
+        codec_loss = per_allocation.mean() / scale
         log_probability = distribution.log_prob(allocations, validate=False)
-        advantage = (per_allocation[0] - per_allocation[1]) / scale
-        policy_loss = 0.5 * advantage * (log_probability[0] - log_probability[1])
+        detached = per_allocation.detach()
+        baseline = (detached.sum() - detached) / (len(detached) - 1)
+        advantage = (detached - baseline) / scale
+        policy_loss = (advantage * log_probability).mean()
         entropy = distribution.entropy()
         entropy_coefficient = C.cosine_lr(
             step, schedule_total, float(entropy_weight))
         policy_loss = policy_loss - entropy_coefficient * entropy / C.GROUPS
-        policy_loss.backward()
+        (codec_loss + policy_loss).backward()
 
         if grad_clip > 0:
             torch.nn.utils.clip_grad_norm_(codec.parameters(), float(grad_clip))
@@ -288,34 +265,51 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         if step % C.REVIVE_EVERY == 0:
             for modes, selected in zip(allocations, labels):
                 qhard.revive_dead_codewords(codec, y, modes, selected)
-            qhard.revive_dead_codewords(codec, y, support, support_labels)
 
-        trace.append((step, per_allocation.mean().detach(), support_mean.detach(),
+        trace.append((step, per_allocation.mean().detach(),
                       policy_loss.detach(), entropy.detach()))
         if step % C.VAL_EVERY == 0 or step == total:
             current = policy.build(temperature)
             record = stage1_validation(
                 codec, tail, val, current, step, C.STAGE1_VAL_SAMPLES)
+            previous = next((item for item in reversed(validation)
+                             if "map_allocation" in item), None)
+            if previous is None:
+                record["map_hamming_from_previous"] = None
+                record["map_stable_run"] = 1
+            else:
+                hamming = sum(
+                    left != right for left, right in zip(
+                        record["map_allocation"], previous["map_allocation"]))
+                record["map_hamming_from_previous"] = int(hamming)
+                record["map_stable_run"] = (
+                    int(previous.get("map_stable_run", 1)) + 1
+                    if hamming == 0 else 1)
             validation.append(record)
             log(f"[{anchor.name}] validation step={step} "
-                f"MAP={record['map_distortion']:.1f} H={record['entropy']:.3f}")
+                f"MAP={record['map_distortion']:.1f} "
+                f"sample_gap={record['map_vs_sample_mean']:.1f} "
+                f"H={record['entropy']:.3f} "
+                f"pmax={record['marginal_max_mean']:.3f} "
+                f"dMAP={record['map_hamming_from_previous']} "
+                f"stable={record['map_stable_run']}")
         if step == 1 or step % C.LOG_EVERY == 0:
             log(f"[{anchor.name}] {step}/{total} D={float(per_allocation.mean()):.1f} "
-                f"support={float(support_mean):.1f} H={float(entropy):.3f} "
-                f"coverage={int(support_coverage.min())}.."
-                f"{int(support_coverage.max())}")
+                f"H={float(entropy):.3f} "
+                f"coverage={int(policy_coverage.min())}.."
+                f"{int(policy_coverage.max())}")
 
     if device.type == "cuda":
         torch.cuda.synchronize(device)
     training_seconds = time.time() - training_started
     peak_memory_gb = (torch.cuda.max_memory_allocated(device) / 2 ** 30
                       if device.type == "cuda" else 0.0)
-    summary = snapshot(policy, temperature, policy_coverage, support_coverage)
+    summary = snapshot(policy, temperature, policy_coverage)
     if int(budget_violations) != 0:
         raise SystemExit("INVALID_EXPERIMENT: policy sample violated budget")
     final_map = torch.tensor(summary["map_allocation"], device=device)
-    if summary["map_rate"] != anchor.rate or summary["support_coverage_min"] == 0:
-        raise SystemExit("INVALID_EXPERIMENT: final rate or support coverage failed")
+    if summary["map_rate"] != anchor.rate:
+        raise SystemExit("INVALID_EXPERIMENT: final rate failed")
     final_parity = qhard.selfcheck(codec, tail, val, final_map)
     final_orth = frozen.orthogonality_error(codec)
     if final_orth - initial_orth > C.ORTH_TOL:
@@ -325,6 +319,9 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     final_record = stage1_validation(
         codec, tail, val, final_distribution, total,
         C.STAGE1_FINAL_SAMPLES)
+    for key in ("map_hamming_from_previous", "map_stable_run"):
+        if key in validation[-1]:
+            final_record[key] = validation[-1][key]
     validation[-1] = final_record
     book_drift = []
     for initial, quantizer in zip(initial_books, codec.pq.quantizers):
@@ -379,8 +376,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     np.save(out / "allocation.npy", final_map.cpu().numpy())
     (out / "policy_summary.json").write_text(json.dumps(summary, indent=2))
     trace = [{"step": item[0], "policy_mean": float(item[1]),
-              "support_mean": float(item[2]), "policy_loss": float(item[3]),
-              "entropy": float(item[4])} for item in trace]
+              "policy_loss": float(item[2]), "entropy": float(item[3])}
+             for item in trace]
     payload = {"plan": "v13.1", "anchor": anchor.name, "rate": anchor.rate,
                "run_id": run_id, "init": metadata, "images": len(train_set),
                "val_images": val.count, "batch": batch, "epochs": float(total / per_epoch),
@@ -388,10 +385,10 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                "schedule_steps": schedule_total,
                "schedule_epochs": int(epochs),
                "lr_U": lr_u, "lr_theta": lr_theta, "policy_lr": policy_lr,
+               "policy_samples": policy_samples,
                "book_optimizer": book_optimizer_name,
                "grad_clip": grad_clip,
                "temperature": temperature, "entropy_weight": entropy_weight,
-               "coverage_weight": coverage_weight,
                "initial_distortion": initial_distortion,
                "hard_parity_initial": initial_parity,
                "hard_parity_final": final_parity,
@@ -420,9 +417,8 @@ def main(argv=None):
     parser.add_argument("--book-optimizer", choices=("sgd", "adam"),
                         default="adam")
     parser.add_argument("--grad-clip", type=float, default=1.0)
-    parser.add_argument("--coverage-weight", type=float,
-                        default=C.COVERAGE_WEIGHT)
     parser.add_argument("--policy-lr", type=float, default=C.DEFAULT_POLICY_LR)
+    parser.add_argument("--policy-samples", type=int, default=C.POLICY_SAMPLES)
     parser.add_argument("--temperature", type=float, default=C.DEFAULT_TEMPERATURE)
     parser.add_argument("--entropy-weight", type=float,
                         default=C.DEFAULT_ENTROPY_WEIGHT)
@@ -431,10 +427,10 @@ def main(argv=None):
     result = run(C.ANCHOR_BY_NAME[args.anchor], args.run_id,
                  torch.device(args.device), epochs=args.epochs, steps=args.steps,
                  batch=args.batch, lr_u=args.lr_u, lr_theta=args.lr_theta,
-                 policy_lr=args.policy_lr, temperature=args.temperature,
+                 policy_lr=args.policy_lr, policy_samples=args.policy_samples,
+                 temperature=args.temperature,
                  entropy_weight=args.entropy_weight, images=args.images,
-                 book_optimizer=args.book_optimizer, grad_clip=args.grad_clip,
-                 coverage_weight=args.coverage_weight)
+                 book_optimizer=args.book_optimizer, grad_clip=args.grad_clip)
     print(json.dumps({"anchor": result["anchor"], "seconds": result["seconds"],
                       "validation": result["validation"],
                       "policy": result["policy"]}, indent=2))
