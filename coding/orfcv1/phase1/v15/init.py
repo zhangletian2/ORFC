@@ -18,8 +18,7 @@ from .config import SPECS, activate
 def _fit(rotation, y, groups, dim, k, iterations, seed, device):
     torch.manual_seed(int(seed))
     z = y @ rotation
-    sub = z.reshape(-1, groups, dim).permute(1, 0, 2).contiguous()
-    del z
+    sub = z.reshape(-1, groups, dim).permute(1, 0, 2)
     book = batched_kmeans(
         sub, k, max_iter=iterations, device=device, verbose=False)
     return sub, book
