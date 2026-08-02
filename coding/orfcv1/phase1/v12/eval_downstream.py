@@ -23,9 +23,9 @@ from codec_v1 import load_codec_v1
 
 
 class CodecSegmentation(SegmentationEvaluator):
-    def __init__(self, codec, modes, device, voc_root, weights_root):
+    def __init__(self, codec, modes, device, voc_root, weights_root, layer_idx=20):
         self.codec, self.modes, self.device = codec, modes, device
-        self.norm_mode, self.layer_idx = "per_image", 20
+        self.norm_mode, self.layer_idx = "per_image", int(layer_idx)
         self.voc_root, self.weights_root = voc_root, weights_root
         self.feat_dim, self.model_name = 1024, "dinov2_vitl14"
 
@@ -58,6 +58,7 @@ def main(argv=None):
     parser.add_argument("--name", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--chunk", type=int, default=16)
+    parser.add_argument("--layer", type=int, default=20)
     args = parser.parse_args(argv)
 
     device = torch.device("cuda")
@@ -76,7 +77,8 @@ def main(argv=None):
 
     wrapper = Dinov2Wrapper(head_layers=1, model_name="dinov2_vitl14", device=device)
     feature_root = PROJECT / "features"
-    test_dir = feature_root / "test" / "dinov2_vitl14" / "blk20"
+    block = f"blk{args.layer:02d}"
+    test_dir = feature_root / "test" / "dinov2_vitl14" / block
     files = sorted(test_dir.glob("*.npy"))
     features, basenames = preload_features(files, num_workers=4)
     labels = load_gt(PROJECT / "utils" / "imagenet_selected_label500.txt")
@@ -85,7 +87,7 @@ def main(argv=None):
     if wrapper.head is not None:
         wrapper.head.to(device)
     accuracy = evaluate_accuracy(
-        reconstructed, basenames, labels, wrapper, 20, device)
+        reconstructed, basenames, labels, wrapper, args.layer, device)
     del reconstructed
 
     wrapper.backbone.cpu()
@@ -94,14 +96,15 @@ def main(argv=None):
     torch.cuda.empty_cache()
     evaluator = CodecSegmentation(
         codec, modes, device, PROJECT / "data" / "VOCdevkit" / "VOC2012",
-        wrapper.weights_root)
+        wrapper.weights_root, args.layer)
     segmentation = evaluator.evaluate(
-        seg_feat_dir=str(feature_root / "voc2012_100" / "dinov2_vitl14" / "blk20"),
+        seg_feat_dir=str(feature_root / "voc2012_100" / "dinov2_vitl14" / block),
         image_list=str(PROJECT / "utils" / "voc2012_val_100.txt"),
         verbose=False)
     result = {"name": args.name, "kind": args.kind,
               "checkpoint": args.checkpoint, "allocation": args.allocation or None,
-              "nominal_rate": nominal_rate, "classification_images": len(files),
+              "nominal_rate": nominal_rate, "layer": args.layer, "block": block,
+              "classification_images": len(files),
               "segmentation_images": 100, "cls_acc": float(accuracy),
               "seg_miou": float(segmentation["miou"]),
               "seg_acc": float(segmentation["acc"])}
