@@ -34,7 +34,7 @@ def activate(block):
         C.TRAIN_TEACHERS = C.CACHE / "teacher_train_blk20_n5000_v12.npy"
     C.VAL_FEATURES = C.CACHE / f"features_test_{block}_n3000_ss20260730.npy"
     C.VAL_TEACHERS = C.CACHE / f"teacher_test_{block}_n3000_ss20260730.npy"
-    C.EVAL_IMAGE_BATCH = 10 if block == "blk05" else 100
+    C.EVAL_IMAGE_BATCH = 100
     C.EVAL_PAIR_BUDGET = C.EVAL_IMAGE_BATCH
     return C
 
