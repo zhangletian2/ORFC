@@ -149,6 +149,22 @@ class PolicyContracts(unittest.TestCase):
         self.assertLessEqual(float((empirical - probabilities).abs().max()),
                              tolerance)
 
+    def test_conditioned_sampling_forces_pair_and_preserves_budget(self):
+        policy = self.make_policy()
+        dist = policy.build(self.temperature)
+        for group, mode in itertools.product(
+                range(self.groups), range(len(self.bits))):
+            samples = dist.sample_conditioned(
+                group, mode, 20,
+                generator=torch.Generator().manual_seed(100 + 3 * group + mode))
+            self.assertTrue(bool((samples[:, group] == mode).all()))
+            self.assertTrue(bool(
+                (policy.actual_rate(samples) == self.budget).all()))
+
+        constrained = FixedBudgetAllocationPolicy(2, (1, 3), 2).build()
+        with self.assertRaises(ValueError):
+            constrained.sample_conditioned(0, 1)
+
     def test_unreachable_budget_and_invalid_allocation_fail(self):
         with self.assertRaises(ValueError):
             FixedBudgetAllocationPolicy(3, (1, 3), 4)

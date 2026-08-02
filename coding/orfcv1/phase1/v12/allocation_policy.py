@@ -245,6 +245,32 @@ class FixedBudgetDistribution:
         return samples
 
     @torch.no_grad()
+    def sample_conditioned(self, group, mode, count=1,
+                           generator: Optional[torch.Generator] = None):
+        """Sample exact-budget allocations with one group-mode pair forced."""
+        group, mode = int(group), int(mode)
+        if not 0 <= group < self.groups or not 0 <= mode < self.modes:
+            raise ValueError("conditioned group or mode is out of range")
+        scores = self.scores.detach().clone()
+        scores[group].fill_(float("-inf"))
+        scores[group, mode] = 0.0
+        forward, backward = _COMPUTE_DP_TABLES(
+            scores, self.shifted_costs, self.shifted_budget,
+            self.forward_mask, self.backward_mask)
+        if not bool(torch.isfinite(forward[-1, self.shifted_budget])):
+            raise ValueError("forced group-mode pair makes budget unreachable")
+        conditioned = FixedBudgetDistribution(
+            scores=scores, shifted_costs=self.shifted_costs,
+            shifted_budget=self.shifted_budget, forward=forward,
+            forward_mask=self.forward_mask, backward=backward,
+            backward_mask=self.backward_mask,
+            _cost_tensor=self._cost_tensor)
+        samples = conditioned.sample(count, generator=generator)
+        if not bool((samples[:, group] == mode).all()):
+            raise RuntimeError("conditioned sampler violated its forced mode")
+        return samples
+
+    @torch.no_grad()
     def map_allocation(self):
         """Deterministic max-sum DP; lowest mode index wins exact ties."""
         negative = float("-inf")

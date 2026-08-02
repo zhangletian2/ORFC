@@ -217,7 +217,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         book_optimizer="adam", grad_clip=1.0,
         policy_gradient="reinforce", codeword_temperature=0.0,
         codeword_temperature_end=None, optimizer_mode="cayley_sgd",
-        num_workers=C.DATALOADER_WORKERS):
+        num_workers=C.DATALOADER_WORKERS, coverage_samples=0,
+        coverage_weight=0.0, coverage_fraction=1.0):
     started = time.time()
     run_id = C.ensure_run_id(run_id)
     out = C.output_dir(anchor, run_id)
@@ -305,10 +306,25 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         raise ValueError("dp_st requires a positive codeword temperature")
     if optimizer_mode == "orfc_adam" and policy_gradient != "reinforce":
         raise ValueError("orfc_adam validation currently requires reinforce")
+    coverage_samples = int(coverage_samples)
+    coverage_weight, coverage_fraction = map(
+        float, (coverage_weight, coverage_fraction))
+    coverage_enabled = coverage_samples > 0 or coverage_weight > 0
+    if coverage_samples < 0 or not 0 <= coverage_weight <= 1:
+        raise ValueError("coverage samples/weight must be nonnegative and weight <= 1")
+    if coverage_enabled and (coverage_samples < 1 or coverage_weight <= 0):
+        raise ValueError("coverage requires positive samples and weight")
+    if coverage_enabled and policy_gradient != "reinforce":
+        raise ValueError("exact-budget coverage is separate from DP-ST")
+    if not 0 < coverage_fraction <= 1:
+        raise ValueError("coverage_fraction must lie in (0, 1]")
+    coverage_until = math.ceil(total * coverage_fraction) if coverage_enabled else 0
     train_iterator = iter(train_loader)
     generator = torch.Generator(device=device).manual_seed(C.POLICY_SEED)
     policy_coverage = torch.zeros(
         C.GROUPS, len(bits), dtype=torch.long, device=device)
+    forced_coverage = torch.zeros_like(policy_coverage)
+    coverage_exposure = torch.zeros_like(policy_coverage)
     gradient_coverage = torch.zeros_like(policy_coverage)
     gradient_coverage_window = torch.zeros_like(policy_coverage)
     budget_violations = torch.zeros((), dtype=torch.long, device=device)
@@ -346,7 +362,25 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         with torch.no_grad():
             y, mu, std = batch_normalize_gpu(x, mode=C.NORM_MODE)
         distribution = policy.build(temperature, validate=False)
-        allocations = distribution.sample(policy_samples, generator=generator)
+        policy_allocations = distribution.sample(
+            policy_samples, generator=generator)
+        coverage_allocations = []
+        if step <= coverage_until:
+            for sample_index in range(coverage_samples):
+                target = ((step - 1) * coverage_samples + sample_index)
+                target %= C.GROUPS * len(bits)
+                group, mode = divmod(target, len(bits))
+                coverage_allocations.append(distribution.sample_conditioned(
+                    group, mode, generator=generator))
+                forced_coverage[group, mode] += 1
+        if coverage_allocations:
+            coverage_allocations = torch.cat(coverage_allocations, dim=0)
+            add_coverage(coverage_exposure, coverage_allocations)
+            allocations = torch.cat(
+                (policy_allocations, coverage_allocations), dim=0)
+        else:
+            coverage_allocations = None
+            allocations = policy_allocations
         if policy_gradient == "dp_st":
             marginals = distribution.marginals()
             entropy = distribution.entropy(marginals)
@@ -355,7 +389,7 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
             entropy = distribution.entropy()
         budget_violations.add_(
             (policy.actual_rate(allocations) != anchor.rate).sum())
-        add_coverage(policy_coverage, allocations)
+        add_coverage(policy_coverage, policy_allocations)
 
         if codec_optimizer is None:
             set_lrs(rotation_optimizer, book_optimizer, policy_optimizer,
@@ -383,13 +417,20 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
             marginals=marginals,
             codeword_temperature=current_codeword_tau)
         per_allocation = per_image.mean(dim=1)
-        codec_loss = per_allocation.mean()
+        policy_distortion = per_allocation[:policy_samples].mean()
+        coverage_distortion = (per_allocation[policy_samples:].mean()
+                               if coverage_allocations is not None else
+                               policy_distortion)
+        codec_loss = ((1 - coverage_weight) * policy_distortion
+                      + coverage_weight * coverage_distortion
+                      if coverage_allocations is not None else
+                      policy_distortion)
         if optimizer_mode != "orfc_adam":
             codec_loss = codec_loss / scale
         if policy_gradient == "reinforce":
             log_probability = distribution.log_prob(
-                allocations, validate=False)
-            detached = per_allocation.detach()
+                policy_allocations, validate=False)
+            detached = per_allocation[:policy_samples].detach()
             baseline = (detached.sum() - detached) / (len(detached) - 1)
             advantage = (detached - baseline) / scale
             policy_loss = (advantage * log_probability).mean()
@@ -422,8 +463,9 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
             for modes, selected in zip(allocations, labels):
                 qhard.revive_dead_codewords(codec, y, modes, selected)
 
-        trace.append((step, per_allocation.mean().detach(),
-                      policy_loss.detach(), entropy.detach()))
+        trace.append((step, policy_distortion.detach(),
+                      coverage_distortion.detach(), policy_loss.detach(),
+                      entropy.detach(), coverage_allocations is not None))
         if step % C.VAL_EVERY == 0 or step == total:
             current = policy.build(temperature)
             record = joint_validation(
@@ -465,7 +507,9 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                              if book_gradients else 0.0,
                 "policy": float(policy.logits.grad.norm())
                           if policy.logits.grad is not None else 0.0}
-            log(f"[{anchor.name}] {step}/{total} D={float(per_allocation.mean()):.1f} "
+            log(f"[{anchor.name}] {step}/{total} "
+                f"Dpol={float(policy_distortion):.1f} "
+                f"Dcov={float(coverage_distortion):.1f} "
                 f"H={float(entropy):.3f} "
                 f"coverage={int(policy_coverage.min())}.."
                 f"{int(policy_coverage.max())}")
@@ -532,6 +576,17 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         "codec_loss_scale": "raw" if optimizer_mode == "orfc_adam"
                             else "initial_distortion",
         "single_continuous_trajectory": True,
+        "exact_budget_coverage": {
+            "enabled": coverage_enabled,
+            "samples": coverage_samples,
+            "weight": coverage_weight,
+            "fraction": coverage_fraction,
+            "until_step": coverage_until,
+            "forced_exposure": forced_coverage.cpu().tolist(),
+            "forced_exposure_min": int(forced_coverage.min()),
+            "allocation_exposure": coverage_exposure.cpu().tolist(),
+            "allocation_exposure_min": int(coverage_exposure.min()),
+            "policy_gradient_uses_coverage": False},
         "gradient_coverage": gradient_coverage.cpu().tolist(),
         "gradient_coverage_min": int(gradient_coverage.min()),
         "codebook_relative_drift": book_drift.cpu().tolist(),
@@ -581,7 +636,9 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     np.save(out / "allocation.npy", final_map.cpu().numpy())
     (out / "policy_summary.json").write_text(json.dumps(summary, indent=2))
     trace = [{"step": item[0], "policy_mean": float(item[1]),
-              "policy_loss": float(item[2]), "entropy": float(item[3])}
+              "coverage_mean": float(item[2]),
+              "policy_loss": float(item[3]), "entropy": float(item[4]),
+              "coverage_active": bool(item[5])}
              for item in trace]
     payload = {"plan": "continuous_joint_v1", "anchor": anchor.name,
                "rate": anchor.rate,
@@ -592,6 +649,9 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                "schedule_epochs": int(epochs),
                "lr_U": lr_u, "lr_theta": lr_theta, "policy_lr": policy_lr,
                "policy_samples": policy_samples,
+               "coverage_samples": coverage_samples,
+               "coverage_weight": coverage_weight,
+               "coverage_fraction": coverage_fraction,
                "optimizer_mode": optimizer_mode,
                "book_optimizer": book_optimizer_name,
                "grad_clip": grad_clip,
@@ -641,6 +701,9 @@ def main(argv=None):
     parser.add_argument("--codeword-temperature-end", type=float, default=None)
     parser.add_argument("--optimizer-mode", choices=("cayley_sgd", "orfc_adam"),
                         default="cayley_sgd")
+    parser.add_argument("--coverage-samples", type=int, default=0)
+    parser.add_argument("--coverage-weight", type=float, default=0.0)
+    parser.add_argument("--coverage-fraction", type=float, default=1.0)
     parser.add_argument("--images", type=int, default=None, help="probe only")
     args = parser.parse_args(argv)
     result = run(C.ANCHOR_BY_NAME[args.anchor], args.run_id,
@@ -654,7 +717,10 @@ def main(argv=None):
                  codeword_temperature=args.codeword_temperature,
                  codeword_temperature_end=args.codeword_temperature_end,
                  optimizer_mode=args.optimizer_mode,
-                 num_workers=args.num_workers)
+                 num_workers=args.num_workers,
+                 coverage_samples=args.coverage_samples,
+                 coverage_weight=args.coverage_weight,
+                 coverage_fraction=args.coverage_fraction)
     print(json.dumps({"anchor": result["anchor"], "seconds": result["seconds"],
                       "validation": result["validation"],
                       "policy": result["policy"],
