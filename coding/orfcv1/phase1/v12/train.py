@@ -304,8 +304,6 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         raise ValueError("policy_gradient must be reinforce or dp_st")
     if policy_gradient == "dp_st" and not codeword_temperature > 0:
         raise ValueError("dp_st requires a positive codeword temperature")
-    if optimizer_mode == "orfc_adam" and policy_gradient != "reinforce":
-        raise ValueError("orfc_adam validation currently requires reinforce")
     coverage_samples = int(coverage_samples)
     coverage_weight, coverage_fraction = map(
         float, (coverage_weight, coverage_fraction))

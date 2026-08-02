@@ -30,7 +30,7 @@ def run(anchor, source, run_id, device, epochs=20, steps=None,
         batch=C.DEFAULT_BATCH, lr_u=C.DEFAULT_LR_U,
         lr_theta=C.DEFAULT_LR_THETA, tau_start=0.5, tau_end=0.005,
         num_workers=C.DATALOADER_WORKERS, optimizer_mode="cayley_sgd",
-        uniform=False, log=print):
+        uniform=False, freeze_u=False, freeze_codebooks=False, log=print):
     source = Path(source)
     out = C.output_dir(anchor, run_id)
     if out.exists() and any(out.iterdir()):
@@ -57,6 +57,14 @@ def run(anchor, source, run_id, device, epochs=20, steps=None,
     if rate != anchor.rate:
         raise SystemExit(f"INVALID_EXPERIMENT: rate {rate} != {anchor.rate}")
     joint.make_trainable(codec)
+    if freeze_u and freeze_codebooks:
+        raise ValueError("at least one of U or codebooks must remain trainable")
+    if freeze_u:
+        for parameter in codec.transform.parameters():
+            parameter.requires_grad_(False)
+    if freeze_codebooks:
+        for quantizer in codec.pq.quantizers:
+            quantizer.codebooks.requires_grad_(False)
     initial_rotation = codec.transform.get_rotation().detach().clone()
     initial_books = [q.codebooks.detach().clone() for q in codec.pq.quantizers]
     if optimizer_mode == "orfc_adam":
@@ -65,9 +73,8 @@ def run(anchor, source, run_id, device, epochs=20, steps=None,
                 "INVALID_EXPERIMENT: ORFC Adam requires Cayley triu parameters")
         if lr_u != lr_theta:
             raise SystemExit("INVALID_EXPERIMENT: ORFC Adam requires lr_U == lr_theta")
-        codec_opt = torch.optim.Adam(
-            list(codec.transform.parameters())
-            + [q.codebooks for q in codec.pq.quantizers], lr=lr_theta)
+        parameters = [p for p in codec.parameters() if p.requires_grad]
+        codec_opt = torch.optim.Adam(parameters, lr=lr_theta)
         rotation_opt = book_opt = None
     elif optimizer_mode == "cayley_sgd":
         rotation_opt, book_opt = joint.build_optimizers(
@@ -161,6 +168,8 @@ def run(anchor, source, run_id, device, epochs=20, steps=None,
         "anchor": anchor.name, "rate": anchor.rate, "source": str(source),
         "allocation": allocation.cpu().tolist(), "epochs": float(epochs),
         "optimizer_mode": optimizer_mode,
+        "freeze_U": bool(freeze_u),
+        "freeze_codebooks": bool(freeze_codebooks),
         "loss_scale": float(scale),
         "steps": total, "batch": int(batch), "lr_U": float(lr_u),
         "lr_theta": float(lr_theta), "tau_start": float(tau_start),
@@ -200,6 +209,8 @@ def main():
                         choices=("cayley_sgd", "orfc_adam"),
                         default="cayley_sgd")
     parser.add_argument("--uniform", action="store_true")
+    parser.add_argument("--freeze-u", action="store_true")
+    parser.add_argument("--freeze-codebooks", action="store_true")
     parser.add_argument("--num-workers", type=int, default=C.DATALOADER_WORKERS)
     args = parser.parse_args()
     payload = run(C.ANCHOR_BY_NAME[args.anchor], args.source,
@@ -207,7 +218,9 @@ def main():
                   steps=args.steps, batch=args.batch, lr_u=args.lr_u,
                   lr_theta=args.lr_theta, tau_start=args.tau_start,
                   tau_end=args.tau_end, num_workers=args.num_workers,
-                  optimizer_mode=args.optimizer_mode, uniform=args.uniform)
+                  optimizer_mode=args.optimizer_mode, uniform=args.uniform,
+                  freeze_u=args.freeze_u,
+                  freeze_codebooks=args.freeze_codebooks)
     print(json.dumps(payload, indent=2))
 
 
