@@ -218,7 +218,9 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         policy_gradient="reinforce", codeword_temperature=0.0,
         codeword_temperature_end=None, optimizer_mode="cayley_sgd",
         num_workers=C.DATALOADER_WORKERS, coverage_samples=0,
-        coverage_weight=0.0, coverage_fraction=1.0):
+        coverage_weight=0.0, coverage_fraction=1.0,
+        stream_allocations=False, image_microbatch=0,
+        run_neighbor_audit=True):
     started = time.time()
     run_id = C.ensure_run_id(run_id)
     out = C.output_dir(anchor, run_id)
@@ -314,6 +316,9 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         raise ValueError("coverage requires positive samples and weight")
     if coverage_enabled and policy_gradient != "reinforce":
         raise ValueError("exact-budget coverage is separate from DP-ST")
+    if stream_allocations and (policy_gradient != "reinforce" or
+                               optimizer_mode != "orfc_adam"):
+        raise ValueError("streaming currently requires REINFORCE + ORFC Adam")
     if not 0 < coverage_fraction <= 1:
         raise ValueError("coverage_fraction must lie in (0, 1]")
     coverage_until = math.ceil(total * coverage_fraction) if coverage_enabled else 0
@@ -410,11 +415,33 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         else:
             current_codeword_tau = codeword_tau(
                 step, total, codeword_temperature, codeword_temperature_end)
-        per_image, labels = qhard.distortions(
-            codec, tail, y, mu, std, teacher, allocations,
-            marginals=marginals,
-            codeword_temperature=current_codeword_tau)
-        per_allocation = per_image.mean(dim=1)
+        if stream_allocations:
+            micro = n if int(image_microbatch) <= 0 else int(image_microbatch)
+            count = int(allocations.shape[0])
+            n_coverage = count - policy_samples
+            weights = ([((1 - coverage_weight) / policy_samples)
+                        if n_coverage else (1 / policy_samples)] * policy_samples)
+            weights += ([coverage_weight / n_coverage] * n_coverage)
+            values = []
+            labels = None
+            for allocation, weight in zip(allocations, weights):
+                pieces = []
+                for first in range(0, n, micro):
+                    last = min(first + micro, n)
+                    value, _ = qhard.distortion_sparse(
+                        codec, tail, y[first:last], mu[first:last], std[first:last],
+                        teacher[first:last], allocation,
+                        codeword_temperature=current_codeword_tau)
+                    (float(weight) * value.mean() * ((last - first) / n)).backward()
+                    pieces.append(value.detach())
+                values.append(torch.cat(pieces).mean())
+            per_allocation = torch.stack(values)
+        else:
+            per_image, labels = qhard.distortions(
+                codec, tail, y, mu, std, teacher, allocations,
+                marginals=marginals,
+                codeword_temperature=current_codeword_tau)
+            per_allocation = per_image.mean(dim=1)
         policy_distortion = per_allocation[:policy_samples].mean()
         coverage_distortion = (per_allocation[policy_samples:].mean()
                                if coverage_allocations is not None else
@@ -437,7 +464,10 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         entropy_coefficient = C.cosine_lr(
             step, schedule_total, float(entropy_weight), floor_ratio=0.0)
         policy_loss = policy_loss - entropy_coefficient * entropy / C.GROUPS
-        (codec_loss + policy_loss).backward()
+        if stream_allocations:
+            policy_loss.backward()
+        else:
+            (codec_loss + policy_loss).backward()
 
         if grad_clip > 0:
             torch.nn.utils.clip_grad_norm_(codec.parameters(), float(grad_clip))
@@ -457,7 +487,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         policy_optimizer.step()
         with torch.no_grad():
             policy.logits.sub_(policy.logits.mean(dim=1, keepdim=True))
-        if optimizer_mode != "orfc_adam" and step % C.REVIVE_EVERY == 0:
+        if (optimizer_mode != "orfc_adam" and not stream_allocations
+                and step % C.REVIVE_EVERY == 0):
             for modes, selected in zip(allocations, labels):
                 qhard.revive_dead_codewords(codec, y, modes, selected)
 
@@ -537,7 +568,9 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         if key in validation[-1]:
             final_record[key] = validation[-1][key]
     validation[-1] = final_record
-    neighbor_audit = local_neighbor_audit(codec, tail, val, policy, final_map)
+    neighbor_audit = (local_neighbor_audit(
+        codec, tail, val, policy, final_map) if run_neighbor_audit else
+        {"skipped": True, "locally_optimal": False})
     book_drift = []
     for initial, quantizer in zip(initial_books, codec.pq.quantizers):
         delta = (quantizer.codebooks.detach() - initial).flatten(1).norm(dim=1)
@@ -571,6 +604,10 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
             codeword_temperature if codeword_temperature_end is None
             else codeword_temperature_end),
         "optimizer_mode": optimizer_mode,
+        "logical_batch": batch,
+        "stream_allocations": bool(stream_allocations),
+        "image_microbatch": int(image_microbatch),
+        "neighbor_audit_enabled": bool(run_neighbor_audit),
         "codec_loss_scale": "raw" if optimizer_mode == "orfc_adam"
                             else "initial_distortion",
         "single_continuous_trajectory": True,
@@ -638,7 +675,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
               "policy_loss": float(item[3]), "entropy": float(item[4]),
               "coverage_active": bool(item[5])}
              for item in trace]
-    payload = {"plan": "continuous_joint_v1", "anchor": anchor.name,
+    payload = {"plan": getattr(C, "PLAN", "continuous_joint_v1"),
+               "anchor": anchor.name,
                "rate": anchor.rate,
                "run_id": run_id, "init": metadata, "images": len(train_set),
                "val_images": val.count, "batch": batch, "epochs": float(total / per_epoch),
@@ -702,6 +740,9 @@ def main(argv=None):
     parser.add_argument("--coverage-samples", type=int, default=0)
     parser.add_argument("--coverage-weight", type=float, default=0.0)
     parser.add_argument("--coverage-fraction", type=float, default=1.0)
+    parser.add_argument("--stream-allocations", action="store_true")
+    parser.add_argument("--image-microbatch", type=int, default=0)
+    parser.add_argument("--skip-neighbor-audit", action="store_true")
     parser.add_argument("--images", type=int, default=None, help="probe only")
     args = parser.parse_args(argv)
     result = run(C.ANCHOR_BY_NAME[args.anchor], args.run_id,
@@ -718,7 +759,10 @@ def main(argv=None):
                  num_workers=args.num_workers,
                  coverage_samples=args.coverage_samples,
                  coverage_weight=args.coverage_weight,
-                 coverage_fraction=args.coverage_fraction)
+                 coverage_fraction=args.coverage_fraction,
+                 stream_allocations=args.stream_allocations,
+                 image_microbatch=args.image_microbatch,
+                 run_neighbor_audit=not args.skip_neighbor_audit)
     print(json.dumps({"anchor": result["anchor"], "seconds": result["seconds"],
                       "validation": result["validation"],
                       "policy": result["policy"],

@@ -82,7 +82,8 @@ def build(anchor, device, max_images=None, parameterization="direct", log=print)
     arrays.update({f"codebook_{m}": q.codebooks.detach().cpu().numpy()
                    for m, q in enumerate(codec.pq.quantizers)})
     np.savez(root / "codec_ref.npz", **arrays)
-    meta = {"plan": "v12", "stage": "opq_u0_all_modes_kmeans",
+    meta = {"plan": getattr(C, "PLAN", "v12"),
+            "stage": "opq_u0_all_modes_kmeans",
             "transform_parameterization": parameterization,
             "opq_to_effective_rotation_relative": rotation_conversion_rel,
             "anchor": anchor.name, "rate": anchor.rate,
