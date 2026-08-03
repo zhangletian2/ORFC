@@ -264,6 +264,7 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         coverage_weight=0.0, coverage_fraction=1.0,
         strict_fair_codec=False,
         strict_fair_weighting="equal", fair_weight_floor=1e-4,
+        fair_loss_alpha=None,
         stream_allocations=False, image_microbatch=0,
         run_neighbor_audit=True):
     started = time.time()
@@ -356,10 +357,19 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         float, (coverage_weight, coverage_fraction))
     legacy_coverage = coverage_samples > 0 or coverage_weight > 0
     strict_fair_codec = bool(strict_fair_codec)
+    additive_fair = fair_loss_alpha is not None
+    fair_loss_alpha = (0.0 if fair_loss_alpha is None
+                       else float(fair_loss_alpha))
     if strict_fair_weighting not in ("equal", "policy", "norm_match"):
         raise ValueError("unknown strict-fair weighting")
     if strict_fair_weighting != "equal" and not strict_fair_codec:
         raise ValueError("strict-fair weighting requires strict fairness")
+    if additive_fair and not strict_fair_codec:
+        raise ValueError("additive fair loss requires strict fairness")
+    if additive_fair and strict_fair_weighting != "equal":
+        raise ValueError("additive fair loss requires equal fair weighting")
+    if fair_loss_alpha < 0:
+        raise ValueError("fair loss alpha must be nonnegative")
     if strict_fair_weighting != "equal" and not stream_allocations:
         raise ValueError("controlled strict-fair weighting requires streaming")
     if strict_fair_codec and legacy_coverage:
@@ -490,7 +500,11 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                 fair_weights = (equal_fair_weights
                                 if strict_fair_weighting in ("equal", "norm_match")
                                 else policy_fair_weights)
-                weights = [0.0] * policy_samples + fair_weights.tolist()
+                if additive_fair:
+                    weights = ([1 / policy_samples] * policy_samples
+                               + (fair_loss_alpha * equal_fair_weights).tolist())
+                else:
+                    weights = [0.0] * policy_samples + fair_weights.tolist()
             else:
                 weights = ([((1 - coverage_weight) / policy_samples)
                             if n_coverage else (1 / policy_samples)] * policy_samples)
@@ -532,7 +546,10 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         coverage_distortion = (per_allocation[policy_samples:].mean()
                                if coverage_allocations is not None else
                                policy_distortion)
-        codec_loss = (coverage_distortion if strict_fair_codec else
+        codec_loss = (policy_distortion
+                      + fair_loss_alpha * coverage_distortion
+                      if additive_fair else
+                      coverage_distortion if strict_fair_codec else
                       (1 - coverage_weight) * policy_distortion
                       + coverage_weight * coverage_distortion
                       if coverage_allocations is not None else
@@ -704,6 +721,11 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
             "strict_fair_slate_size": len(bits) if strict_fair_codec else 0,
             "strict_fair_weighting": strict_fair_weighting,
             "fair_weight_floor": float(fair_weight_floor),
+            "fair_loss_alpha": (float(fair_loss_alpha)
+                                if additive_fair else None),
+            "fair_loss_source": ("strict_fair_slate"
+                                 if additive_fair else None),
+            "fair_loss_normalized": False if additive_fair else None,
             "last_gradient_match": last_gradient_match,
             "samples": coverage_samples,
             "weight": coverage_weight,
@@ -782,6 +804,11 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                "coverage_fraction": coverage_fraction,
                "strict_fair_weighting": strict_fair_weighting,
                "fair_weight_floor": float(fair_weight_floor),
+               "fair_loss_alpha": (float(fair_loss_alpha)
+                                   if additive_fair else None),
+               "fair_loss_source": ("strict_fair_slate"
+                                    if additive_fair else None),
+               "fair_loss_normalized": False if additive_fair else None,
                "optimizer_mode": optimizer_mode,
                "book_optimizer": book_optimizer_name,
                "grad_clip": grad_clip,
@@ -839,6 +866,7 @@ def main(argv=None):
                         choices=("equal", "policy", "norm_match"),
                         default="equal")
     parser.add_argument("--fair-weight-floor", type=float, default=1e-4)
+    parser.add_argument("--fair-loss-alpha", type=float, default=None)
     parser.add_argument("--stream-allocations", action="store_true")
     parser.add_argument("--image-microbatch", type=int, default=0)
     parser.add_argument("--skip-neighbor-audit", action="store_true")
@@ -862,6 +890,7 @@ def main(argv=None):
                  strict_fair_codec=args.strict_fair_codec,
                  strict_fair_weighting=args.strict_fair_weighting,
                  fair_weight_floor=args.fair_weight_floor,
+                 fair_loss_alpha=args.fair_loss_alpha,
                  stream_allocations=args.stream_allocations,
                  image_microbatch=args.image_microbatch,
                  run_neighbor_audit=not args.skip_neighbor_audit)
