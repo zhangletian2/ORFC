@@ -108,6 +108,48 @@ def add_coverage(table, allocations):
     table.scatter_add_(1, index, torch.ones_like(index, dtype=table.dtype))
 
 
+def fair_policy_weights(distribution, allocations, floor):
+    """Policy-relative slate weights with an explicit positive lower bound."""
+    count = int(allocations.shape[0])
+    floor = float(floor)
+    if not 0 <= floor < 1 / count:
+        raise ValueError("fair weight floor must lie in [0, 1/slate_size)")
+    logp = distribution.log_prob(allocations, validate=False).detach().double()
+    weights = torch.softmax(logp, dim=0).to(dtype=torch.float32)
+    weights = weights * (1 - count * floor) + floor
+    return weights / weights.sum()
+
+
+def clone_gradient_blocks(codec):
+    blocks = [list(codec.transform.parameters())]
+    blocks += [[quantizer.codebooks] for quantizer in codec.pq.quantizers]
+    return [[None if p.grad is None else p.grad.detach().clone() for p in block]
+            for block in blocks]
+
+
+def restore_norm_matched_gradients(codec, source, target):
+    """Restore source directions with each block norm matched to target."""
+    blocks = [list(codec.transform.parameters())]
+    blocks += [[quantizer.codebooks] for quantizer in codec.pq.quantizers]
+    ratios = []
+    for parameters, source_block, target_block in zip(blocks, source, target):
+        source_norm = torch.sqrt(sum(
+            gradient.square().sum() for gradient in source_block
+            if gradient is not None))
+        target_norm = torch.sqrt(sum(
+            gradient.square().sum() for gradient in target_block
+            if gradient is not None))
+        if not bool(torch.isfinite(source_norm) & torch.isfinite(target_norm)):
+            raise RuntimeError("non-finite strict-fair gradient norm")
+        if float(source_norm) == 0:
+            raise RuntimeError("zero strict-fair gradient cannot be norm matched")
+        ratio = target_norm / source_norm
+        for parameter, gradient in zip(parameters, source_block):
+            parameter.grad = None if gradient is None else gradient * ratio
+        ratios.append(float(ratio))
+    return {"U": ratios[0], "codebooks": ratios[1:]}
+
+
 @torch.no_grad()
 def validate_many(codec, tail, resident, allocations):
     allocations = torch.as_tensor(allocations)
@@ -221,6 +263,7 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         num_workers=C.DATALOADER_WORKERS, coverage_samples=0,
         coverage_weight=0.0, coverage_fraction=1.0,
         strict_fair_codec=False,
+        strict_fair_weighting="equal", fair_weight_floor=1e-4,
         stream_allocations=False, image_microbatch=0,
         run_neighbor_audit=True):
     started = time.time()
@@ -313,6 +356,12 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         float, (coverage_weight, coverage_fraction))
     legacy_coverage = coverage_samples > 0 or coverage_weight > 0
     strict_fair_codec = bool(strict_fair_codec)
+    if strict_fair_weighting not in ("equal", "policy", "norm_match"):
+        raise ValueError("unknown strict-fair weighting")
+    if strict_fair_weighting != "equal" and not strict_fair_codec:
+        raise ValueError("strict-fair weighting requires strict fairness")
+    if strict_fair_weighting != "equal" and not stream_allocations:
+        raise ValueError("controlled strict-fair weighting requires streaming")
     if strict_fair_codec and legacy_coverage:
         raise ValueError("strict fairness replaces weighted coverage")
     coverage_enabled = legacy_coverage or strict_fair_codec
@@ -356,6 +405,7 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         torch.cuda.synchronize(device)
     training_started = time.time()
     last_gradient_norms = {"U": 0.0, "codebooks": 0.0, "policy": 0.0}
+    last_gradient_match = None
 
     for step in range(1, total + 1):
         try:
@@ -433,25 +483,45 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
             count = int(allocations.shape[0])
             n_coverage = count - policy_samples
             if strict_fair_codec:
-                weights = [0.0] * policy_samples + [1 / n_coverage] * n_coverage
+                equal_fair_weights = torch.full(
+                    (n_coverage,), 1 / n_coverage, device=device)
+                policy_fair_weights = fair_policy_weights(
+                    distribution, coverage_allocations, fair_weight_floor)
+                fair_weights = (equal_fair_weights
+                                if strict_fair_weighting in ("equal", "norm_match")
+                                else policy_fair_weights)
+                weights = [0.0] * policy_samples + fair_weights.tolist()
             else:
                 weights = ([((1 - coverage_weight) / policy_samples)
                             if n_coverage else (1 / policy_samples)] * policy_samples)
                 weights += ([coverage_weight / n_coverage] * n_coverage)
-            values = []
             labels = None
-            for allocation, weight in zip(allocations, weights):
-                pieces = []
-                for first in range(0, n, micro):
-                    last = min(first + micro, n)
-                    value, _ = qhard.distortion_sparse(
-                        codec, tail, y[first:last], mu[first:last], std[first:last],
-                        teacher[first:last], allocation,
-                        codeword_temperature=current_codeword_tau)
-                    (float(weight) * value.mean() * ((last - first) / n)).backward()
-                    pieces.append(value.detach())
-                values.append(torch.cat(pieces).mean())
-            per_allocation = torch.stack(values)
+
+            def stream_pass(pass_allocations, pass_weights):
+                values = []
+                for allocation, weight in zip(pass_allocations, pass_weights):
+                    pieces = []
+                    for first in range(0, n, micro):
+                        last = min(first + micro, n)
+                        value, _ = qhard.distortion_sparse(
+                            codec, tail, y[first:last], mu[first:last],
+                            std[first:last], teacher[first:last], allocation,
+                            codeword_temperature=current_codeword_tau)
+                        if float(weight) != 0:
+                            (float(weight) * value.mean()
+                             * ((last - first) / n)).backward()
+                        pieces.append(value.detach())
+                    values.append(torch.cat(pieces).mean())
+                return torch.stack(values)
+
+            per_allocation = stream_pass(allocations, weights)
+            if strict_fair_codec and strict_fair_weighting == "norm_match":
+                equal_gradients = clone_gradient_blocks(codec)
+                codec_optimizer.zero_grad(set_to_none=True)
+                stream_pass(coverage_allocations, policy_fair_weights.tolist())
+                policy_gradients = clone_gradient_blocks(codec)
+                last_gradient_match = restore_norm_matched_gradients(
+                    codec, equal_gradients, policy_gradients)
         else:
             per_image, labels = qhard.distortions(
                 codec, tail, y, mu, std, teacher, allocations,
@@ -632,6 +702,9 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
             "enabled": coverage_enabled,
             "strict_fair": strict_fair_codec,
             "strict_fair_slate_size": len(bits) if strict_fair_codec else 0,
+            "strict_fair_weighting": strict_fair_weighting,
+            "fair_weight_floor": float(fair_weight_floor),
+            "last_gradient_match": last_gradient_match,
             "samples": coverage_samples,
             "weight": coverage_weight,
             "fraction": coverage_fraction,
@@ -707,6 +780,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                "coverage_samples": coverage_samples,
                "coverage_weight": coverage_weight,
                "coverage_fraction": coverage_fraction,
+               "strict_fair_weighting": strict_fair_weighting,
+               "fair_weight_floor": float(fair_weight_floor),
                "optimizer_mode": optimizer_mode,
                "book_optimizer": book_optimizer_name,
                "grad_clip": grad_clip,
@@ -760,6 +835,10 @@ def main(argv=None):
     parser.add_argument("--coverage-weight", type=float, default=0.0)
     parser.add_argument("--coverage-fraction", type=float, default=1.0)
     parser.add_argument("--strict-fair-codec", action="store_true")
+    parser.add_argument("--strict-fair-weighting",
+                        choices=("equal", "policy", "norm_match"),
+                        default="equal")
+    parser.add_argument("--fair-weight-floor", type=float, default=1e-4)
     parser.add_argument("--stream-allocations", action="store_true")
     parser.add_argument("--image-microbatch", type=int, default=0)
     parser.add_argument("--skip-neighbor-audit", action="store_true")
@@ -781,6 +860,8 @@ def main(argv=None):
                  coverage_weight=args.coverage_weight,
                  coverage_fraction=args.coverage_fraction,
                  strict_fair_codec=args.strict_fair_codec,
+                 strict_fair_weighting=args.strict_fair_weighting,
+                 fair_weight_floor=args.fair_weight_floor,
                  stream_allocations=args.stream_allocations,
                  image_microbatch=args.image_microbatch,
                  run_neighbor_audit=not args.skip_neighbor_audit)

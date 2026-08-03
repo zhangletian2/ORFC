@@ -3,6 +3,13 @@
 import torch
 
 from .strict_fair import strict_fair_slate
+from .train import fair_policy_weights
+
+
+class _Distribution:
+    def log_prob(self, allocations, validate=False):
+        del validate
+        return torch.tensor([-4.0, -2.0, 0.0], device=allocations.device)
 
 
 def main():
@@ -14,6 +21,9 @@ def main():
         assert bool(torch.equal(
             torch.sort(slate, dim=0).values,
             torch.arange(3)[:, None].expand_as(slate)))
+        weights = fair_policy_weights(_Distribution(), slate, 1e-4)
+        assert torch.isclose(weights.sum(), torch.tensor(1.0))
+        assert bool((weights >= 1e-4).all())
     print("strict fair slate contracts: PASS")
 
 
