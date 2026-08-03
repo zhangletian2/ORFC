@@ -16,6 +16,7 @@ from opq import batch_normalize_gpu
 from . import config as C
 from . import init as init_mod
 from .allocation_policy import FixedBudgetAllocationPolicy
+from .strict_fair import strict_fair_slate
 from .. import engine, frozen
 from .. import tail as tail_mod
 from . import qhard
@@ -219,6 +220,7 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         codeword_temperature_end=None, optimizer_mode="cayley_sgd",
         num_workers=C.DATALOADER_WORKERS, coverage_samples=0,
         coverage_weight=0.0, coverage_fraction=1.0,
+        strict_fair_codec=False,
         stream_allocations=False, image_microbatch=0,
         run_neighbor_audit=True):
     started = time.time()
@@ -309,10 +311,14 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     coverage_samples = int(coverage_samples)
     coverage_weight, coverage_fraction = map(
         float, (coverage_weight, coverage_fraction))
-    coverage_enabled = coverage_samples > 0 or coverage_weight > 0
+    legacy_coverage = coverage_samples > 0 or coverage_weight > 0
+    strict_fair_codec = bool(strict_fair_codec)
+    if strict_fair_codec and legacy_coverage:
+        raise ValueError("strict fairness replaces weighted coverage")
+    coverage_enabled = legacy_coverage or strict_fair_codec
     if coverage_samples < 0 or not 0 <= coverage_weight <= 1:
         raise ValueError("coverage samples/weight must be nonnegative and weight <= 1")
-    if coverage_enabled and (coverage_samples < 1 or coverage_weight <= 0):
+    if legacy_coverage and (coverage_samples < 1 or coverage_weight <= 0):
         raise ValueError("coverage requires positive samples and weight")
     if coverage_enabled and policy_gradient != "reinforce":
         raise ValueError("exact-budget coverage is separate from DP-ST")
@@ -321,7 +327,9 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         raise ValueError("streaming currently requires REINFORCE + ORFC Adam")
     if not 0 < coverage_fraction <= 1:
         raise ValueError("coverage_fraction must lie in (0, 1]")
-    coverage_until = math.ceil(total * coverage_fraction) if coverage_enabled else 0
+    coverage_until = (total if strict_fair_codec else
+                      math.ceil(total * coverage_fraction)
+                      if coverage_enabled else 0)
     train_iterator = iter(train_loader)
     generator = torch.Generator(device=device).manual_seed(C.POLICY_SEED)
     policy_coverage = torch.zeros(
@@ -368,7 +376,11 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         policy_allocations = distribution.sample(
             policy_samples, generator=generator)
         coverage_allocations = []
-        if step <= coverage_until:
+        if strict_fair_codec:
+            coverage_allocations = strict_fair_slate(
+                C.GROUPS, bits, anchor.rate, device, generator)
+            forced_coverage.add_(1)
+        elif step <= coverage_until:
             for sample_index in range(coverage_samples):
                 target = ((step - 1) * coverage_samples + sample_index)
                 target %= C.GROUPS * len(bits)
@@ -376,8 +388,9 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                 coverage_allocations.append(distribution.sample_conditioned(
                     group, mode, generator=generator))
                 forced_coverage[group, mode] += 1
-        if coverage_allocations:
-            coverage_allocations = torch.cat(coverage_allocations, dim=0)
+        if strict_fair_codec or coverage_allocations:
+            if not strict_fair_codec:
+                coverage_allocations = torch.cat(coverage_allocations, dim=0)
             add_coverage(coverage_exposure, coverage_allocations)
             allocations = torch.cat(
                 (policy_allocations, coverage_allocations), dim=0)
@@ -419,9 +432,12 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
             micro = n if int(image_microbatch) <= 0 else int(image_microbatch)
             count = int(allocations.shape[0])
             n_coverage = count - policy_samples
-            weights = ([((1 - coverage_weight) / policy_samples)
-                        if n_coverage else (1 / policy_samples)] * policy_samples)
-            weights += ([coverage_weight / n_coverage] * n_coverage)
+            if strict_fair_codec:
+                weights = [0.0] * policy_samples + [1 / n_coverage] * n_coverage
+            else:
+                weights = ([((1 - coverage_weight) / policy_samples)
+                            if n_coverage else (1 / policy_samples)] * policy_samples)
+                weights += ([coverage_weight / n_coverage] * n_coverage)
             values = []
             labels = None
             for allocation, weight in zip(allocations, weights):
@@ -446,7 +462,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         coverage_distortion = (per_allocation[policy_samples:].mean()
                                if coverage_allocations is not None else
                                policy_distortion)
-        codec_loss = ((1 - coverage_weight) * policy_distortion
+        codec_loss = (coverage_distortion if strict_fair_codec else
+                      (1 - coverage_weight) * policy_distortion
                       + coverage_weight * coverage_distortion
                       if coverage_allocations is not None else
                       policy_distortion)
@@ -613,6 +630,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         "single_continuous_trajectory": True,
         "exact_budget_coverage": {
             "enabled": coverage_enabled,
+            "strict_fair": strict_fair_codec,
+            "strict_fair_slate_size": len(bits) if strict_fair_codec else 0,
             "samples": coverage_samples,
             "weight": coverage_weight,
             "fraction": coverage_fraction,
@@ -740,6 +759,7 @@ def main(argv=None):
     parser.add_argument("--coverage-samples", type=int, default=0)
     parser.add_argument("--coverage-weight", type=float, default=0.0)
     parser.add_argument("--coverage-fraction", type=float, default=1.0)
+    parser.add_argument("--strict-fair-codec", action="store_true")
     parser.add_argument("--stream-allocations", action="store_true")
     parser.add_argument("--image-microbatch", type=int, default=0)
     parser.add_argument("--skip-neighbor-audit", action="store_true")
@@ -760,6 +780,7 @@ def main(argv=None):
                  coverage_samples=args.coverage_samples,
                  coverage_weight=args.coverage_weight,
                  coverage_fraction=args.coverage_fraction,
+                 strict_fair_codec=args.strict_fair_codec,
                  stream_allocations=args.stream_allocations,
                  image_microbatch=args.image_microbatch,
                  run_neighbor_audit=not args.skip_neighbor_audit)

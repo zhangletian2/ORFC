@@ -81,14 +81,14 @@ def distortions(codec, tail, y, mu, std, teacher, allocations,
 
 
 def distortion_sparse(codec, tail, y, mu, std, teacher, allocation,
-                      codeword_temperature=0.0):
+                      codeword_temperature=0.0, rotation=None):
     """One hard allocation without materialising unused group-mode banks."""
     allocation = torch.as_tensor(
         allocation, dtype=torch.long, device=y.device).reshape(-1)
     pq = codec.pq
     if allocation.numel() != pq.G:
         raise ValueError("allocation must contain one mode per group")
-    rotation = codec.transform.get_rotation()
+    rotation = (codec.transform.get_rotation() if rotation is None else rotation)
     b, tokens, dim = y.shape
     z = y.reshape(b * tokens, dim) @ rotation
     sub = z.reshape(-1, pq.G, pq.d).permute(1, 0, 2)
