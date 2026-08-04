@@ -54,6 +54,8 @@ def make_trainable(codec):
         parameter.requires_grad_(True)
     for quantizer in codec.pq.quantizers:
         quantizer.codebooks.requires_grad_(True)
+        if getattr(quantizer, "use_rate", False):
+            quantizer.log_prior.requires_grad_(True)
 
 
 def build_optimizers(codec, lr_u, lr_theta, book_optimizer="sgd"):
@@ -62,6 +64,8 @@ def build_optimizers(codec, lr_u, lr_theta, book_optimizer="sgd"):
         fixed_point_iterations=C.CAYLEY_FIXED_POINT_ITERATIONS,
         reorthogonalize_every=C.CAYLEY_REORTH_EVERY)
     parameters = [q.codebooks for q in codec.pq.quantizers]
+    parameters += [q.log_prior for q in codec.pq.quantizers
+                   if getattr(q, "use_rate", False)]
     if book_optimizer == "adam":
         books = torch.optim.Adam(parameters, lr=float(lr_theta))
     else:
@@ -166,6 +170,18 @@ def validate(codec, tail, resident, allocation):
     return float(validate_many(codec, tail, resident, allocation)[0])
 
 
+@torch.no_grad()
+def validate_rates(codec, resident, allocations):
+    allocations = torch.as_tensor(allocations, device=resident.device)
+    if allocations.ndim == 1:
+        allocations = allocations[None]
+    chunks = []
+    for first in range(0, resident.count, C.EVAL_IMAGE_BATCH):
+        chunks.append(qhard.rates(
+            codec, resident.y[first:first + C.EVAL_IMAGE_BATCH], allocations))
+    return torch.cat(chunks, dim=1).mean(1).cpu().numpy()
+
+
 def fixed_rate_neighbors(policy, allocation):
     """All adjacent donor/receiver moves that preserve the exact bit budget."""
     base = np.asarray(torch.as_tensor(allocation).cpu(), dtype=np.int64)
@@ -214,16 +230,24 @@ def local_neighbor_audit(codec, tail, resident, policy, allocation):
             "locally_optimal": bool(gain <= tolerance)}
 
 
-def joint_validation(codec, tail, resident, distribution, step, samples):
+def joint_validation(codec, tail, resident, distribution, step, samples,
+                     rate_lambda=0.0):
     allocation = distribution.map_allocation()
     generator = torch.Generator(device=allocation.device).manual_seed(
         C.STAGE1_VAL_SEED + int(step))
     draws = distribution.sample(int(samples), generator=generator)
     values = validate_many(codec, tail, resident,
                            torch.cat((allocation[None], draws), dim=0))
+    rates = validate_rates(
+        codec, resident, torch.cat((allocation[None], draws), dim=0))
+    objectives = rates * resident.tokens + float(rate_lambda) * values
     marginals = distribution.marginals().detach()
     return {"step": int(step), "map_distortion": float(values[0]),
+            "map_rate_bpt": float(rates[0]),
+            "map_objective": float(objectives[0]),
             "sample_mean": float(values[1:].mean()),
+            "sample_rate_bpt_mean": float(rates[1:].mean()),
+            "sample_objective_mean": float(objectives[1:].mean()),
             "sample_min": float(values[1:].min()),
             "sample_max": float(values[1:].max()),
             "map_vs_sample_mean": float(values[0] - values[1:].mean()),
@@ -266,7 +290,7 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         strict_fair_weighting="equal", fair_weight_floor=1e-4,
         fair_loss_alpha=None,
         stream_allocations=False, image_microbatch=0,
-        run_neighbor_audit=True):
+        run_neighbor_audit=True, rate_lambda=0.0):
     started = time.time()
     run_id = C.ensure_run_id(run_id)
     out = C.output_dir(anchor, run_id)
@@ -281,8 +305,17 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         anchor, device, parameterization=parameterization,
         require_full=images is None)
     make_trainable(codec)
+    rate_lambda = float(rate_lambda)
+    if bool(getattr(codec.pq, "use_rate", False)) != (rate_lambda > 0):
+        raise SystemExit("INVALID_EXPERIMENT: codec prior and rate objective disagree")
+    if rate_lambda > 0 and not math.isclose(
+            float(codec.pq.lmbda), rate_lambda, rel_tol=0, abs_tol=1e-12):
+        raise SystemExit("INVALID_EXPERIMENT: codec and objective lambda disagree")
     initial_rotation = codec.transform.get_rotation().detach().clone()
     initial_books = [q.codebooks.detach().clone() for q in codec.pq.quantizers]
+    initial_priors = [q.log_prior.detach().clone()
+                      for q in codec.pq.quantizers
+                      if getattr(q, "use_rate", False)]
     book_optimizer_name = book_optimizer
     bits = actual_mode_bits(codec)
     if bits != tuple(anchor.mode_bits):
@@ -301,6 +334,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
             raise ValueError("orfc_adam requires one shared lr for U and codebooks")
         parameters = list(codec.transform.parameters()) + [
             q.codebooks for q in codec.pq.quantizers]
+        parameters += [q.log_prior for q in codec.pq.quantizers
+                       if getattr(q, "use_rate", False)]
         codec_optimizer = torch.optim.Adam(parameters, lr=float(lr_theta))
         rotation_optimizer = book_optimizer = None
     elif optimizer_mode == "cayley_sgd":
@@ -397,6 +432,7 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     coverage_exposure = torch.zeros_like(policy_coverage)
     gradient_coverage = torch.zeros_like(policy_coverage)
     gradient_coverage_window = torch.zeros_like(policy_coverage)
+    prior_gradient_coverage = torch.zeros_like(policy_coverage)
     budget_violations = torch.zeros((), dtype=torch.long, device=device)
 
     uniform = torch.as_tensor(
@@ -404,18 +440,21 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     initial_parity = qhard.selfcheck(codec, tail, val, uniform)
     initial_distortion = validate(codec, tail, val, uniform)
     initial_entropy = float(policy.build(temperature).entropy().detach())
-    scale = initial_distortion
     initial_orth = frozen.orthogonality_error(codec)
     trace = []
     validation = [joint_validation(
         codec, tail, val, policy.build(temperature), 0,
-        C.STAGE1_VAL_SAMPLES)]
+        C.STAGE1_VAL_SAMPLES, rate_lambda)]
     validation[0]["uniform"] = initial_distortion
+    scale = max(abs(validation[0]["map_objective"]), 1.0)
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
         torch.cuda.synchronize(device)
     training_started = time.time()
-    last_gradient_norms = {"U": 0.0, "codebooks": 0.0, "policy": 0.0}
+    last_gradient_norms = {
+        "U": 0.0, "codebooks": 0.0, "policy": 0.0}
+    if rate_lambda > 0:
+        last_gradient_norms["priors"] = 0.0
     last_gradient_match = None
 
     for step in range(1, total + 1):
@@ -513,54 +552,82 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
             labels = None
 
             def stream_pass(pass_allocations, pass_weights):
-                values = []
+                values, rates, objectives = [], [], []
                 for allocation, weight in zip(pass_allocations, pass_weights):
-                    pieces = []
+                    pieces, rate_pieces = [], []
                     for first in range(0, n, micro):
                         last = min(first + micro, n)
-                        value, _ = qhard.distortion_sparse(
+                        result = qhard.distortion_sparse(
                             codec, tail, y[first:last], mu[first:last],
                             std[first:last], teacher[first:last], allocation,
-                            codeword_temperature=current_codeword_tau)
+                            codeword_temperature=current_codeword_tau,
+                            return_rate=rate_lambda > 0)
+                        value = result[0]
+                        rate = (result[2] if rate_lambda > 0 else
+                                torch.zeros_like(value))
+                        objective = rate * y.shape[1] + rate_lambda * value
+                        if rate_lambda == 0:
+                            objective = value
                         if float(weight) != 0:
-                            (float(weight) * value.mean()
+                            (float(weight) * objective.mean()
                              * ((last - first) / n)).backward()
                         pieces.append(value.detach())
+                        rate_pieces.append(rate.detach())
                     values.append(torch.cat(pieces).mean())
-                return torch.stack(values)
+                    rates.append(torch.cat(rate_pieces).mean())
+                    objectives.append(rates[-1] * y.shape[1]
+                                      + rate_lambda * values[-1]
+                                      if rate_lambda > 0 else values[-1])
+                return map(torch.stack, (values, rates, objectives))
 
-            per_allocation = stream_pass(allocations, weights)
+            per_allocation, per_rate, per_objective = stream_pass(
+                allocations, weights)
             if strict_fair_codec and strict_fair_weighting == "norm_match":
                 equal_gradients = clone_gradient_blocks(codec)
                 codec_optimizer.zero_grad(set_to_none=True)
-                stream_pass(coverage_allocations, policy_fair_weights.tolist())
+                tuple(stream_pass(
+                    coverage_allocations, policy_fair_weights.tolist()))
                 policy_gradients = clone_gradient_blocks(codec)
                 last_gradient_match = restore_norm_matched_gradients(
                     codec, equal_gradients, policy_gradients)
         else:
-            per_image, labels = qhard.distortions(
+            result = qhard.distortions(
                 codec, tail, y, mu, std, teacher, allocations,
                 marginals=marginals,
-                codeword_temperature=current_codeword_tau)
+                codeword_temperature=current_codeword_tau,
+                return_rate=rate_lambda > 0)
+            per_image, labels = result[:2]
             per_allocation = per_image.mean(dim=1)
+            per_rate = (result[2].mean(dim=1) if rate_lambda > 0 else
+                        torch.zeros_like(per_allocation))
+            per_objective = (per_rate * y.shape[1]
+                             + rate_lambda * per_allocation
+                             if rate_lambda > 0 else per_allocation)
         policy_distortion = per_allocation[:policy_samples].mean()
         coverage_distortion = (per_allocation[policy_samples:].mean()
                                if coverage_allocations is not None else
                                policy_distortion)
-        codec_loss = (policy_distortion
-                      + fair_loss_alpha * coverage_distortion
+        policy_rate = per_rate[:policy_samples].mean()
+        coverage_rate = (per_rate[policy_samples:].mean()
+                         if coverage_allocations is not None else policy_rate)
+        policy_objective = per_objective[:policy_samples].mean()
+        coverage_objective = (per_objective[policy_samples:].mean()
+                              if coverage_allocations is not None else
+                              policy_objective)
+        codec_loss = (policy_objective
+                      + fair_loss_alpha * coverage_objective
                       if additive_fair else
-                      coverage_distortion if strict_fair_codec else
-                      (1 - coverage_weight) * policy_distortion
-                      + coverage_weight * coverage_distortion
+                      coverage_objective if strict_fair_codec else
+                      (1 - coverage_weight) * policy_objective
+                      + coverage_weight * coverage_objective
                       if coverage_allocations is not None else
-                      policy_distortion)
+                      policy_objective)
         if optimizer_mode != "orfc_adam":
             codec_loss = codec_loss / scale
         if policy_gradient == "reinforce":
             log_probability = distribution.log_prob(
                 policy_allocations, validate=False)
-            detached = per_allocation[:policy_samples].detach()
+            detached = per_objective[:policy_samples].detach()
             baseline = (detached.sum() - detached) / (len(detached) - 1)
             advantage = (detached - baseline) / scale
             policy_loss = (advantage * log_probability).mean()
@@ -583,6 +650,10 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                     active = gradient.square().sum(dim=(1, 2)).gt(0)
                     gradient_coverage[:, mode].add_(active)
                     gradient_coverage_window[:, mode].add_(active)
+                prior_gradient = getattr(quantizer, "log_prior", None)
+                if prior_gradient is not None and prior_gradient.grad is not None:
+                    prior_gradient_coverage[:, mode].add_(
+                        prior_gradient.grad.square().sum(1).gt(0))
 
         if codec_optimizer is None:
             rotation_optimizer.step()
@@ -598,12 +669,15 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                 qhard.revive_dead_codewords(codec, y, modes, selected)
 
         trace.append((step, policy_distortion.detach(),
-                      coverage_distortion.detach(), policy_loss.detach(),
+                      coverage_distortion.detach(), policy_rate.detach(),
+                      coverage_rate.detach(), policy_objective.detach(),
+                      coverage_objective.detach(), policy_loss.detach(),
                       entropy.detach(), coverage_allocations is not None))
         if step % C.VAL_EVERY == 0 or step == total:
             current = policy.build(temperature)
             record = joint_validation(
-                codec, tail, val, current, step, C.STAGE1_VAL_SAMPLES)
+                codec, tail, val, current, step, C.STAGE1_VAL_SAMPLES,
+                rate_lambda)
             record["codeword_temperature"] = current_codeword_tau
             record["gradient_coverage_window_min"] = int(
                 gradient_coverage_window.min())
@@ -624,6 +698,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
             validation.append(record)
             log(f"[{anchor.name}] validation step={step} "
                 f"MAP={record['map_distortion']:.1f} "
+                f"R={record['map_rate_bpt']:.3f} "
+                f"J={record['map_objective']:.1f} "
                 f"sample_gap={record['map_vs_sample_mean']:.1f} "
                 f"H={record['entropy']:.3f} "
                 f"pmax={record['marginal_max_mean']:.3f} "
@@ -635,15 +711,25 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
             book_gradients = [q.codebooks.grad.norm()
                               for q in codec.pq.quantizers
                               if q.codebooks.grad is not None]
+            prior_gradients = [q.log_prior.grad.norm()
+                               for q in codec.pq.quantizers
+                               if getattr(q, "use_rate", False)
+                               and q.log_prior.grad is not None]
             last_gradient_norms = {
                 "U": transform_grad_norm(codec),
                 "codebooks": float(torch.stack(book_gradients).norm())
                              if book_gradients else 0.0,
                 "policy": float(policy.logits.grad.norm())
                           if policy.logits.grad is not None else 0.0}
+            if rate_lambda > 0:
+                last_gradient_norms["priors"] = (
+                    float(torch.stack(prior_gradients).norm())
+                    if prior_gradients else 0.0)
             log(f"[{anchor.name}] {step}/{total} "
                 f"Dpol={float(policy_distortion):.1f} "
                 f"Dcov={float(coverage_distortion):.1f} "
+                f"Rpol={float(policy_rate):.3f} "
+                f"Jpol={float(policy_objective):.1f} "
                 f"H={float(entropy):.3f} "
                 f"coverage={int(policy_coverage.min())}.."
                 f"{int(policy_coverage.max())}")
@@ -679,7 +765,7 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     final_distribution = policy.build(temperature)
     final_record = joint_validation(
         codec, tail, val, final_distribution, total,
-        C.STAGE1_FINAL_SAMPLES)
+        C.STAGE1_FINAL_SAMPLES, rate_lambda)
     for key in ("map_hamming_from_previous", "map_stable_run",
                 "gradient_coverage_window_min"):
         if key in validation[-1]:
@@ -695,6 +781,11 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
             torch.finfo(initial.dtype).eps)
         book_drift.append(delta / base)
     book_drift = torch.stack(book_drift, dim=1)
+    final_priors = [q.log_prior.detach() for q in codec.pq.quantizers
+                    if getattr(q, "use_rate", False)]
+    prior_drift = ([float((final - initial).norm())
+                    for initial, final in zip(initial_priors, final_priors)]
+                   if initial_priors else [])
     final_rotation = codec.transform.get_rotation().detach()
     rotation_drift = float(
         (final_rotation - initial_rotation).norm()
@@ -727,6 +818,20 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         "neighbor_audit_enabled": bool(run_neighbor_audit),
         "codec_loss_scale": "raw" if optimizer_mode == "orfc_adam"
                             else "initial_distortion",
+        "rate_objective": {
+            "enabled": bool(rate_lambda > 0),
+            "definition": "cross_entropy_bits_per_token*T + lambda*tail_mse",
+            "lambda": float(rate_lambda),
+            "prior_floor": float(getattr(codec.pq, "prior_floor", 0.0)),
+            "policy_advantage_uses_same_objective": True,
+            "initial_map_rate_bpt": validation[0]["map_rate_bpt"],
+            "final_map_rate_bpt": final_record["map_rate_bpt"],
+            "initial_map_objective": validation[0]["map_objective"],
+            "final_map_objective": final_record["map_objective"],
+            "prior_gradient_coverage": prior_gradient_coverage.cpu().tolist(),
+            "prior_gradient_coverage_min": int(prior_gradient_coverage.min())
+                                           if rate_lambda > 0 else None,
+            "prior_drift_norms": prior_drift},
         "single_continuous_trajectory": True,
         "exact_budget_coverage": {
             "enabled": coverage_enabled,
@@ -778,6 +883,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     }
     joint["protocol_valid"] = bool(
         joint["gradient_coverage_min"] > 0
+        and (rate_lambda == 0 or
+             joint["rate_objective"]["prior_gradient_coverage_min"] > 0)
         and joint["codebook_relative_drift_min"] > 0
         and joint["rotation_relative_drift"] > 0
         and joint["all_variables_active_at_end"])
@@ -792,8 +899,12 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
 
     trace = [{"step": item[0], "policy_mean": float(item[1]),
               "coverage_mean": float(item[2]),
-              "policy_loss": float(item[3]), "entropy": float(item[4]),
-              "coverage_active": bool(item[5])}
+              "policy_rate_bpt": float(item[3]),
+              "coverage_rate_bpt": float(item[4]),
+              "policy_objective": float(item[5]),
+              "coverage_objective": float(item[6]),
+              "policy_loss": float(item[7]), "entropy": float(item[8]),
+              "coverage_active": bool(item[9])}
              for item in trace]
     payload = {"plan": getattr(C, "PLAN", "continuous_joint_v1"),
                "anchor": anchor.name,
@@ -819,6 +930,7 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                "book_optimizer": book_optimizer_name,
                "grad_clip": grad_clip,
                "temperature": temperature, "entropy_weight": entropy_weight,
+               "rate_lambda": rate_lambda,
                "policy_gradient": policy_gradient,
                "codeword_temperature": float(codeword_temperature),
                "codeword_temperature_end": float(
@@ -861,6 +973,8 @@ def main(argv=None):
     parser.add_argument("--temperature", type=float, default=C.DEFAULT_TEMPERATURE)
     parser.add_argument("--entropy-weight", type=float,
                         default=C.DEFAULT_ENTROPY_WEIGHT)
+    parser.add_argument("--rate-lambda", type=float, default=0.0,
+                        help="ORFC objective J=R_bits+lambda*D (0 disables priors)")
     parser.add_argument("--policy-gradient", choices=("reinforce", "dp_st"),
                         default="reinforce")
     parser.add_argument("--codeword-temperature", type=float, default=0.0)
@@ -902,7 +1016,8 @@ def main(argv=None):
                  fair_loss_alpha=args.fair_loss_alpha,
                  stream_allocations=args.stream_allocations,
                  image_microbatch=args.image_microbatch,
-                 run_neighbor_audit=not args.skip_neighbor_audit)
+                 run_neighbor_audit=not args.skip_neighbor_audit,
+                 rate_lambda=args.rate_lambda)
     print(json.dumps({"anchor": result["anchor"], "seconds": result["seconds"],
                       "validation": result["validation"],
                       "policy": result["policy"],

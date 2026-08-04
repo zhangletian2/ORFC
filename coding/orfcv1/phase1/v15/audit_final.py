@@ -2,9 +2,11 @@
 
 import argparse
 import json
+import math
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from codec_v1 import load_codec_v1
 from opq import batch_normalize_gpu
@@ -50,7 +52,17 @@ def centroid_usage(codec, feature_path, count, device, norm_mode, image_batch):
         z = y.reshape(-1, y.shape[-1]) @ rotation
         sub = z.reshape(-1, codec.pq.G, codec.pq.d).permute(1, 0, 2)
         for table, quantizer in zip(counts, codec.pq.quantizers):
-            labels = torch.cdist(sub, quantizer.codebooks).argmin(-1)
+            cost = torch.cdist(sub, quantizer.codebooks).square()
+            if getattr(quantizer, "use_rate", False):
+                log_p = F.log_softmax(quantizer.log_prior, dim=-1)
+                if quantizer.prior_floor > 0:
+                    p = ((1 - quantizer.prior_floor) * log_p.exp()
+                         + quantizer.prior_floor / quantizer.K)
+                    rate = -p.clamp_min(1e-30).log() / math.log(2)
+                else:
+                    rate = -log_p / math.log(2)
+                cost = cost + rate.unsqueeze(1) / quantizer.lmbda
+            labels = cost.argmin(-1)
             table.scatter_add_(
                 1, labels, torch.ones_like(labels, dtype=table.dtype))
     result = []

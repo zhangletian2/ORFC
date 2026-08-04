@@ -21,8 +21,10 @@ is then no way for a soft number to reach a result by accident (plan v9
 section 3.4).
 """
 
+import math
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from opq import batch_inv_normalize_gpu, batch_normalize_gpu
 
@@ -72,7 +74,17 @@ def build_bank(codec, y):
     banks = []
     for quantizer in pq.quantizers:
         book = quantizer.codebooks                            # [G, K, d]
-        labels = torch.cdist(sub, book).square().argmin(dim=-1)
+        cost = torch.cdist(sub, book).square()
+        if getattr(quantizer, "use_rate", False):
+            log_p = F.log_softmax(quantizer.log_prior, dim=-1)
+            if quantizer.prior_floor > 0:
+                p = ((1 - quantizer.prior_floor) * log_p.exp()
+                     + quantizer.prior_floor / quantizer.K)
+                rate = -p.clamp_min(1e-30).log() / math.log(2)
+            else:
+                rate = -log_p / math.log(2)
+            cost = cost + rate.unsqueeze(1) / quantizer.lmbda
+        labels = cost.argmin(dim=-1)
         banks.append(torch.gather(
             book, 1, labels.unsqueeze(-1).expand(-1, -1, pq.d)))
     return torch.stack(banks), rotation

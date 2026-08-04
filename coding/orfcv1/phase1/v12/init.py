@@ -106,6 +106,9 @@ def load_checked(anchor, device, parameterization="direct", require_full=True):
     tensors = {"U0": codec.transform.get_rotation().detach().cpu().numpy()}
     tensors.update({f"codebook_{m}": q.codebooks.detach().cpu().numpy()
                     for m, q in enumerate(codec.pq.quantizers)})
+    tensors.update({f"log_prior_{m}": q.log_prior.detach().cpu().numpy()
+                    for m, q in enumerate(codec.pq.quantizers)
+                    if getattr(q, "use_rate", False)})
     for name, value in tensors.items():
         if not np.array_equal(value, reference[name]):
             raise SystemExit(f"INVALID_EXPERIMENT: v12 init tensor {name} changed")
