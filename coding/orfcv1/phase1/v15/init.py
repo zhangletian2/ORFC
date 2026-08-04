@@ -68,8 +68,9 @@ def _opq(y, groups, dim, k, outer, inner, seed, device, log):
     return best_rotation, history
 
 
-def build(anchor, device, max_images=None, parameterization="orfc_cayley", log=print):
-    C = activate("blk20")
+def build(anchor, device, max_images=None, parameterization="orfc_cayley", log=print,
+          config=None):
+    C = config if config is not None else activate("blk20")
     from ..v12 import init as old
     started = time.time()
     y, images = old._vectors(device, max_images=max_images)
