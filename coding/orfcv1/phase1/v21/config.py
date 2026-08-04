@@ -1,4 +1,4 @@
-"""V21 contracts: ORFC-rate objective at blk05/blk20, R64/R96."""
+"""V21 contracts: ORFC-rate objective across ViT split depths, R64/R96."""
 
 from ..config import Anchor
 from ..v12 import config as C
@@ -6,6 +6,12 @@ from ..v12 import config as C
 
 SPECS = {
     "blk05": (5, (
+        Anchor("R64", 64, 2, (1, 2, 3)),
+        Anchor("R96", 96, 3, (2, 3, 4)))),
+    "blk10": (10, (
+        Anchor("R64", 64, 2, (1, 2, 3)),
+        Anchor("R96", 96, 3, (2, 3, 4)))),
+    "blk15": (15, (
         Anchor("R64", 64, 2, (1, 2, 3)),
         Anchor("R96", 96, 3, (2, 3, 4)))),
     "blk20": (20, (
