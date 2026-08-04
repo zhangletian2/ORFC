@@ -18,8 +18,13 @@ from .config import FAIR_LOSS_ALPHA, PRIOR_FLOOR, RATE_LAMBDA, SPECS, activate
 def build(block, anchor, device, batch=16):
     started = time.time()
     C = activate(block)
-    source_plan = C.PHASE1 / ("v15/blk05" if block == "blk05" else "v12")
-    source = source_plan / "init_orfc_adam" / anchor.name / "codec.pt"
+    if block in ("blk10", "blk15"):
+        from ..v15.init import build as build_opq
+        build_opq(anchor, device, parameterization="orfc_cayley", config=C)
+        source = C.init_dir(anchor, "orfc_cayley") / "codec.pt"
+    else:
+        source_plan = C.PHASE1 / ("v15/blk05" if block == "blk05" else "v12")
+        source = source_plan / "init_orfc_adam" / anchor.name / "codec.pt"
     old = load_codec_v1(source, device=device)
     pq = MultiModeSoftPQ(C.GROUPS, anchor.mode_sizes, C.DIM,
                          lmbda=RATE_LAMBDA, prior_floor=PRIOR_FLOOR).to(device)
