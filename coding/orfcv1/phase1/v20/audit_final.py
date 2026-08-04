@@ -17,13 +17,20 @@ def main(argv=None):
     parser.add_argument("--profile", required=True, choices=tuple(SPECS))
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--images", type=int, default=None)
+    parser.add_argument("--max-neighbors", type=int, default=None)
+    parser.add_argument("--skip-centroid", action="store_true")
+    parser.add_argument("--out", default="final_audit.json")
     args = parser.parse_args(argv)
     C, anchor = activate(args.profile)
     root, device = C.output_dir(anchor, args.run_id), torch.device(args.device)
     codec = load_codec_v1(root / "codec.pt", device=device)
     allocation = np.load(root / "allocation.npy")
     candidates, moves = full_neighbors(allocation, anchor.mode_bits)
-    resident = engine.ResidentSet(*C.load_split("train_val")[:3], device)
+    if args.max_neighbors is not None:
+        candidates, moves = candidates[:args.max_neighbors], moves[:args.max_neighbors]
+    resident = engine.ResidentSet(
+        *C.load_split("train_val")[:3], device, max_images=args.images)
     tail = tail_mod.build_tail(C.LAYER, device)
     values = engine.evaluate_allocations(
         codec, tail, resident, np.concatenate((allocation[None], candidates)),
@@ -37,13 +44,14 @@ def main(argv=None):
         "locally_optimal": bool(values[winner + 1] >= values[0])}
     del tail, resident, values
     torch.cuda.empty_cache()
-    usage = centroid_usage(codec, C.TRAIN_FEATURES, C.N_TRAIN, device,
-                           C.NORM_MODE, 4 if max(anchor.mode_sizes) >= 1024 else 16)
+    usage = ([] if args.skip_centroid else centroid_usage(
+        codec, C.TRAIN_FEATURES, C.N_TRAIN, device, C.NORM_MODE,
+        4 if max(anchor.mode_sizes) >= 1024 else 16))
     result = {"profile": args.profile, "rate": anchor.rate,
               "allocation": allocation.tolist(),
               "full_two_group_neighborhood": neighborhood,
               "centroid_usage_train5k": usage}
-    (root / "final_audit.json").write_text(json.dumps(result, indent=2))
+    (root / args.out).write_text(json.dumps(result, indent=2))
     print(json.dumps(result, indent=2))
 
 
