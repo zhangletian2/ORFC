@@ -149,17 +149,19 @@ def evaluate_allocations(codec, tail, resident, allocations,
 
 
 # ------------------------------------------------------- allocation algebra ---
-def uniform_allocation(anchor, groups=C.GROUPS):
+def uniform_allocation(anchor, groups=None):
+    groups = C.GROUPS if groups is None else int(groups)
     return np.full(groups, anchor.uniform_mode, dtype=np.int64)
 
 
-def swap_candidates(anchor, groups=C.GROUPS):
+def swap_candidates(anchor, groups=None):
     """All 32x31 ordered one-bit transfers around the uniform point.
 
     Returns ``(allocations [992, G], pairs [992, 2])`` where ``pairs[k]`` is
     ``(down_group, up_group)``, enumerated in lexicographic order -- which is
     also the frozen tie-break order (``config.TIE_BREAK``).
     """
+    groups = C.GROUPS if groups is None else int(groups)
     base = uniform_allocation(anchor, groups)
     allocations, pairs = [], []
     for down in range(groups):
