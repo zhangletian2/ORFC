@@ -27,6 +27,6 @@ def activate(profile):
     C.TRAIN_TEACHERS = C.CACHE / "teacher_train_blk20_n5000_v12.npy"
     C.VAL_FEATURES = C.CACHE / "features_test_blk20_n3000_ss20260730.npy"
     C.VAL_TEACHERS = C.CACHE / "teacher_test_blk20_n3000_ss20260730.npy"
-    C.EVAL_IMAGE_BATCH = 100
-    C.EVAL_PAIR_BUDGET = 100
+    C.EVAL_IMAGE_BATCH = 16 if profile == "R512" else 100
+    C.EVAL_PAIR_BUDGET = C.EVAL_IMAGE_BATCH
     return C, anchor

@@ -659,6 +659,18 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     final_map = torch.tensor(summary["map_allocation"], device=device)
     if summary["map_rate"] != anchor.rate:
         raise SystemExit("INVALID_EXPERIMENT: final rate failed")
+    # Persist the completed optimisation trajectory before any diagnostic.
+    # Parity and neighbourhood audits may require substantially more memory
+    # than one training step, especially for large multi-mode codebooks.
+    save_codec_v1(codec, out / "codec.pt")
+    torch.save({"policy_state": policy.state_dict(), "groups": policy.groups,
+                "bit_costs": bits, "total_bits": anchor.rate,
+                "temperature": temperature}, out / "policy.pt")
+    np.save(out / "allocation.npy", final_map.cpu().numpy())
+    (out / "policy_summary.json").write_text(json.dumps(summary, indent=2))
+    (out / "training_complete.json").write_text(json.dumps({
+        "steps": total, "rate": summary["map_rate"],
+        "post_training_audit_complete": False}, indent=2))
     final_parity = qhard.selfcheck(codec, tail, val, final_map)
     final_orth = frozen.orthogonality_error(codec)
     if final_orth - initial_orth > C.ORTH_TOL:
@@ -778,13 +790,6 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
         and joint["map_better_than_sample_mean"]
         and neighbor_audit["locally_optimal"])
 
-    save_codec_v1(codec, out / "codec.pt")
-    torch.save({"policy_state": policy.state_dict(), "groups": policy.groups,
-                "bit_costs": bits, "total_bits": anchor.rate,
-                "temperature": temperature},
-               out / "policy.pt")
-    np.save(out / "allocation.npy", final_map.cpu().numpy())
-    (out / "policy_summary.json").write_text(json.dumps(summary, indent=2))
     trace = [{"step": item[0], "policy_mean": float(item[1]),
               "coverage_mean": float(item[2]),
               "policy_loss": float(item[3]), "entropy": float(item[4]),
@@ -830,6 +835,9 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
                "peak_memory_gb": peak_memory_gb,
                "seconds": time.time() - started}
     (out / "train.json").write_text(json.dumps(payload, indent=2))
+    (out / "training_complete.json").write_text(json.dumps({
+        "steps": total, "rate": summary["map_rate"],
+        "post_training_audit_complete": True}, indent=2))
     log(f"[{anchor.name}] complete in {payload['seconds']:.1f}s")
     return payload
 

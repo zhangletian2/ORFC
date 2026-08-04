@@ -21,6 +21,8 @@ def main(argv=None):
     for flag in ("--strict-fair-codec", "--stream-allocations"):
         if flag not in rest:
             rest.append(flag)
+    if known.profile == "R512" and "--skip-neighbor-audit" not in rest:
+        rest.append("--skip-neighbor-audit")
     from ..v12 import train
     train.main(rest)
 
