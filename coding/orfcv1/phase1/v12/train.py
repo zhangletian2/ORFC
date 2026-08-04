@@ -399,7 +399,8 @@ def run(anchor, run_id, device, epochs=C.DEFAULT_EPOCHS, steps=None,
     gradient_coverage_window = torch.zeros_like(policy_coverage)
     budget_violations = torch.zeros((), dtype=torch.long, device=device)
 
-    uniform = torch.as_tensor(engine.uniform_allocation(anchor), device=device)
+    uniform = torch.as_tensor(
+        engine.uniform_allocation(anchor, C.GROUPS), device=device)
     initial_parity = qhard.selfcheck(codec, tail, val, uniform)
     initial_distortion = validate(codec, tail, val, uniform)
     initial_entropy = float(policy.build(temperature).entropy().detach())
