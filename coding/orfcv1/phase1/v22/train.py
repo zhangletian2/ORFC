@@ -71,6 +71,22 @@ def validate(codec, tail, resident, allocation, image_batch, rate_lambda):
             "objective": float(objective.mean())}
 
 
+@torch.no_grad()
+def audit_event(codec, tail, resident, event, image_batch, rate_lambda):
+    modes = np.asarray([event["base"], event["proposed"]], dtype=np.int64)
+    distortion, rates, objective = evaluate(
+        codec, tail, resident, modes, image_batch, rate_lambda)
+    event.update(
+        report_base_distortion=float(distortion[0].mean()),
+        report_proposed_distortion=float(distortion[1].mean()),
+        report_base_rate_bpt=float(rates[0].mean()),
+        report_proposed_rate_bpt=float(rates[1].mean()),
+        report_base_objective=float(objective[0].mean()),
+        report_proposed_objective=float(objective[1].mean()),
+        report_objective_gain=float(
+            objective[0].mean() - objective[1].mean()))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--block", default="blk20", choices=tuple(SPECS))
@@ -169,6 +185,7 @@ def main(argv=None):
         codec, tail, cal, select, allocation, bits, anchor.rate,
         args.image_batch, args.topk, args.rate_lambda)
     event["step"] = 0
+    audit_event(codec, tail, report, event, args.image_batch, args.rate_lambda)
     outer.append(event)
     validation.append({"step": 0, **validate(
         codec, tail, report, allocation, args.image_batch, args.rate_lambda),
@@ -214,6 +231,9 @@ def main(argv=None):
                 codec, tail, cal, select, allocation, bits, anchor.rate,
                 args.image_batch, args.topk, args.rate_lambda)
             event["step"] = step
+            audit_event(
+                codec, tail, report, event,
+                args.image_batch, args.rate_lambda)
             outer.append(event)
         if step % args.val_every == 0 or step == total:
             record = validate(
