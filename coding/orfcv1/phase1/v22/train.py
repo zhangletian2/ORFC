@@ -36,6 +36,7 @@ def propose(codec, tail, cal, select, base, bits, rate, image_batch,
     winners = topk_allocations(costs, bits, rate, topk)
     rows, seen = [base.copy()], {tuple(base.tolist())}
     for _, row in winners:
+        row = np.asarray(row, dtype=np.int64)
         key = tuple(row.tolist())
         if key not in seen:
             rows.append(row.copy())
