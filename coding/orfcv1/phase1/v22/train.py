@@ -34,8 +34,13 @@ def propose(codec, tail, cal, select, base, bits, rate, image_batch,
     for index, (group, mode) in enumerate(keys[1:], start=1):
         costs[group, mode] = float(cal_objective[index].mean() - base_cal)
     winners = topk_allocations(costs, bits, rate, topk)
-    dp_rows = np.asarray([item[1] for item in winners], dtype=np.int64)
-    candidates = np.concatenate((base[None], dp_rows), axis=0)
+    rows, seen = [base.copy()], {tuple(base.tolist())}
+    for _, row in winners:
+        key = tuple(row.tolist())
+        if key not in seen:
+            rows.append(row.copy())
+            seen.add(key)
+    candidates = np.asarray(rows, dtype=np.int64)
     distortion, rates, objective = evaluate(
         codec, tail, select, candidates, image_batch, rate_lambda)
     values = objective.mean(1)
@@ -45,6 +50,7 @@ def propose(codec, tail, cal, select, base, bits, rate, image_batch,
     return chosen, {
         "base": base.tolist(), "proposed": candidates[winner].tolist(),
         "accepted": accepted, "topk": int(topk),
+        "candidate_count": int(len(candidates)),
         "predicted": [float(base_cal + item[0]) for item in winners],
         "select_base_distortion": float(distortion[0].mean()),
         "select_winner_distortion": float(distortion[winner].mean()),
@@ -94,6 +100,10 @@ def main(argv=None):
 
     started = time.time()
     config = activate(args.block)
+    np.random.seed(config.TRAIN_SEED)
+    torch.manual_seed(config.TRAIN_SEED)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(config.TRAIN_SEED)
     anchor = config.ANCHOR_BY_NAME[args.anchor]
     device = torch.device(args.device)
     out = Path(args.out)
