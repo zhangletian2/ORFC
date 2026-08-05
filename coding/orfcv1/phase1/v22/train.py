@@ -25,7 +25,7 @@ from .probe import evaluate, local_table, split_resident
 
 @torch.no_grad()
 def propose(codec, tail, cal, select, base, bits, rate, image_batch,
-            topk, rate_lambda):
+            topk, rate_lambda, active_slate_size=0):
     probes, keys = local_table(base, len(bits))
     _, _, cal_objective = evaluate(
         codec, tail, cal, probes, image_batch, rate_lambda)
@@ -48,6 +48,9 @@ def propose(codec, tail, cal, select, base, bits, rate, image_batch,
     winner = int(np.argmin(values))
     accepted = bool(winner != 0 and values[winner] < values[0])
     chosen = candidates[winner].copy() if accepted else base.copy()
+    count = min(max(1, int(active_slate_size)), len(candidates))
+    order = np.argsort(values, kind="stable")[:count]
+    slate = candidates[order].copy() if active_slate_size else chosen[None]
     return chosen, {
         "base": base.tolist(), "proposed": candidates[winner].tolist(),
         "accepted": accepted, "topk": int(topk),
@@ -59,7 +62,9 @@ def propose(codec, tail, cal, select, base, bits, rate, image_batch,
         "select_winner_rate_bpt": float(rates[winner].mean()),
         "select_base_objective": float(values[0]),
         "select_winner_objective": float(values[winner]),
-        "select_objective_gain": float(values[0] - values[winner])}
+        "select_objective_gain": float(values[0] - values[winner]),
+        "active_slate": slate.tolist(),
+        "active_slate_objectives": [float(values[index]) for index in order]}, slate
 
 
 @torch.no_grad()
@@ -111,10 +116,13 @@ def main(argv=None):
     parser.add_argument("--image-batch", type=int, default=16)
     parser.add_argument("--val-every", type=int, default=100)
     parser.add_argument("--candidate-adapt", action="store_true")
+    parser.add_argument("--active-slate-size", type=int, default=0)
     parser.add_argument("--skip-centroid", action="store_true")
     args = parser.parse_args(argv)
     if args.rate_lambda <= 0:
         raise SystemExit("V22 currently requires the V21 ECVQ objective")
+    if args.candidate_adapt and args.active_slate_size:
+        raise SystemExit("candidate adaptation and active slate are exclusive")
 
     started = time.time()
     config = activate(args.block)
@@ -183,10 +191,13 @@ def main(argv=None):
         config.GROUPS, len(bits), dtype=torch.long, device=device)
     candidate_coverage = torch.zeros_like(gradient_coverage)
     candidate_trace, candidate_u_grad_delta = [], 0.0
+    slate_exposure = torch.zeros_like(gradient_coverage)
+    slate_trace = []
 
-    allocation, event = propose(
+    allocation, event, active_slate = propose(
         codec, tail, cal, select, allocation, bits, anchor.rate,
-        args.image_batch, args.topk, args.rate_lambda)
+        args.image_batch, args.topk, args.rate_lambda,
+        args.active_slate_size)
     event["step"] = 0
     audit_event(codec, tail, report, event, args.image_batch, args.rate_lambda)
     outer.append(event)
@@ -212,12 +223,38 @@ def main(argv=None):
         tau = joint.codeword_tau(
             epoch, schedule_epochs, args.tau_start, args.tau_end)
         optimizer.zero_grad(set_to_none=True)
-        distortion, _, rate = qhard.distortion_sparse(
-            codec, tail, y, mu, std, teacher, allocation,
-            codeword_temperature=tau, return_rate=args.rate_lambda > 0)
-        objective = (rate * y.shape[1] + args.rate_lambda * distortion
-                     if args.rate_lambda > 0 else distortion)
-        loss = objective.mean()
+        if args.active_slate_size:
+            distortions, _, rates = qhard.distortions(
+                codec, tail, y, mu, std, teacher, active_slate,
+                codeword_temperature=tau, return_rate=True)
+            objectives = rates * y.shape[1] + args.rate_lambda * distortions
+            means = objectives.mean(1)
+            best = int(means.detach().argmin())
+            differences = objectives - objectives[best:best + 1]
+            sem = differences.std(1) / math.sqrt(y.shape[0])
+            mask = torch.arange(len(means), device=device) != best
+            softmin_tau = (sem[mask].median().detach().clamp_min(1.0)
+                           if mask.any() else means.new_tensor(1.0))
+            loss = -softmin_tau * torch.logsumexp(
+                -means / softmin_tau, dim=0)
+            weights = torch.softmax(-means.detach() / softmin_tau, dim=0)
+            distortion = (weights[:, None] * distortions).sum(0)
+            rate = (weights[:, None] * rates).sum(0)
+            objective = (weights[:, None] * objectives).sum(0)
+            with torch.no_grad():
+                for row in active_slate:
+                    groups = torch.arange(config.GROUPS, device=device)
+                    modes = torch.as_tensor(row, device=device)
+                    slate_exposure.index_put_(
+                        (groups, modes), torch.ones_like(groups), accumulate=True)
+            slate_trace.append([step, softmin_tau.item(), best,
+                                weights.cpu().tolist(), means.detach().cpu().tolist()])
+        else:
+            distortion, _, rate = qhard.distortion_sparse(
+                codec, tail, y, mu, std, teacher, allocation,
+                codeword_temperature=tau, return_rate=True)
+            objective = rate * y.shape[1] + args.rate_lambda * distortion
+            loss = objective.mean()
         loss.backward()
         if args.candidate_adapt:
             pairs = [(group, mode) for group in range(config.GROUPS)
@@ -273,9 +310,10 @@ def main(argv=None):
                       float(rate.mean().detach()), float(loss.detach()), tau])
 
         if args.outer_every > 0 and step < total and step % args.outer_every == 0:
-            allocation, event = propose(
+            allocation, event, active_slate = propose(
                 codec, tail, cal, select, allocation, bits, anchor.rate,
-                args.image_batch, args.topk, args.rate_lambda)
+                args.image_batch, args.topk, args.rate_lambda,
+                args.active_slate_size)
             event["step"] = step
             audit_event(
                 codec, tail, report, event,
@@ -314,7 +352,8 @@ def main(argv=None):
         codec, config.TRAIN_FEATURES, config.N_TRAIN, device,
         config.NORM_MODE, 16))
     payload = {
-        "plan": ("v23_candidate_adapted_dp" if args.candidate_adapt else
+        "plan": ("v24_full_information_active_slate" if args.active_slate_size
+                 else "v23_candidate_adapted_dp" if args.candidate_adapt else
                  "v22_deterministic_dp_block_coordinate"),
         "block": args.block, "anchor": anchor.name, "rate": anchor.rate,
         "source_codec": args.source_codec,
@@ -343,6 +382,15 @@ def main(argv=None):
             if args.candidate_adapt else 0),
         "candidate_u_grad_delta": candidate_u_grad_delta,
         "candidate_trace": candidate_trace,
+        "active_slate_size": int(args.active_slate_size),
+        "active_slate_final": active_slate.tolist(),
+        "active_slate_trace": slate_trace,
+        "active_slate_exposure_min": int(
+            slate_exposure[slate_exposure > 0].min()
+            if args.active_slate_size else 0),
+        "active_slate_gradient_min": int(
+            gradient_coverage[slate_exposure > 0].min()
+            if args.active_slate_size else 0),
         "active_codebook_drift_min": float(drift[selected].min()),
         "inactive_codebook_drift_min": float(drift[~selected].min()),
         "centroid_usage_train5k": usage,
