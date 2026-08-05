@@ -117,6 +117,8 @@ def main(argv=None):
     parser.add_argument("--val-every", type=int, default=100)
     parser.add_argument("--candidate-adapt", action="store_true")
     parser.add_argument("--active-slate-size", type=int, default=0)
+    parser.add_argument("--active-slate-temperature", choices=("sem", "range"),
+                        default="sem")
     parser.add_argument("--skip-centroid", action="store_true")
     args = parser.parse_args(argv)
     if args.rate_lambda <= 0:
@@ -233,8 +235,12 @@ def main(argv=None):
             differences = objectives - objectives[best:best + 1]
             sem = differences.std(1) / math.sqrt(y.shape[0])
             mask = torch.arange(len(means), device=device) != best
-            softmin_tau = (sem[mask].median().detach().clamp_min(1.0)
-                           if mask.any() else means.new_tensor(1.0))
+            if args.active_slate_temperature == "range" and len(means) > 1:
+                softmin_tau = ((means.max() - means.min()).detach()
+                               / math.log(len(means))).clamp_min(1.0)
+            else:
+                softmin_tau = (sem[mask].median().detach().clamp_min(1.0)
+                               if mask.any() else means.new_tensor(1.0))
             loss = -softmin_tau * torch.logsumexp(
                 -means / softmin_tau, dim=0)
             weights = torch.softmax(-means.detach() / softmin_tau, dim=0)
@@ -383,6 +389,7 @@ def main(argv=None):
         "candidate_u_grad_delta": candidate_u_grad_delta,
         "candidate_trace": candidate_trace,
         "active_slate_size": int(args.active_slate_size),
+        "active_slate_temperature": args.active_slate_temperature,
         "active_slate_final": active_slate.tolist(),
         "active_slate_trace": slate_trace,
         "active_slate_exposure_min": int(
