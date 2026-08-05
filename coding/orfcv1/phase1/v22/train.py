@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import math
 import time
@@ -92,6 +93,71 @@ def audit_event(codec, tail, resident, event, image_batch, rate_lambda):
             objective[0].mean() - objective[1].mean()))
 
 
+def lookahead(codec, tail, cal, select, report, base, bits, rate, image_batch,
+              topk, size, steps, inner_batch, lr, tau, rate_lambda):
+    """Compare equally adapted exact-budget branches and keep the winner."""
+    _, proposal, slate = propose(
+        codec, tail, cal, select, base, bits, rate, image_batch, topk,
+        rate_lambda, size)
+    rows = [base.copy()]
+    rows.extend(row.copy() for row in slate
+                if not np.array_equal(row, base))
+    rows = np.asarray(rows[:size], dtype=np.int64)
+    records, winner, winner_codec = [], None, None
+    for index, row in enumerate(rows):
+        branch = copy.deepcopy(codec)
+        optimizer = torch.optim.Adam(branch.parameters(), lr=float(lr))
+        for inner in range(steps):
+            first = (inner * inner_batch) % max(1, cal.count - inner_batch + 1)
+            batch = cal.slice(first, min(first + inner_batch, cal.count))
+            distortion, _, rates = qhard.distortion_sparse(
+                branch, tail, *batch, row, codeword_temperature=tau,
+                return_rate=True)
+            objective = rates * cal.tokens + rate_lambda * distortion
+            optimizer.zero_grad(set_to_none=True)
+            objective.mean().backward()
+            torch.nn.utils.clip_grad_norm_(branch.parameters(), 1.0)
+            optimizer.step()
+        selected = validate(
+            branch, tail, select, row, image_batch, rate_lambda)
+        reported = validate(
+            branch, tail, report, row, image_batch, rate_lambda)
+        records.append({"allocation": row.tolist(), "select": selected,
+                        "report": reported})
+        if winner is None or selected["objective"] < records[winner]["select"]["objective"]:
+            del winner_codec
+            winner, winner_codec = index, branch
+        else:
+            del branch
+    del optimizer
+    codec.load_state_dict(winner_codec.state_dict())
+    del winner_codec
+    chosen = rows[winner].copy()
+    base_select, chosen_select = records[0]["select"], records[winner]["select"]
+    base_report, chosen_report = records[0]["report"], records[winner]["report"]
+    return chosen, {
+        "base": base.tolist(), "proposed": chosen.tolist(),
+        "accepted": bool(winner != 0), "topk": int(topk),
+        "candidate_count": int(len(rows)), "lookahead_steps": int(steps),
+        "branches": records,
+        "select_base_distortion": base_select["distortion"],
+        "select_winner_distortion": chosen_select["distortion"],
+        "select_base_rate_bpt": base_select["rate_bpt"],
+        "select_winner_rate_bpt": chosen_select["rate_bpt"],
+        "select_base_objective": base_select["objective"],
+        "select_winner_objective": chosen_select["objective"],
+        "select_objective_gain": (base_select["objective"]
+                                  - chosen_select["objective"]),
+        "report_base_distortion": base_report["distortion"],
+        "report_proposed_distortion": chosen_report["distortion"],
+        "report_base_rate_bpt": base_report["rate_bpt"],
+        "report_proposed_rate_bpt": chosen_report["rate_bpt"],
+        "report_base_objective": base_report["objective"],
+        "report_proposed_objective": chosen_report["objective"],
+        "report_objective_gain": (base_report["objective"]
+                                  - chosen_report["objective"])}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--block", default="blk20", choices=tuple(SPECS))
@@ -119,12 +185,17 @@ def main(argv=None):
     parser.add_argument("--active-slate-size", type=int, default=0)
     parser.add_argument("--active-slate-temperature", choices=("sem", "range"),
                         default="sem")
+    parser.add_argument("--lookahead-steps", type=int, default=0)
+    parser.add_argument("--lookahead-size", type=int, default=3)
+    parser.add_argument("--lookahead-batch", type=int, default=16)
     parser.add_argument("--skip-centroid", action="store_true")
     args = parser.parse_args(argv)
     if args.rate_lambda <= 0:
         raise SystemExit("V22 currently requires the V21 ECVQ objective")
-    if args.candidate_adapt and args.active_slate_size:
-        raise SystemExit("candidate adaptation and active slate are exclusive")
+    if sum(bool(value) for value in (
+            args.candidate_adapt, args.active_slate_size,
+            args.lookahead_steps)) > 1:
+        raise SystemExit("candidate adaptation, active slate, and lookahead are exclusive")
 
     started = time.time()
     config = activate(args.block)
@@ -196,12 +267,22 @@ def main(argv=None):
     slate_exposure = torch.zeros_like(gradient_coverage)
     slate_trace = []
 
-    allocation, event, active_slate = propose(
-        codec, tail, cal, select, allocation, bits, anchor.rate,
-        args.image_batch, args.topk, args.rate_lambda,
-        args.active_slate_size)
+    if args.lookahead_steps:
+        allocation, event = lookahead(
+            codec, tail, cal, select, report, allocation, bits, anchor.rate,
+            args.image_batch, args.topk, args.lookahead_size,
+            args.lookahead_steps, args.lookahead_batch, args.lr,
+            args.tau_start, args.rate_lambda)
+        active_slate = allocation[None]
+        optimizer = torch.optim.Adam(codec.parameters(), lr=float(args.lr))
+    else:
+        allocation, event, active_slate = propose(
+            codec, tail, cal, select, allocation, bits, anchor.rate,
+            args.image_batch, args.topk, args.rate_lambda,
+            args.active_slate_size)
     event["step"] = 0
-    audit_event(codec, tail, report, event, args.image_batch, args.rate_lambda)
+    if not args.lookahead_steps:
+        audit_event(codec, tail, report, event, args.image_batch, args.rate_lambda)
     outer.append(event)
     validation.append({"step": 0, **validate(
         codec, tail, report, allocation, args.image_batch, args.rate_lambda),
@@ -316,14 +397,25 @@ def main(argv=None):
                       float(rate.mean().detach()), float(loss.detach()), tau])
 
         if args.outer_every > 0 and step < total and step % args.outer_every == 0:
-            allocation, event, active_slate = propose(
-                codec, tail, cal, select, allocation, bits, anchor.rate,
-                args.image_batch, args.topk, args.rate_lambda,
-                args.active_slate_size)
+            if args.lookahead_steps:
+                allocation, event = lookahead(
+                    codec, tail, cal, select, report, allocation, bits,
+                    anchor.rate, args.image_batch, args.topk,
+                    args.lookahead_size, args.lookahead_steps,
+                    args.lookahead_batch, args.lr, tau, args.rate_lambda)
+                active_slate = allocation[None]
+                optimizer = torch.optim.Adam(
+                    codec.parameters(), lr=float(args.lr))
+            else:
+                allocation, event, active_slate = propose(
+                    codec, tail, cal, select, allocation, bits, anchor.rate,
+                    args.image_batch, args.topk, args.rate_lambda,
+                    args.active_slate_size)
             event["step"] = step
-            audit_event(
-                codec, tail, report, event,
-                args.image_batch, args.rate_lambda)
+            if not args.lookahead_steps:
+                audit_event(
+                    codec, tail, report, event,
+                    args.image_batch, args.rate_lambda)
             outer.append(event)
         if step % args.val_every == 0 or step == total:
             record = validate(
@@ -358,7 +450,8 @@ def main(argv=None):
         codec, config.TRAIN_FEATURES, config.N_TRAIN, device,
         config.NORM_MODE, 16))
     payload = {
-        "plan": ("v24_full_information_active_slate" if args.active_slate_size
+        "plan": ("v26_allocation_conditioned_lookahead" if args.lookahead_steps
+                 else "v24_full_information_active_slate" if args.active_slate_size
                  else "v23_candidate_adapted_dp" if args.candidate_adapt else
                  "v22_deterministic_dp_block_coordinate"),
         "block": args.block, "anchor": anchor.name, "rate": anchor.rate,
@@ -390,6 +483,9 @@ def main(argv=None):
         "candidate_trace": candidate_trace,
         "active_slate_size": int(args.active_slate_size),
         "active_slate_temperature": args.active_slate_temperature,
+        "lookahead_steps": int(args.lookahead_steps),
+        "lookahead_size": int(args.lookahead_size),
+        "lookahead_batch": int(args.lookahead_batch),
         "active_slate_final": active_slate.tolist(),
         "active_slate_trace": slate_trace,
         "active_slate_exposure_min": int(
