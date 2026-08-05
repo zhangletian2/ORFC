@@ -110,6 +110,7 @@ def main(argv=None):
     parser.add_argument("--report-images", type=int, default=128)
     parser.add_argument("--image-batch", type=int, default=16)
     parser.add_argument("--val-every", type=int, default=100)
+    parser.add_argument("--candidate-adapt", action="store_true")
     parser.add_argument("--skip-centroid", action="store_true")
     args = parser.parse_args(argv)
     if args.rate_lambda <= 0:
@@ -180,6 +181,8 @@ def main(argv=None):
     outer, trace, validation = [], [], []
     gradient_coverage = torch.zeros(
         config.GROUPS, len(bits), dtype=torch.long, device=device)
+    candidate_coverage = torch.zeros_like(gradient_coverage)
+    candidate_trace, candidate_u_grad_delta = [], 0.0
 
     allocation, event = propose(
         codec, tail, cal, select, allocation, bits, anchor.rate,
@@ -216,6 +219,49 @@ def main(argv=None):
                      if args.rate_lambda > 0 else distortion)
         loss = objective.mean()
         loss.backward()
+        if args.candidate_adapt:
+            pairs = [(group, mode) for group in range(config.GROUPS)
+                     for mode in range(len(bits))
+                     if mode != int(allocation[group])]
+            group, mode = pairs[(step - 1) % len(pairs)]
+            candidate = allocation.copy()
+            candidate[group] = mode
+            before = ([parameter.grad.detach().clone()
+                       for parameter in codec.transform.parameters()
+                       if parameter.grad is not None] if step == 1 else [])
+            candidate_distortion, _, candidate_rate = qhard.distortion_sparse(
+                codec, tail, y, mu, std, teacher, candidate,
+                codeword_temperature=tau,
+                rotation=codec.transform.get_rotation().detach(),
+                return_rate=True)
+            candidate_objective = (
+                candidate_rate * y.shape[1]
+                + args.rate_lambda * candidate_distortion).mean()
+            quantizer = codec.pq.quantizers[mode]
+            parameters = [quantizer.codebooks, quantizer.log_prior]
+            gradients = torch.autograd.grad(
+                candidate_objective, parameters, allow_unused=True)
+            for parameter, gradient in zip(parameters, gradients):
+                if gradient is None:
+                    continue
+                if parameter.grad is None:
+                    parameter.grad = torch.zeros_like(parameter)
+                parameter.grad[group].add_(gradient[group])
+            if gradients[0] is not None and gradients[0][group].square().sum() > 0:
+                candidate_coverage[group, mode].add_(1)
+            if step == 1:
+                after = [parameter.grad for parameter in codec.transform.parameters()
+                         if parameter.grad is not None]
+                candidate_u_grad_delta = max(
+                    (float((new - old).abs().max())
+                     for old, new in zip(before, after)), default=0.0)
+                if candidate_u_grad_delta != 0:
+                    raise SystemExit("INVALID_EXPERIMENT: candidate gradient entered U")
+            candidate_trace.append([
+                step, group, mode,
+                float(candidate_distortion.mean().detach()),
+                float(candidate_rate.mean().detach()),
+                float(candidate_objective.detach())])
         torch.nn.utils.clip_grad_norm_(codec.parameters(), 1.0)
         with torch.no_grad():
             for mode, quantizer in enumerate(codec.pq.quantizers):
@@ -268,7 +314,8 @@ def main(argv=None):
         codec, config.TRAIN_FEATURES, config.N_TRAIN, device,
         config.NORM_MODE, 16))
     payload = {
-        "plan": "v22_deterministic_dp_block_coordinate",
+        "plan": ("v23_candidate_adapted_dp" if args.candidate_adapt else
+                 "v22_deterministic_dp_block_coordinate"),
         "block": args.block, "anchor": anchor.name, "rate": anchor.rate,
         "source_codec": args.source_codec,
         "source_allocation": args.source_allocation,
@@ -290,7 +337,14 @@ def main(argv=None):
             gradient_coverage.cpu()[selected].min()),
         "inactive_gradient_coverage_max": int(
             gradient_coverage.cpu()[~selected].max()),
+        "candidate_adapt": bool(args.candidate_adapt),
+        "candidate_gradient_coverage_min": int(
+            candidate_coverage.cpu()[~selected].min()
+            if args.candidate_adapt else 0),
+        "candidate_u_grad_delta": candidate_u_grad_delta,
+        "candidate_trace": candidate_trace,
         "active_codebook_drift_min": float(drift[selected].min()),
+        "inactive_codebook_drift_min": float(drift[~selected].min()),
         "centroid_usage_train5k": usage,
         "training_seconds": time.time() - train_started,
         "training_images_per_second": total * args.batch /
