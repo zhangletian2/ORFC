@@ -95,7 +95,7 @@ def audit_event(codec, tail, resident, event, image_batch, rate_lambda):
 
 def lookahead(codec, tail, cal, select, report, base, bits, rate, image_batch,
               topk, size, steps, inner_batch, lr, tau, rate_lambda,
-              freeze_u=False):
+              freeze_u=False, fit=None):
     """Compare equally adapted exact-budget branches and keep the winner."""
     _, proposal, slate = propose(
         codec, tail, cal, select, base, bits, rate, image_batch, topk,
@@ -119,13 +119,16 @@ def lookahead(codec, tail, cal, select, report, base, bits, rate, image_batch,
         rotation_before = branch.transform.get_rotation().detach().clone()
         books_before = [q.codebooks.detach().clone()
                         for q in branch.pq.quantizers]
+        adapt = cal if fit is None else fit
         for inner in range(steps):
-            first = (inner * inner_batch) % max(1, cal.count - inner_batch + 1)
-            batch = cal.slice(first, min(first + inner_batch, cal.count))
+            first = ((inner * inner_batch)
+                     % max(1, adapt.count - inner_batch + 1))
+            batch = adapt.slice(
+                first, min(first + inner_batch, adapt.count))
             distortion, _, rates = qhard.distortion_sparse(
                 branch, tail, *batch, row, codeword_temperature=tau,
                 return_rate=True)
-            objective = rates * cal.tokens + rate_lambda * distortion
+            objective = rates * adapt.tokens + rate_lambda * distortion
             optimizer.zero_grad(set_to_none=True)
             objective.mean().backward()
             torch.nn.utils.clip_grad_norm_(branch.parameters(), 1.0)
@@ -217,6 +220,7 @@ def main(argv=None):
     parser.add_argument("--lookahead-steps", type=int, default=0)
     parser.add_argument("--lookahead-size", type=int, default=3)
     parser.add_argument("--lookahead-batch", type=int, default=16)
+    parser.add_argument("--lookahead-fit-images", type=int, default=0)
     parser.add_argument("--lookahead-freeze-u", action="store_true")
     parser.add_argument("--main-u-only", action="store_true")
     parser.add_argument("--defer-initial-outer", action="store_true")
@@ -272,6 +276,10 @@ def main(argv=None):
         args.report_images, device)
 
     train_paths = config.load_split("train_fit")
+    lookahead_fit = (engine.ResidentSet(
+        train_paths[0], train_paths[1],
+        np.asarray(train_paths[2][:args.lookahead_fit_images]), device)
+        if args.lookahead_fit_images else None)
     dataset = joint.CachedFeatureDataset(train_paths[0], train_paths[2])
     teacher_host = torch.from_numpy(np.load(train_paths[1])).float()
     if device.type == "cuda":
@@ -311,7 +319,8 @@ def main(argv=None):
             codec, tail, cal, select, report, allocation, bits, anchor.rate,
             args.image_batch, args.topk, args.lookahead_size,
             args.lookahead_steps, args.lookahead_batch, args.lr,
-            args.tau_start, args.rate_lambda, args.lookahead_freeze_u)
+            args.tau_start, args.rate_lambda, args.lookahead_freeze_u,
+            lookahead_fit)
         active_slate = allocation[None]
         if not (args.lookahead_freeze_u and args.main_u_only):
             optimizer = torch.optim.Adam(
@@ -450,7 +459,7 @@ def main(argv=None):
                     anchor.rate, args.image_batch, args.topk,
                     args.lookahead_size, args.lookahead_steps,
                     args.lookahead_batch, args.lr, tau, args.rate_lambda,
-                    args.lookahead_freeze_u)
+                    args.lookahead_freeze_u, lookahead_fit)
                 active_slate = allocation[None]
                 if not (args.lookahead_freeze_u and args.main_u_only):
                     optimizer = torch.optim.Adam(
@@ -536,6 +545,7 @@ def main(argv=None):
         "lookahead_steps": int(args.lookahead_steps),
         "lookahead_size": int(args.lookahead_size),
         "lookahead_batch": int(args.lookahead_batch),
+        "lookahead_fit_images": int(args.lookahead_fit_images),
         "lookahead_freeze_u": bool(args.lookahead_freeze_u),
         "main_u_only": bool(args.main_u_only),
         "defer_initial_outer": bool(args.defer_initial_outer),
