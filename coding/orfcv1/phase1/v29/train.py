@@ -101,6 +101,7 @@ def main(argv=None):
     parser.add_argument("--cost-images", type=int, default=512)
     parser.add_argument("--val-images", type=int, default=500)
     parser.add_argument("--seed", type=int, default=20260806)
+    parser.add_argument("--fixed-uniform", action="store_true")
     parser.add_argument("--smoke", action="store_true")
     args = parser.parse_args(argv)
     if args.beam_width < 1 or args.dp_topk < 1:
@@ -164,10 +165,14 @@ def main(argv=None):
         for parent_index, parent in enumerate(beam):
             # Keep the unmodified parent: retained validation best is monotone.
             pool.append(parent)
-            rows, table = candidates(
-                parent["codec"], tail, cost, parent["allocation"], bits,
-                anchor.rate, args.dp_topk, args.image_batch,
-                args.alloc_chunk, cycle == 0)
+            if args.fixed_uniform:
+                rows = [parent["allocation"].copy()]
+                table = {"fixed_uniform": True, "probe_count": 0}
+            else:
+                rows, table = candidates(
+                    parent["codec"], tail, cost, parent["allocation"], bits,
+                    anchor.rate, args.dp_topk, args.image_batch,
+                    args.alloc_chunk, cycle == 0)
             records = []
             for row in rows:
                 trained = train_codebooks(
@@ -199,7 +204,7 @@ def main(argv=None):
                 continue
             beam.append(state)
             seen.add(key)
-            if len(beam) == args.beam_width:
+            if len(beam) == (1 if args.fixed_uniform else args.beam_width):
                 break
         if beam[0]["score"] < best_payload["hard_tail_mse"]:
             best_payload = save_state(beam[0], out, cycle + 1)
@@ -223,7 +228,8 @@ def main(argv=None):
     if u_final_gap != 0.0:
         raise SystemExit("INVALID_EXPERIMENT: identity transform drift")
     payload = {
-        "plan": "v29_fixed_identity_exact_budget_dp_beam",
+        "plan": ("v29_fixed_identity_uniform_control" if args.fixed_uniform
+                 else "v29_fixed_identity_exact_budget_dp_beam"),
         "block": args.block, "anchor": args.anchor,
         "nominal_rate": anchor.rate, "manifest": str(Path(args.manifest).resolve()),
         "data": {"train": train.count, "cost_table": cost.count,
@@ -231,7 +237,9 @@ def main(argv=None):
                  "validation_select": val.count},
         "cycles": cycles, "branch_epochs": args.branch_epochs,
         "total_path_epochs": total_epochs, "dp_topk": args.dp_topk,
-        "beam_width": args.beam_width, "batch": args.batch, "lr": args.lr,
+        "beam_width": (1 if args.fixed_uniform else args.beam_width),
+        "fixed_uniform": args.fixed_uniform,
+        "batch": args.batch, "lr": args.lr,
         "tau_start": args.tau_start, "tau_end": args.tau_end,
         "initial": initial, "best": best_payload, "final": final,
         "allocation": allocation.tolist(), "events": events,
