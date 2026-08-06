@@ -313,9 +313,10 @@ def main(argv=None):
             args.lookahead_steps, args.lookahead_batch, args.lr,
             args.tau_start, args.rate_lambda, args.lookahead_freeze_u)
         active_slate = allocation[None]
-        optimizer = torch.optim.Adam(
-            codec.transform.parameters() if args.main_u_only
-            else codec.parameters(), lr=float(args.lr))
+        if not (args.lookahead_freeze_u and args.main_u_only):
+            optimizer = torch.optim.Adam(
+                codec.transform.parameters() if args.main_u_only
+                else codec.parameters(), lr=float(args.lr))
     elif not args.lookahead_steps and not args.defer_initial_outer:
         allocation, event, active_slate = propose(
             codec, tail, cal, select, allocation, bits, anchor.rate,
@@ -451,9 +452,10 @@ def main(argv=None):
                     args.lookahead_batch, args.lr, tau, args.rate_lambda,
                     args.lookahead_freeze_u)
                 active_slate = allocation[None]
-                optimizer = torch.optim.Adam(
-                    codec.transform.parameters() if args.main_u_only
-                    else codec.parameters(), lr=float(args.lr))
+                if not (args.lookahead_freeze_u and args.main_u_only):
+                    optimizer = torch.optim.Adam(
+                        codec.transform.parameters() if args.main_u_only
+                        else codec.parameters(), lr=float(args.lr))
             else:
                 allocation, event, active_slate = propose(
                     codec, tail, cal, select, allocation, bits, anchor.rate,
