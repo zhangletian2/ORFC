@@ -235,6 +235,7 @@ def main(argv=None):
     parser.add_argument("--bootstrap-samples", type=int, default=10000)
     parser.add_argument("--threshold", type=float, default=0.01)
     parser.add_argument("--seed", type=int, default=20260806)
+    parser.add_argument("--arm-index", type=int, choices=range(4))
     parser.add_argument("--smoke", action="store_true")
     args = parser.parse_args(argv)
     started = time.time()
@@ -258,6 +259,9 @@ def main(argv=None):
     shifts = (0, max(1, config.GROUPS // 3), max(1, 2 * config.GROUPS // 3))
     allocations = np.unique(np.stack(
         [base] + [np.roll(mixed, shift) for shift in shifts]), axis=0)
+    indexed_allocations = list(enumerate(allocations))
+    if args.arm_index is not None:
+        indexed_allocations = [indexed_allocations[args.arm_index]]
     if any(common.nominal_rate(row, bits) != anchor.rate for row in allocations):
         raise SystemExit("capacity allocation violates the exact budget")
     train_n = min(args.train_images, 16) if args.smoke else args.train_images
@@ -273,7 +277,7 @@ def main(argv=None):
         torch.cuda.reset_peak_memory_stats(device)
     nested_initial = nested.from_independent(source)
     records = []
-    for arm, allocation in enumerate(allocations):
+    for arm, allocation in indexed_allocations:
         independent = copy.deepcopy(source)
         nested_codec = copy.deepcopy(nested_initial)
         for parameter in nested_codec.transform.parameters():
@@ -308,11 +312,13 @@ def main(argv=None):
         for record in records for side in ("independent", "nested"))
     worst_ucb = max(record["paired_capacity_loss"]["one_sided_ucb95"]
                     for record in records)
-    verdict = ("INCONCLUSIVE" if not all_converged else
+    verdict = ("ARM_COMPLETE" if args.arm_index is not None else
+               "INCONCLUSIVE" if not all_converged else
                "PASS" if worst_ucb <= args.threshold else "FAIL")
     result = {
         "plan": "v30_hierarchical_tree_capacity_gate", "block": args.block,
         "anchor": args.anchor, "allocations": allocations.tolist(),
+        "arm_index": args.arm_index,
         "source_codec": str(Path(args.source_codec).resolve()),
         "mode_bits": list(bits),
         "parameterization": "parent_conditioned_residual_tree",
@@ -338,7 +344,7 @@ def main(argv=None):
                               if device.type == "cuda" else 0),
         "seconds_before_optional_export": time.time() - started}
     (out / "capacity_gate.json").write_text(json.dumps(result, indent=2))
-    if verdict == "PASS":
+    if verdict == "PASS" and args.arm_index is None:
         nested_codec = copy.deepcopy(nested_initial)
         train_coverage(
             nested_codec, tail, train, allocations, epochs, args.batch,
