@@ -94,7 +94,8 @@ def audit_event(codec, tail, resident, event, image_batch, rate_lambda):
 
 
 def lookahead(codec, tail, cal, select, report, base, bits, rate, image_batch,
-              topk, size, steps, inner_batch, lr, tau, rate_lambda):
+              topk, size, steps, inner_batch, lr, tau, rate_lambda,
+              freeze_u=False):
     """Compare equally adapted exact-budget branches and keep the winner."""
     _, proposal, slate = propose(
         codec, tail, cal, select, base, bits, rate, image_batch, topk,
@@ -106,7 +107,18 @@ def lookahead(codec, tail, cal, select, report, base, bits, rate, image_batch,
     records, winner, winner_codec = [], None, None
     for index, row in enumerate(rows):
         branch = copy.deepcopy(codec)
-        optimizer = torch.optim.Adam(branch.parameters(), lr=float(lr))
+        for parameter in branch.transform.parameters():
+            parameter.requires_grad_(not freeze_u)
+        for quantizer in branch.pq.quantizers:
+            for parameter in quantizer.parameters():
+                parameter.requires_grad_(True)
+        parameters = ([parameter for quantizer in branch.pq.quantizers
+                       for parameter in quantizer.parameters()]
+                      if freeze_u else list(branch.parameters()))
+        optimizer = torch.optim.Adam(parameters, lr=float(lr))
+        rotation_before = branch.transform.get_rotation().detach().clone()
+        books_before = [q.codebooks.detach().clone()
+                        for q in branch.pq.quantizers]
         for inner in range(steps):
             first = (inner * inner_batch) % max(1, cal.count - inner_batch + 1)
             batch = cal.slice(first, min(first + inner_batch, cal.count))
@@ -122,8 +134,24 @@ def lookahead(codec, tail, cal, select, report, base, bits, rate, image_batch,
             branch, tail, select, row, image_batch, rate_lambda)
         reported = validate(
             branch, tail, report, row, image_batch, rate_lambda)
+        branch_device = next(branch.parameters()).device
+        selected_mask = torch.zeros(
+            len(base), len(bits), dtype=torch.bool, device=branch_device)
+        selected_mask[
+            torch.arange(len(base), device=branch_device),
+            torch.as_tensor(row, device=branch_device)] = True
+        drift = torch.stack([
+            (q.codebooks.detach() - old).flatten(1).norm(dim=1)
+            for q, old in zip(branch.pq.quantizers, books_before)], dim=1)
         records.append({"allocation": row.tolist(), "select": selected,
-                        "report": reported})
+                        "report": reported,
+                        "u_drift": float(
+                            (branch.transform.get_rotation().detach()
+                             - rotation_before).abs().max()),
+                        "selected_book_drift_min": float(
+                            drift[selected_mask].min()),
+                        "unselected_book_drift_max": float(
+                            drift[~selected_mask].max())})
         if winner is None or selected["objective"] < records[winner]["select"]["objective"]:
             del winner_codec
             winner, winner_codec = index, branch
@@ -139,6 +167,7 @@ def lookahead(codec, tail, cal, select, report, base, bits, rate, image_batch,
         "base": base.tolist(), "proposed": chosen.tolist(),
         "accepted": bool(winner != 0), "topk": int(topk),
         "candidate_count": int(len(rows)), "lookahead_steps": int(steps),
+        "lookahead_freeze_u": bool(freeze_u),
         "branches": records,
         "select_base_distortion": base_select["distortion"],
         "select_winner_distortion": chosen_select["distortion"],
@@ -188,6 +217,9 @@ def main(argv=None):
     parser.add_argument("--lookahead-steps", type=int, default=0)
     parser.add_argument("--lookahead-size", type=int, default=3)
     parser.add_argument("--lookahead-batch", type=int, default=16)
+    parser.add_argument("--lookahead-freeze-u", action="store_true")
+    parser.add_argument("--main-u-only", action="store_true")
+    parser.add_argument("--defer-initial-outer", action="store_true")
     parser.add_argument("--skip-centroid", action="store_true")
     args = parser.parse_args(argv)
     if args.rate_lambda <= 0:
@@ -212,6 +244,10 @@ def main(argv=None):
     engine.configure_precision(config.ALLOW_TF32)
     codec = load_codec_v1(Path(args.source_codec), device=device)
     joint.make_trainable(codec)
+    if args.main_u_only:
+        for quantizer in codec.pq.quantizers:
+            for parameter in quantizer.parameters():
+                parameter.requires_grad_(False)
     bits = joint.actual_mode_bits(codec)
     if bits != tuple(anchor.mode_bits):
         raise SystemExit(f"menu {bits} does not match {anchor.mode_bits}")
@@ -223,7 +259,9 @@ def main(argv=None):
     if bool(getattr(codec.pq, "use_rate", False)) != (args.rate_lambda > 0):
         raise SystemExit("codec prior and rate objective disagree")
 
-    optimizer = torch.optim.Adam(codec.parameters(), lr=float(args.lr))
+    optimizer = torch.optim.Adam(
+        codec.transform.parameters() if args.main_u_only else codec.parameters(),
+        lr=float(args.lr))
     tail = tail_mod.build_tail(config.LAYER, device)
     rows = config.load_split("train_val")[2]
     cal = split_resident(config, rows, 0, args.cal_images, device)
@@ -267,23 +305,31 @@ def main(argv=None):
     slate_exposure = torch.zeros_like(gradient_coverage)
     slate_trace = []
 
-    if args.lookahead_steps:
+    event = None
+    if args.lookahead_steps and not args.defer_initial_outer:
         allocation, event = lookahead(
             codec, tail, cal, select, report, allocation, bits, anchor.rate,
             args.image_batch, args.topk, args.lookahead_size,
             args.lookahead_steps, args.lookahead_batch, args.lr,
-            args.tau_start, args.rate_lambda)
+            args.tau_start, args.rate_lambda, args.lookahead_freeze_u)
         active_slate = allocation[None]
-        optimizer = torch.optim.Adam(codec.parameters(), lr=float(args.lr))
-    else:
+        optimizer = torch.optim.Adam(
+            codec.transform.parameters() if args.main_u_only
+            else codec.parameters(), lr=float(args.lr))
+    elif not args.lookahead_steps and not args.defer_initial_outer:
         allocation, event, active_slate = propose(
             codec, tail, cal, select, allocation, bits, anchor.rate,
             args.image_batch, args.topk, args.rate_lambda,
             args.active_slate_size)
-    event["step"] = 0
-    if not args.lookahead_steps:
-        audit_event(codec, tail, report, event, args.image_batch, args.rate_lambda)
-    outer.append(event)
+    else:
+        active_slate = allocation[None]
+    if event is not None:
+        event["step"] = 0
+        if not args.lookahead_steps:
+            audit_event(
+                codec, tail, report, event,
+                args.image_batch, args.rate_lambda)
+        outer.append(event)
     validation.append({"step": 0, **validate(
         codec, tail, report, allocation, args.image_batch, args.rate_lambda),
                        "allocation": allocation.tolist()})
@@ -402,10 +448,12 @@ def main(argv=None):
                     codec, tail, cal, select, report, allocation, bits,
                     anchor.rate, args.image_batch, args.topk,
                     args.lookahead_size, args.lookahead_steps,
-                    args.lookahead_batch, args.lr, tau, args.rate_lambda)
+                    args.lookahead_batch, args.lr, tau, args.rate_lambda,
+                    args.lookahead_freeze_u)
                 active_slate = allocation[None]
                 optimizer = torch.optim.Adam(
-                    codec.parameters(), lr=float(args.lr))
+                    codec.transform.parameters() if args.main_u_only
+                    else codec.parameters(), lr=float(args.lr))
             else:
                 allocation, event, active_slate = propose(
                     codec, tail, cal, select, allocation, bits, anchor.rate,
@@ -486,6 +534,9 @@ def main(argv=None):
         "lookahead_steps": int(args.lookahead_steps),
         "lookahead_size": int(args.lookahead_size),
         "lookahead_batch": int(args.lookahead_batch),
+        "lookahead_freeze_u": bool(args.lookahead_freeze_u),
+        "main_u_only": bool(args.main_u_only),
+        "defer_initial_outer": bool(args.defer_initial_outer),
         "active_slate_final": active_slate.tolist(),
         "active_slate_trace": slate_trace,
         "active_slate_exposure_min": int(
