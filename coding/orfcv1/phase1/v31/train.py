@@ -165,6 +165,7 @@ def main(argv=None):
     parser.add_argument("--image-batch", type=int, default=16)
     parser.add_argument("--smoke", action="store_true")
     args = parser.parse_args(argv)
+    core.configure_determinism(args.seed)
     config = activate(args.block); anchor = config.ANCHOR_BY_NAME[args.anchor]
     authorization = require_authorization(
         args.authorization, args.block, args.anchor) if not args.smoke else None
@@ -252,6 +253,7 @@ def main(argv=None):
         "anchor": args.anchor, "smoke": args.smoke,
         "source_codec": str(Path(args.nested_codec).resolve()),
         "authorization": str(Path(args.authorization).resolve()),
+        "deterministic_backend": "xformers_off_math_sdpa",
         "replay_parity": replay, "mode_bits": list(bits),
         "initial_tail_mse_select500": initial,
         "final_tail_mse_select500": final,

@@ -12,6 +12,7 @@ import torch
 from .. import engine, tail as tail_mod
 from ..v21.config import SPECS, activate
 from ..v30 import common, nested
+from . import core
 
 
 def orthogonality(codec):
@@ -77,6 +78,7 @@ def main(argv=None):
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--image-batch", type=int, default=16)
     args = parser.parse_args(argv)
+    core.configure_determinism(20260807)
     config = activate(args.block); anchor = config.ANCHOR_BY_NAME[args.anchor]
     device, out = torch.device(args.device), Path(args.out)
     out.mkdir(parents=True, exist_ok=True)

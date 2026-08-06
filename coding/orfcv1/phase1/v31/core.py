@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import math
+import os
 
 import numpy as np
 import torch
@@ -22,6 +23,21 @@ WARMUP_STEPS = 300
 AUTHORIZATION_STEPS = 500
 SHORT_ADAPT_STEPS = 8
 SHORT_ADAPT_BATCH = 16
+
+
+def configure_determinism(seed=20260807):
+    """Require and configure the deterministic V31 training backend."""
+    if os.environ.get("XFORMERS_DISABLED") != "1":
+        raise RuntimeError("V31 must be launched with XFORMERS_DISABLED=1")
+    if os.environ.get("CUBLAS_WORKSPACE_CONFIG") != ":4096:8":
+        raise RuntimeError(
+            "V31 must be launched with CUBLAS_WORKSPACE_CONFIG=:4096:8")
+    torch.manual_seed(int(seed)); torch.cuda.manual_seed_all(int(seed))
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cuda.enable_flash_sdp(False)
+    torch.backends.cuda.enable_mem_efficient_sdp(False)
+    torch.backends.cuda.enable_math_sdp(True)
+    torch.use_deterministic_algorithms(True)
 
 
 class ResidentView:

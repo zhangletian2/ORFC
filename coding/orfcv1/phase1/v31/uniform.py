@@ -26,6 +26,7 @@ def main(argv=None):
     parser.add_argument("--seed", type=int, default=20260807)
     parser.add_argument("--image-batch", type=int, default=16)
     args = parser.parse_args(argv)
+    core.configure_determinism(args.seed)
     bilevel = json.loads(Path(args.bilevel_result).read_text())
     if (bilevel.get("plan") != "v31_warm_state_bilevel" or
             bilevel.get("smoke") or bilevel.get("block") != args.block or
@@ -84,6 +85,7 @@ def main(argv=None):
         "anchor": args.anchor, "source_codec": str(Path(args.nested_codec).resolve()),
         "matched_bilevel_result": str(Path(args.bilevel_result).resolve()),
         "accepted_event_steps_compensated": sorted(accepted_steps),
+        "deterministic_backend": "xformers_off_math_sdpa",
         "compensated_updates": 8 * len(accepted_steps),
         "same_first300_strict_fair": True, "main_uniform_steps": 4700,
         "final_uniform_steps": 500, "codec_committed_update_count": scheduler.count,

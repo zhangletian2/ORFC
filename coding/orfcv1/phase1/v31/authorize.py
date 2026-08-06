@@ -38,6 +38,7 @@ def main(argv=None):
     parser.add_argument("--seed", type=int, default=20260807)
     parser.add_argument("--smoke", action="store_true")
     args = parser.parse_args(argv)
+    core.configure_determinism(args.seed)
 
     config = activate(args.block); anchor = config.ANCHOR_BY_NAME[args.anchor]
     device, out = torch.device(args.device), Path(args.out)
@@ -114,6 +115,8 @@ def main(argv=None):
             "prefix_steps": steps, "formal_prefix_steps": 500,
             "warmup_steps": 300, "codec_lr": core.CODEC_LR,
             "schedule": "committed_clipped_cosine", "schedule_max": 5580,
+            "deterministic_backend": "xformers_off_math_sdpa",
+            "deterministic_algorithms": True,
             "cost_train": cost.count, "formal_cost_train": 512,
             "adapt_train": adapt.count, "adapt_steps": 8,
             "adapt_batch": 16, "validation_select": validation.count,
