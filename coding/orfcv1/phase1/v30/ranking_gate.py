@@ -40,6 +40,12 @@ def main(argv=None):
     device, out = torch.device(args.device), Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     codec, payload = nested.load_checkpoint(args.nested_codec, device)
+    capacity_gate = payload.get("extra", {}).get("capacity_gate", {})
+    if capacity_gate.get("verdict") != "PASS":
+        raise SystemExit("nested checkpoint is not backed by a PASS capacity gate")
+    coverage_export = payload.get("extra", {}).get("coverage_export", {})
+    if not coverage_export or coverage_export.get("smoke", True):
+        raise SystemExit("ranking gate requires a formal coverage export")
     bits = common.mode_bits(codec)
     base = (np.load(args.allocation).astype(np.int64)
             if args.allocation else engine.uniform_allocation(
@@ -81,6 +87,7 @@ def main(argv=None):
     result = {
         "plan": "v30_shared_weight_ranking_gate", "block": args.block,
         "anchor": args.anchor, "mode_bits": list(bits),
+        "capacity_gate_verdict": capacity_gate["verdict"],
         "candidate_count": len(pool), "topk": k,
         "data": {"cost_table_train": cal.count,
                  "adapt_train": adapt.count,
