@@ -95,7 +95,7 @@ def audit_event(codec, tail, resident, event, image_batch, rate_lambda):
 
 def lookahead(codec, tail, cal, select, report, base, bits, rate, image_batch,
               topk, size, steps, inner_batch, lr, tau, rate_lambda,
-              freeze_u=False, fit=None):
+              freeze_u=False, fit=None, u_optimizer_state=None):
     """Compare equally adapted exact-budget branches and keep the winner."""
     _, proposal, slate = propose(
         codec, tail, cal, select, base, bits, rate, image_batch, topk,
@@ -104,7 +104,7 @@ def lookahead(codec, tail, cal, select, report, base, bits, rate, image_batch,
     rows.extend(row.copy() for row in slate
                 if not np.array_equal(row, base))
     rows = np.asarray(rows[:size], dtype=np.int64)
-    records, winner, winner_codec = [], None, None
+    records, winner, winner_codec, winner_u_state = [], None, None, None
     for index, row in enumerate(rows):
         branch = copy.deepcopy(codec)
         for parameter in branch.transform.parameters():
@@ -112,10 +112,22 @@ def lookahead(codec, tail, cal, select, report, base, bits, rate, image_batch,
         for quantizer in branch.pq.quantizers:
             for parameter in quantizer.parameters():
                 parameter.requires_grad_(True)
-        parameters = ([parameter for quantizer in branch.pq.quantizers
-                       for parameter in quantizer.parameters()]
-                      if freeze_u else list(branch.parameters()))
-        optimizer = torch.optim.Adam(parameters, lr=float(lr))
+        q_parameters = [parameter for quantizer in branch.pq.quantizers
+                        for parameter in quantizer.parameters()]
+        if freeze_u:
+            optimizers = [torch.optim.Adam(q_parameters, lr=float(lr))]
+            branch_u_optimizer = None
+        elif u_optimizer_state is not None:
+            branch_u_optimizer = torch.optim.Adam(
+                branch.transform.parameters(), lr=float(lr))
+            branch_u_optimizer.load_state_dict(
+                copy.deepcopy(u_optimizer_state))
+            optimizers = [branch_u_optimizer,
+                          torch.optim.Adam(q_parameters, lr=float(lr))]
+        else:
+            branch_u_optimizer = None
+            optimizers = [torch.optim.Adam(
+                branch.parameters(), lr=float(lr))]
         rotation_before = branch.transform.get_rotation().detach().clone()
         books_before = [q.codebooks.detach().clone()
                         for q in branch.pq.quantizers]
@@ -129,10 +141,12 @@ def lookahead(codec, tail, cal, select, report, base, bits, rate, image_batch,
                 branch, tail, *batch, row, codeword_temperature=tau,
                 return_rate=True)
             objective = rates * adapt.tokens + rate_lambda * distortion
-            optimizer.zero_grad(set_to_none=True)
+            for branch_optimizer in optimizers:
+                branch_optimizer.zero_grad(set_to_none=True)
             objective.mean().backward()
             torch.nn.utils.clip_grad_norm_(branch.parameters(), 1.0)
-            optimizer.step()
+            for branch_optimizer in optimizers:
+                branch_optimizer.step()
         selected = validate(
             branch, tail, select, row, image_batch, rate_lambda)
         reported = validate(
@@ -158,9 +172,12 @@ def lookahead(codec, tail, cal, select, report, base, bits, rate, image_batch,
         if winner is None or selected["objective"] < records[winner]["select"]["objective"]:
             del winner_codec
             winner, winner_codec = index, branch
+            winner_u_state = (copy.deepcopy(
+                branch_u_optimizer.state_dict())
+                if branch_u_optimizer is not None else None)
         else:
             del branch
-    del optimizer
+    del optimizers
     codec.load_state_dict(winner_codec.state_dict())
     del winner_codec
     chosen = rows[winner].copy()
@@ -187,7 +204,9 @@ def lookahead(codec, tail, cal, select, report, base, bits, rate, image_batch,
         "report_base_objective": base_report["objective"],
         "report_proposed_objective": chosen_report["objective"],
         "report_objective_gain": (base_report["objective"]
-                                  - chosen_report["objective"])}
+                                  - chosen_report["objective"]),
+        "u_optimizer_state_reused": bool(u_optimizer_state is not None)}, \
+        winner_u_state
 
 
 def main(argv=None):
@@ -315,14 +334,19 @@ def main(argv=None):
 
     event = None
     if args.lookahead_steps and not args.defer_initial_outer:
-        allocation, event = lookahead(
+        allocation, event, winner_u_state = lookahead(
             codec, tail, cal, select, report, allocation, bits, anchor.rate,
             args.image_batch, args.topk, args.lookahead_size,
             args.lookahead_steps, args.lookahead_batch, args.lr,
             args.tau_start, args.rate_lambda, args.lookahead_freeze_u,
-            lookahead_fit)
+            lookahead_fit, optimizer.state_dict()
+            if args.main_u_only and not args.lookahead_freeze_u else None)
         active_slate = allocation[None]
-        if not (args.lookahead_freeze_u and args.main_u_only):
+        if winner_u_state is not None:
+            optimizer = torch.optim.Adam(
+                codec.transform.parameters(), lr=float(args.lr))
+            optimizer.load_state_dict(winner_u_state)
+        elif not (args.lookahead_freeze_u and args.main_u_only):
             optimizer = torch.optim.Adam(
                 codec.transform.parameters() if args.main_u_only
                 else codec.parameters(), lr=float(args.lr))
@@ -454,14 +478,21 @@ def main(argv=None):
 
         if args.outer_every > 0 and step < total and step % args.outer_every == 0:
             if args.lookahead_steps:
-                allocation, event = lookahead(
+                allocation, event, winner_u_state = lookahead(
                     codec, tail, cal, select, report, allocation, bits,
                     anchor.rate, args.image_batch, args.topk,
                     args.lookahead_size, args.lookahead_steps,
                     args.lookahead_batch, args.lr, tau, args.rate_lambda,
-                    args.lookahead_freeze_u, lookahead_fit)
+                    args.lookahead_freeze_u, lookahead_fit,
+                    optimizer.state_dict()
+                    if args.main_u_only and not args.lookahead_freeze_u
+                    else None)
                 active_slate = allocation[None]
-                if not (args.lookahead_freeze_u and args.main_u_only):
+                if winner_u_state is not None:
+                    optimizer = torch.optim.Adam(
+                        codec.transform.parameters(), lr=float(args.lr))
+                    optimizer.load_state_dict(winner_u_state)
+                elif not (args.lookahead_freeze_u and args.main_u_only):
                     optimizer = torch.optim.Adam(
                         codec.transform.parameters() if args.main_u_only
                         else codec.parameters(), lr=float(args.lr))
