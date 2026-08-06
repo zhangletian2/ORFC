@@ -100,20 +100,12 @@ def main(argv=None):
     select_uniform = nested.evaluate(
         control, tail, selection, uniform, args.image_batch)[0]
     del selection
-    heldout = engine.ResidentSet(
-        *val_paths[:2], val_paths[2][500:3000], device)
-    heldout_bilevel = nested.evaluate(
-        codec, tail, heldout, allocation, args.image_batch)[0]
-    heldout_uniform = nested.evaluate(
-        control, tail, heldout, uniform, args.image_batch)[0]
-    del heldout
-    difference = heldout_bilevel - heldout_uniform
-    upper = bootstrap_upper(difference)
     exact = (common.nominal_rate(allocation, bits) == anchor.rate and
              common.nominal_rate(uniform, bits) == anchor.rate)
     train_paths = config.load_split("train_fit")
     train = engine.ResidentSet(*train_paths[:2], train_paths[2][:5000], device)
     usage = centroid_usage(codec, train)
+    del train
     update = drift(codec, source)
     select_improved = float(select_bilevel.mean()) < float(select_uniform.mean())
     parity_bilevel = abs(float(select_bilevel.mean()) -
@@ -123,9 +115,22 @@ def main(argv=None):
                          uniform_json["final_tail_mse_select500"]) / max(
                              abs(uniform_json["final_tail_mse_select500"]), 1e-12)
     orth = orthogonality(codec)
+    authorization = torch.load(
+        bilevel_json["authorization"], map_location="cpu")
+    warm_allocations = authorization["prefix"]["allocations"][:300]
+    warm_exposure = torch.zeros(codec.pq.G, len(bits), dtype=torch.long)
+    groups = torch.arange(codec.pq.G)
+    for row in warm_allocations:
+        warm_exposure[groups, row] += 1
+    events_valid = all(
+        not event["accepted"] or (
+            event["local_spearman"] >= 0.8 and
+            event["winner_strictly_better"] and
+            event["winner_realized_as_map"])
+        for event in bilevel_json["events"])
     internal = bool(
         exact and bilevel_json["accepted_event_count"] >= 1 and
-        bilevel_json["group_mode_exposure_min"] >= 100 and
+        int(warm_exposure.min()) >= 100 and events_valid and
         select_improved and parity_bilevel <= 1e-6 and
         parity_uniform <= 1e-6 and orth <= 1e-4 and
         update["minimum_stage_update_norm"] > 0 and
@@ -136,7 +141,8 @@ def main(argv=None):
         "anchor": args.anchor, "exact_nominal_budgets": exact,
         "allocation": allocation.tolist(), "uniform_allocation": uniform.tolist(),
         "accepted_event_count": bilevel_json["accepted_event_count"],
-        "warmup_group_mode_exposure_min": bilevel_json["group_mode_exposure_min"],
+        "warmup_group_mode_exposure_min": int(warm_exposure.min()),
+        "accepted_events_contract_valid": events_valid,
         "bilevel_scheduler_count": bilevel_json["codec_committed_update_count"],
         "uniform_scheduler_count": uniform_json["codec_committed_update_count"],
         "orthogonality": orth, "maximum_orthogonality": 1e-4,
@@ -149,8 +155,26 @@ def main(argv=None):
                       "uniform_mean": float(select_uniform.mean()),
                       "mean_difference": float((select_bilevel-select_uniform).mean()),
                       "bilevel_strictly_better": select_improved},
-        "internal_contract_verdict": "PASS" if internal else "FAIL",
-        "heldout": {"images": 2500, "selection_role": False,
+        "internal_contract_verdict": "PASS" if internal else "FAIL"}
+    np.savez_compressed(out / "selection_per_image.npz",
+                        selection_bilevel=select_bilevel,
+                        selection_uniform=select_uniform)
+    if not internal:
+        result["heldout"] = {"status": "NOT_OPENED_INTERNAL_FAIL"}
+        (out / "evaluation.json").write_text(json.dumps(result, indent=2))
+        print(json.dumps(result, indent=2), flush=True)
+        return
+    heldout = engine.ResidentSet(
+        *val_paths[:2], val_paths[2][500:3000], device)
+    heldout_bilevel = nested.evaluate(
+        codec, tail, heldout, allocation, args.image_batch)[0]
+    heldout_uniform = nested.evaluate(
+        control, tail, heldout, uniform, args.image_batch)[0]
+    del heldout
+    difference = heldout_bilevel - heldout_uniform
+    upper = bootstrap_upper(difference)
+    result["heldout"] = {
+                    "images": 2500, "selection_role": False,
                     "bootstrap_repetitions": 10000,
                     "bootstrap_seed": 20260807,
                     "bilevel_mean": float(heldout_bilevel.mean()),
@@ -160,10 +184,8 @@ def main(argv=None):
                         difference.mean()/heldout_uniform.mean()),
                     "one_sided_upper_95": upper,
                     "improved_images": int((difference < 0).sum()),
-                    "verdict": "PASS" if upper < 0 else "FAIL"}}
-    np.savez_compressed(out / "per_image.npz",
-                        selection_bilevel=select_bilevel,
-                        selection_uniform=select_uniform,
+                    "verdict": "PASS" if upper < 0 else "FAIL"}
+    np.savez_compressed(out / "heldout_per_image.npz",
                         heldout_bilevel=heldout_bilevel,
                         heldout_uniform=heldout_uniform)
     (out / "evaluation.json").write_text(json.dumps(result, indent=2))
