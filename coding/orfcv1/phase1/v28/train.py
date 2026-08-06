@@ -56,7 +56,7 @@ def candidates(codec, tail, train, base, bits, budget, topk, image_batch,
 
 
 def adapt_branch(parent, optimizer_state, tail, train, allocation, permutations,
-                 batch, lr, taus, train_rate_lambda):
+                 batch, lr, lrs, taus, train_rate_lambda):
     branch = copy.deepcopy(parent)
     joint.make_trainable(branch)
     optimizer = torch.optim.Adam(branch.parameters(), lr=lr)
@@ -66,7 +66,9 @@ def adapt_branch(parent, optimizer_state, tail, train, allocation, permutations,
     groups = torch.arange(len(allocation), device=train.device)
     selected = torch.as_tensor(allocation, device=train.device)
     losses = []
-    for permutation, tau in zip(permutations, taus):
+    for permutation, epoch_lr, tau in zip(permutations, lrs, taus):
+        for group in optimizer.param_groups:
+            group["lr"] = float(epoch_lr)
         for first in range(0, len(permutation), batch):
             index = permutation[first:first + batch]
             if len(index) != batch:
@@ -114,8 +116,11 @@ def main(argv=None):
     parser.add_argument("--topk", type=int, default=2)
     parser.add_argument("--batch", type=int, default=32)
     parser.add_argument("--lr", type=float, default=3e-4)
+    parser.add_argument("--lr-schedule", choices=("constant", "cosine"),
+                        default="constant")
     parser.add_argument("--tau-start", type=float, default=0.5)
     parser.add_argument("--tau-end", type=float, default=0.005)
+    parser.add_argument("--tau-floor", type=float, default=0.0)
     parser.add_argument("--train-rate-lambda", type=float, default=0.0)
     parser.add_argument("--image-batch", type=int, default=20)
     parser.add_argument("--alloc-chunk", type=int, default=2)
@@ -169,10 +174,15 @@ def main(argv=None):
         taus = [joint.codeword_tau(
             cycle * args.branch_epochs + epoch + 1, total_epochs,
             args.tau_start, args.tau_end) for epoch in range(args.branch_epochs)]
+        taus = [max(value, args.tau_floor) for value in taus]
+        lrs = [(config.cosine_lr(
+            cycle * args.branch_epochs + epoch, total_epochs, args.lr)
+            if args.lr_schedule == "cosine" else args.lr)
+            for epoch in range(args.branch_epochs)]
         for index, row in enumerate(rows):
             branch, state, train_loss, selected, active_drift, inactive_drift = adapt_branch(
                 codec, optimizer_state, tail, train, row, permutations, args.batch,
-                args.lr, taus, args.train_rate_lambda)
+                args.lr, lrs, taus, args.train_rate_lambda)
             record = val_record(branch, tail, val, row, args.image_batch)
             record.update(index=index, allocation=row.tolist(), train_loss=train_loss,
                           selected_book_drift_min=active_drift,
@@ -216,6 +226,7 @@ def main(argv=None):
         "cycles": cycles, "branch_epochs": args.branch_epochs,
         "total_path_epochs": total_epochs, "topk": args.topk, "batch": args.batch,
         "lr": args.lr, "tau_start": args.tau_start, "tau_end": args.tau_end,
+        "lr_schedule": args.lr_schedule, "tau_floor": args.tau_floor,
         "train_rate_lambda": args.train_rate_lambda,
         "image_batch": args.image_batch, "alloc_chunk": args.alloc_chunk,
         "initial": initial, "best": best_payload, "final": final,
