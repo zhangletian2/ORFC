@@ -168,7 +168,7 @@ def main(argv=None):
         print(json.dumps(result, indent=2), flush=True)
         return
     heldout = engine.ResidentSet(
-        *val_paths[:2], val_paths[2][500:3000], device)
+        *val_paths[:2], np.arange(500, 3000, dtype=np.int64), device)
     heldout_bilevel = nested.evaluate(
         codec, tail, heldout, allocation, args.image_batch)[0]
     heldout_uniform = nested.evaluate(
