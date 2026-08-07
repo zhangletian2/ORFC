@@ -49,7 +49,10 @@ def drift(codec, source):
     rows = {}
     for key, value in codec.state_dict().items():
         baseline = source.state_dict()[key]
-        rows[key] = float((value.detach() - baseline.detach()).norm())
+        if value.is_floating_point() or value.is_complex():
+            rows[key] = float((value.detach() - baseline.detach()).norm())
+        else:
+            rows[key] = 0.0 if torch.equal(value, baseline) else float("inf")
     return {"per_tensor_update_norm": rows,
             "minimum_stage_update_norm": min(
                 value for key, value in rows.items() if "pq.stages" in key),
