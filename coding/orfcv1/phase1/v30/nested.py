@@ -20,9 +20,17 @@ from opq import batch_inv_normalize_gpu
 
 
 class StageBank(nn.Module):
-    def __init__(self, groups, parents, children, dim):
+    """One depth of the tree.
+
+    The root carries no parent axis.  Deeper stages always keep theirs, even
+    when they happen to have a single parent -- a zero-bit first mode gives
+    stage 1 one parent, and collapsing on ``parents == 1`` would then make it
+    indistinguishable from a root and break the composition.
+    """
+
+    def __init__(self, groups, parents, children, dim, root=False):
         super().__init__()
-        shape = ((groups, children, dim) if parents == 1 else
+        shape = ((groups, children, dim) if root else
                  (groups, parents, children, dim))
         self.codebooks = nn.Parameter(torch.empty(*shape))
 
@@ -33,9 +41,9 @@ class NestedMultiModePQ(nn.Module):
     def __init__(self, groups, mode_bits, dim):
         super().__init__()
         bits = tuple(map(int, mode_bits))
-        if not bits or any(b <= 0 for b in bits) or any(
+        if not bits or any(b < 0 for b in bits) or any(
                 right <= left for left, right in zip(bits, bits[1:])):
-            raise ValueError("mode_bits must be positive and increasing")
+            raise ValueError("mode_bits must be non-negative and increasing")
         increments = (bits[0],) + tuple(
             right - left for left, right in zip(bits, bits[1:]))
         self.G, self.d, self.D = int(groups), int(dim), int(groups * dim)
@@ -45,8 +53,9 @@ class NestedMultiModePQ(nn.Module):
         self.stage_sizes = self.mode_sizes
         parents = (1,) + self.mode_sizes[:-1]
         self.stages = nn.ModuleList([
-            StageBank(self.G, parent, branch, self.d)
-            for parent, branch in zip(parents, self.branch_sizes)])
+            StageBank(self.G, parent, branch, self.d, root=(depth == 0))
+            for depth, (parent, branch) in enumerate(
+                zip(parents, self.branch_sizes))])
 
     @property
     def num_modes(self):

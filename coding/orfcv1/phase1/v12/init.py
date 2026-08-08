@@ -14,6 +14,7 @@ from opq import batch_normalize_gpu
 
 from . import config as C
 from .. import kmeans
+from ..v21 import config as v21_config
 
 
 def _vectors(device, max_images=None, batch=64):
@@ -122,6 +123,10 @@ def load_checked(anchor, device, parameterization="direct", require_full=True):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--block", default=None, choices=tuple(v21_config.SPECS),
+                        help="omit for the legacy blk20 wiring; set blk05/"
+                             "blk10/... to retarget the caches, tail layer and "
+                             "the v21 init root")
     parser.add_argument("--anchor", required=True, choices=list(C.ANCHOR_BY_NAME))
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--images", type=int, default=None, help="debug only")
@@ -129,6 +134,8 @@ def main():
                         default="direct")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
+    if args.block is not None:
+        v21_config.activate(args.block)
     anchor = C.ANCHOR_BY_NAME[args.anchor]
     target = C.init_dir(anchor, args.parameterization) / "codec.pt"
     if target.exists() and not args.force:

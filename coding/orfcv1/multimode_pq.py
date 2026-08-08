@@ -26,8 +26,11 @@ class MultiModeSoftPQ(nn.Module):
         if not sizes or tuple(sorted(set(sizes))) != sizes:
             raise ValueError(
                 "mode_sizes must be non-empty and strictly increasing")
-        if any(k < 2 or (k & (k - 1)) for k in sizes):
-            raise ValueError("every mode size must be a power of two >= 2")
+        # K == 1 is the zero-bit mode: the group costs no rate and is served by
+        # a single learned centroid.  Low-rate anchors need it to have any
+        # allocation freedom at all.
+        if any(k < 1 or (k & (k - 1)) for k in sizes):
+            raise ValueError("every mode size must be a power of two >= 1")
         self.G, self.d, self.D = int(G), int(d), int(G * d)
         self.K = sizes[-1]
         self.mode_sizes = sizes

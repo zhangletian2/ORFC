@@ -1,22 +1,17 @@
 """V21 contracts: ORFC-rate objective across ViT split depths, R64/R96."""
 
-from ..config import Anchor
+from ..config import ANCHORS as BASE_ANCHORS
 from ..v12 import config as C
 
 
+# Every depth offers the same rate ladder; only the tail layer differs.
+_LADDER = BASE_ANCHORS
+
 SPECS = {
-    "blk05": (5, (
-        Anchor("R64", 64, 2, (1, 2, 3)),
-        Anchor("R96", 96, 3, (2, 3, 4)))),
-    "blk10": (10, (
-        Anchor("R64", 64, 2, (1, 2, 3)),
-        Anchor("R96", 96, 3, (2, 3, 4)))),
-    "blk15": (15, (
-        Anchor("R64", 64, 2, (1, 2, 3)),
-        Anchor("R96", 96, 3, (2, 3, 4)))),
-    "blk20": (20, (
-        Anchor("R64", 64, 2, (1, 2, 3)),
-        Anchor("R96", 96, 3, (2, 3, 4)))),
+    "blk05": (5, _LADDER),
+    "blk10": (10, _LADDER),
+    "blk15": (15, _LADDER),
+    "blk20": (20, _LADDER),
 }
 
 RATE_LAMBDA = 0.5

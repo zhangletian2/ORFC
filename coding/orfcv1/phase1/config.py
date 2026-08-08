@@ -79,9 +79,15 @@ class Anchor(NamedTuple):
         return V9 / self.name
 
 
+# R32: uniform K2, one group dropped to K1 and another to K4.
 # R64: uniform K4, one group to K2 and another to K8.
 # R96: uniform K8, one group to K4 and another to K16.
+#
+# R32 sits at one bit per group, the floor of the R64 ladder, so a positive
+# ladder would admit exactly one allocation.  Its down-mode is therefore K1:
+# the group costs no rate and is served by a single learned centroid.
 ANCHORS = (
+    Anchor(name="R32", rate=32, uniform_bits=1, mode_bits=(0, 1, 2)),
     Anchor(name="R64", rate=64, uniform_bits=2, mode_bits=(1, 2, 3)),
     Anchor(name="R96", rate=96, uniform_bits=3, mode_bits=(2, 3, 4)),
 )
