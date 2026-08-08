@@ -6,6 +6,15 @@ from itertools import permutations
 import torch
 
 
+def _mode_count_imbalance(counts, steps):
+    """Squared deviation of per-member mode counts from uniform."""
+    if steps == 0:
+        return 0.0
+    modes = len(counts[0])
+    target = steps / modes
+    return sum((count - target) ** 2 for row in counts for count in row)
+
+
 @lru_cache(maxsize=None)
 def _base_slate(groups, bits, rate):
     """Return M allocations: every group uses every mode once, each at rate R."""
@@ -41,19 +50,32 @@ def _base_slate(groups, bits, rate):
         return tuple(tuple(map(int, row)) for row in slate.tolist())
     options = tuple(permutations(range(modes)))
     target = (rate,) * (modes - 1)
-    states = {(0,) * (modes - 1): None}
+    empty_counts = tuple((0,) * modes for _ in range(modes))
+    # Prefer near-uniform per-member mode counts among exact-budget paths.
+    # First-reach setdefault otherwise yields degeneracies like (16,0,16).
+    states = {(0,) * (modes - 1): (None, None, empty_counts, 0.0)}
     parents = []
     for group in range(groups):
         remaining = groups - group - 1
         current = {}
-        for state in states:
+        for state, (_, _, counts, _) in states.items():
             for option in options:
                 value = tuple(state[row] + bits[option[row]]
                               for row in range(modes - 1))
                 if any(x > rate or x + remaining * min(bits) > rate
                        or x + remaining * max(bits) < rate for x in value):
                     continue
-                current.setdefault(value, (state, option))
+                new_counts = tuple(
+                    tuple(counts[row][mode] + (option[row] == mode)
+                          for mode in range(modes))
+                    for row in range(modes)
+                )
+                score = _mode_count_imbalance(new_counts, group + 1)
+                previous = current.get(value)
+                if (previous is None
+                        or score < previous[3]
+                        or (score == previous[3] and new_counts < previous[2])):
+                    current[value] = (state, option, new_counts, score)
         if not current:
             raise ValueError("no strictly fair exact-budget slate exists")
         parents.append(current)
@@ -62,7 +84,7 @@ def _base_slate(groups, bits, rate):
         raise ValueError("no strictly fair exact-budget slate reaches the rate")
     chosen, state = [], target
     for table in reversed(parents):
-        previous, option = table[state]
+        previous, option, _, _ = table[state]
         chosen.append(option)
         state = previous
     slate = torch.tensor(list(reversed(chosen)), dtype=torch.long).t()
