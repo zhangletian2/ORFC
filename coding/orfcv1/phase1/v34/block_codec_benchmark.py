@@ -29,11 +29,18 @@ FULL_TOKENS, FEATURE_DIM = 257, 1024
 
 
 def codec_spec(codec):
-    patch_side = 16 if codec.arm == "orfc" else 8
+    if codec.arm == "orfc":
+        grid_h = grid_w = 16
+        block_shape = (1, 1)
+    else:
+        block_shape = codec.pq.block_shape
+        grid_h = math.ceil(16 / block_shape[0])
+        grid_w = math.ceil(16 / block_shape[1])
     return {
-        "arm": codec.arm, "side": patch_side, "positions": patch_side ** 2,
+        "arm": codec.arm, "grid_h": grid_h, "grid_w": grid_w,
+        "block_shape": list(block_shape), "positions": grid_h * grid_w,
         "groups": int(codec.pq.G), "K": int(codec.pq.K), "d": int(codec.pq.d),
-        "symbols_per_image": patch_side ** 2 * int(codec.pq.G),
+        "symbols_per_image": grid_h * grid_w * int(codec.pq.G),
         "codebook_parameters": int(codec.pq.codebooks.numel()),
     }
 
@@ -69,8 +76,8 @@ def hard_labels(codec, x_np, device, spec):
 
 def context_ids(labels, spec, context_count):
     n, positions, groups = labels.shape
-    side, k = spec["side"], spec["K"]
-    grid = labels.reshape(n, side, side, groups).astype(np.int64)
+    height, width, k = spec["grid_h"], spec["grid_w"], spec["K"]
+    grid = labels.reshape(n, height, width, groups).astype(np.int64)
     left = np.full_like(grid, k)
     up = np.full_like(grid, k)
     left[:, :, 1:] = grid[:, :, :-1]
@@ -101,7 +108,8 @@ def collect(codec, batches, device, spec):
     records = []
     for x in batches:
         labels = hard_labels(codec, x, device, spec)
-        records.extend({"labels": row, "side": spec["side"],
+        records.extend({"labels": row,
+                        "grid_shape": (spec["grid_h"], spec["grid_w"]),
                         "full_tokens": FULL_TOKENS} for row in labels)
     return records
 
@@ -118,10 +126,13 @@ def variable_records(codec, paths, device, spec):
         patch_side = int(round(math.sqrt(x.shape[1] - 1)))
         if patch_side ** 2 != x.shape[1] - 1:
             raise ValueError(f"non-square patch grid {x.shape} in {path}")
-        symbol_side = patch_side if codec.arm == "orfc" else (patch_side + 1) // 2
-        local = dict(spec, side=symbol_side, positions=symbol_side ** 2)
+        block_h, block_w = spec["block_shape"]
+        symbol_h = math.ceil(patch_side / block_h)
+        symbol_w = math.ceil(patch_side / block_w)
+        local = dict(spec, grid_h=symbol_h, grid_w=symbol_w,
+                     positions=symbol_h * symbol_w)
         labels = hard_labels(codec, np.array(x, copy=True), device, local)
-        records.extend({"labels": row, "side": symbol_side,
+        records.extend({"labels": row, "grid_shape": (symbol_h, symbol_w),
                         "full_tokens": int(x.shape[1]), "source": path.name}
                        for row in labels)
     return records
@@ -129,8 +140,9 @@ def variable_records(codec, paths, device, spec):
 
 def add_record_counts(counts, records, spec):
     for record in records:
-        local = dict(spec, side=record["side"],
-                     positions=record["side"] ** 2)
+        height, width = record["grid_shape"]
+        local = dict(spec, grid_h=height, grid_w=width,
+                     positions=height * width)
         add_counts(counts, record["labels"][None], local)
 
 
@@ -213,9 +225,9 @@ def context_stream(labels, provider, spec, contexts):
     decoded = np.empty_like(flat)
     t0 = time.perf_counter()
     for pos in range(spec["positions"]):
-        row, col = divmod(pos, spec["side"])
+        row, col = divmod(pos, spec["grid_w"])
         left = decoded[pos - 1] if col else np.full(spec["groups"], spec["K"])
-        up = (decoded[pos - spec["side"]] if row
+        up = (decoded[pos - spec["grid_w"]] if row
               else np.full(spec["groups"], spec["K"]))
         current = ((left * (spec["K"] + 1) + up) % contexts).astype(np.int64)
         step_cdfs = [provider.spatial(g, int(current[g]))
@@ -236,8 +248,9 @@ def rate_dataset(records, provider, spec, counts):
         total_patch_tokens = 0
         for record in records:
             image = record["labels"]
-            local = dict(spec, side=record["side"],
-                         positions=record["side"] ** 2)
+            height, width = record["grid_shape"]
+            local = dict(spec, grid_h=height, grid_w=width,
+                         positions=height * width)
             if name == "factor":
                 stream, e, d, p = coder(image, provider, local)
             else:
@@ -269,7 +282,8 @@ def encode_gpu(codec, x):
     if codec.arm == "orfc":
         vectors = patches.reshape(-1, codec.pq.G, codec.pq.d).permute(1, 0, 2)
     else:
-        blocks = blockify(patches.reshape(-1, 16, 16, 32, 32))
+        blocks = blockify(patches.reshape(-1, 16, 16, 32, 32),
+                          block_shape=codec.pq.block_shape)
         vectors = codec.pq.split(blocks).permute(2, 0, 1, 3).reshape(
             codec.pq.G, -1, codec.pq.d)
     labels = torch.cdist(vectors, codec.pq.codebooks).argmin(-1)
@@ -287,7 +301,7 @@ def decode_gpu(codec, labels, cls, mu, std):
         patch = chosen.reshape(b, 256, FEATURE_DIM)
     else:
         merged = codec.pq.merge(chosen)
-        patch = unblockify(merged, 16, 16)
+        patch = unblockify(merged, 16, 16, codec.pq.block_shape)
     patch = patch @ codec.transform.get_rotation().t()
     return batch_inv_normalize_gpu(torch.cat((cls, patch), 1), mu, std)
 
