@@ -1,0 +1,14 @@
+{
+  "task": "cls",
+  "tag": "bypass_blk05",
+  "layer": "blk05",
+  "mode": "bypass",
+  "ckpt": "",
+  "n_samples": 500,
+  "avg_mse": 0.0,
+  "metrics": {
+    "top-1": 88.6,
+    "top-5": 98.6
+  },
+  "norm_mode": "split_reg_cls_patch"
+}

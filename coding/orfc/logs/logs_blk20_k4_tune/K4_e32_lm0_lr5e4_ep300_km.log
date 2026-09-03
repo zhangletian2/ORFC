@@ -1,48 +1,0 @@
-
-######################################################################
-# Feature Codec Experiment (OrthogonalTransform + PQ)
-# layer=blk20 (idx=20), K=4, emb=32, bt=1024
-# transform: all trainable
-# epochs=300, lr=0.0005, λ=0.0, τ=0.5→0.005
-# max_train=5000, batch=32
-# 2026-02-25 11:57:02
-######################################################################
-
-Data: train=5000, test=500
-  并行加载特征 (workers=8)...
-Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:   7%|▋         | 331/5000 [00:00<00:01, 3280.94it/s]Loading:  13%|█▎        | 660/5000 [00:00<00:01, 2815.30it/s]Loading:  19%|█▉        | 950/5000 [00:00<00:01, 2848.69it/s]Loading:  25%|██▌       | 1252/5000 [00:00<00:01, 2909.91it/s]Loading:  31%|███       | 1545/5000 [00:00<00:01, 2758.15it/s]Loading:  37%|███▋      | 1840/5000 [00:00<00:01, 2815.80it/s]Loading:  43%|████▎     | 2142/5000 [00:00<00:00, 2878.74it/s]Loading:  49%|████▊     | 2432/5000 [00:00<00:00, 2781.42it/s]Loading:  54%|█████▍    | 2717/5000 [00:00<00:00, 2799.90it/s]Loading:  60%|██████    | 3023/5000 [00:01<00:00, 2877.11it/s]Loading:  66%|██████▌   | 3312/5000 [00:01<00:00, 2787.57it/s]Loading:  72%|███████▏  | 3592/5000 [00:01<00:00, 2764.15it/s]Loading:  77%|███████▋  | 3870/5000 [00:01<00:00, 2758.42it/s]Loading:  83%|████████▎ | 4147/5000 [00:01<00:00, 2745.92it/s]Loading:  88%|████████▊ | 4422/5000 [00:01<00:00, 2665.97it/s]Loading:  94%|█████████▍| 4691/5000 [00:01<00:00, 2671.52it/s]Loading:  99%|█████████▉| 4971/5000 [00:01<00:00, 2709.07it/s]Loading: 100%|██████████| 5000/5000 [00:01<00:00, 2780.82it/s]
-  并行加载特征 (workers=8)...
-Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  54%|█████▍    | 269/500 [00:00<00:00, 2686.36it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 2629.74it/s]
-  D=1024, D'=1024, T=257, G=32, d=32
-  bits/token=64
-
-Loading DINOv2...
-  Tail: 3 blocks (blk21..blk23) + norm
-
-============================================================
-  [Standard OPQ] baseline
-============================================================
-    OPQ done: MSE=0.27700061 (25.7s)
-  * Standard OPQ Acc = 0.0340
-  * Standard OPQ ΔL_ref = 691699.2
-
-============================================================
-  [Codec] K=4, λ=0.0, bt=1024, epochs=300, τ=0.5→0.005
-============================================================
-  K-means init for codebooks (5000 images)...
-Traceback (most recent call last):
-  File "/data4/workspace/zlt/featcodec/coding/vq/v3.4/run_soft_pq.py", line 913, in <module>
-    main()
-  File "/data4/workspace/zlt/featcodec/coding/vq/v3.4/run_soft_pq.py", line 909, in main
-    run_experiment(args)
-  File "/data4/workspace/zlt/featcodec/coding/vq/v3.4/run_soft_pq.py", line 625, in run_experiment
-    codec, history = train_soft_pq(
-  File "/data4/workspace/zlt/featcodec/coding/vq/v3.4/soft_pq.py", line 504, in train_soft_pq
-    pq.init_from_kmeans(Z_flat, device=device)
-  File "/data4/workspace/zlt/featcodec/coding/vq/v3.4/soft_pq.py", line 190, in init_from_kmeans
-    centroids = batched_kmeans(sub, self.K,
-  File "/data4/workspace/zlt/featcodec/coding/vq/v3.2/opq.py", line 114, in batched_kmeans
-    dists = torch.cdist(batch, centroids)  # [G, chunk, K]
-  File "/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torch/functional.py", line 1222, in cdist
-    return _VF.cdist(x1, x2, p, None)  # type: ignore[attr-defined]
-torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 5.21 GiB (GPU 0; 23.65 GiB total capacity; 16.40 GiB already allocated; 2.26 GiB free; 20.83 GiB reserved in total by PyTorch) If reserved memory is >> allocated memory try setting max_split_size_mb to avoid fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF

@@ -1,0 +1,16 @@
+{
+  "task": "depth",
+  "tag": "bypass_blk10",
+  "layer": "blk10",
+  "mode": "bypass",
+  "ckpt": "",
+  "n_samples": 654,
+  "missing_gt": 0,
+  "avg_mse": 0.0,
+  "metrics": {
+    "rmse": 0.34742241544187613,
+    "abs_rel": 0.09773248445459097,
+    "a1": 0.9235997629275016
+  },
+  "norm_mode": "split_reg_cls_patch"
+}

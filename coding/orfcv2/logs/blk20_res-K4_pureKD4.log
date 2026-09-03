@@ -1,0 +1,79 @@
+/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torchvision/datapoints/__init__.py:12: UserWarning: The torchvision.datapoints and torchvision.transforms.v2 namespaces are still Beta. While we do not expect major breaking changes, some APIs may still change according to user feedback. Please submit any feedback you may have in this issue: https://github.com/pytorch/vision/issues/6753, and you can also check out https://github.com/pytorch/vision/issues/7319 to learn more about the APIs that we suspect might involve future changes. You can silence this warning by calling torchvision.disable_beta_transforms_warning().
+  warnings.warn(_BETA_TRANSFORMS_WARNING)
+/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torchvision/transforms/v2/__init__.py:54: UserWarning: The torchvision.datapoints and torchvision.transforms.v2 namespaces are still Beta. While we do not expect major breaking changes, some APIs may still change according to user feedback. Please submit any feedback you may have in this issue: https://github.com/pytorch/vision/issues/6753, and you can also check out https://github.com/pytorch/vision/issues/7319 to learn more about the APIs that we suspect might involve future changes. You can silence this warning by calling torchvision.disable_beta_transforms_warning().
+  warnings.warn(_BETA_TRANSFORMS_WARNING)
+
+######################################################################
+# Scalable codec: frozen base (tail-MSE) + task residual
+# layer=blk20 (idx=20)  backbone=dinov2_vitl14
+# base_ckpt=blk20_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.pt
+# residual: K=4, emb=32, transform=orthogonal, loss=task
+# epochs=100, lr=0.0003, lmbda_rate=0.0, ecvq_lmbda=0.0, lmbda_kd=4.0, beta_mse=0.0
+# 2026-08-11 05:15:42
+######################################################################
+
+Data: train=5000, test=500
+  并行加载特征 (workers=4)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:   6%|▌         | 287/5000 [00:00<00:01, 2827.82it/s]Loading:  11%|█▏        | 570/5000 [00:00<00:01, 2642.17it/s]Loading:  17%|█▋        | 839/5000 [00:00<00:01, 2655.99it/s]Loading:  22%|██▏       | 1118/5000 [00:00<00:01, 2704.26it/s]Loading:  28%|██▊       | 1389/5000 [00:00<00:01, 2563.41it/s]Loading:  33%|███▎      | 1647/5000 [00:00<00:01, 2474.45it/s]Loading:  38%|███▊      | 1896/5000 [00:00<00:01, 2441.39it/s]Loading:  43%|████▎     | 2141/5000 [00:00<00:01, 2396.40it/s]Loading:  48%|████▊     | 2384/5000 [00:00<00:01, 2405.18it/s]Loading:  53%|█████▎    | 2629/5000 [00:01<00:00, 2417.55it/s]Loading:  57%|█████▊    | 2875/5000 [00:01<00:00, 2424.97it/s]Loading:  62%|██████▏   | 3118/5000 [00:01<00:00, 2421.42it/s]Loading:  67%|██████▋   | 3369/5000 [00:01<00:00, 2442.27it/s]Loading:  72%|███████▏  | 3621/5000 [00:01<00:00, 2464.17it/s]Loading:  78%|███████▊  | 3891/5000 [00:01<00:00, 2526.98it/s]Loading:  83%|████████▎ | 4144/5000 [00:01<00:00, 2491.95it/s]Loading:  88%|████████▊ | 4394/5000 [00:01<00:00, 2436.91it/s]Loading:  93%|█████████▎| 4638/5000 [00:01<00:00, 2386.39it/s]Loading:  98%|█████████▊| 4877/5000 [00:01<00:00, 2383.97it/s]Loading: 100%|██████████| 5000/5000 [00:02<00:00, 2454.31it/s]
+  并行加载特征 (workers=4)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  50%|████▉     | 248/500 [00:00<00:00, 2472.80it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 2532.60it/s]
+  D=1024, T=257, labels: 1000 classes
+  train=4800, val=200 (held out from train pool)
+
+Loading DINOv2 (dinov2_vitl14)...
+  Tail: 3 blocks (blk21..blk23) + norm
+
+============================================================
+  [Base] frozen codec from stage 1 (tail-MSE optimised)
+============================================================
+  base: G=32, K=8, d=32, transform=OrthogonalTransform, fixed rate=96 bits/token
+  residual: G=32, K=4, d=32, fixed rate=64 bits/token
+
+  Collecting residuals R = Y - Ŷ_base for initialisation (≤62,500 vectors)...
+  residual vectors: (62496, 1024), mean square = 0.347928
+  Residual init: OPQ on 62,496 residual vectors (G=32, d=32, K=4)
+    residual OPQ MSE=0.26481915 (104.6s)
+
+============================================================
+  [Residual] training under 'task' loss
+============================================================
+  Base codec: 532,224 params (frozen), G=32, K=8, d=32
+  Residual codec: G=32, K=4, d=32, 527,872 trainable params
+  Residual transform ||R'R-I||=5.29e-04
+  Loss: 4.0*KD(T=2.0)
+  Soft PQ: τ 0.500 → 0.0050 (exponential)
+  Pre-computing teacher logits (4800 images)...
+  ep   0/100  D=2.1048  acc=0.816  ppl=3.9  dead=0  τ=0.5000  val=0.8002  val_acc=0.775  (17.0s)
+  ep  10/100  D=0.6409  acc=0.856  ppl=3.8  dead=0  τ=0.3140  val=0.7683  val_acc=0.795  (9.4s)
+  ep  20/100  D=0.5353  acc=0.856  ppl=3.8  dead=0  τ=0.1972  val=0.7751  val_acc=0.790  (9.5s)
+  ep  30/100  D=0.4769  acc=0.856  ppl=3.8  dead=0  τ=0.1239  val=0.7626  val_acc=0.810  (9.5s)
+  ep  40/100  D=0.4367  acc=0.856  ppl=3.8  dead=0  τ=0.0778  val=0.7535  val_acc=0.800  (9.5s)
+  ep  50/100  D=0.4008  acc=0.858  ppl=3.8  dead=0  τ=0.0489  val=0.7473  val_acc=0.800  (9.5s)
+  ep  60/100  D=0.3719  acc=0.858  ppl=3.8  dead=0  τ=0.0307  val=0.7518  val_acc=0.790  (9.5s)
+  ep  70/100  D=0.3472  acc=0.860  ppl=3.8  dead=0  τ=0.0193  val=0.7378  val_acc=0.795  (9.5s)
+  ep  80/100  D=0.3264  acc=0.858  ppl=3.8  dead=0  τ=0.0121  val=0.7412  val_acc=0.800  (9.5s)
+  ep  90/100  D=0.3124  acc=0.859  ppl=3.8  dead=0  τ=0.0076  val=0.7441  val_acc=0.800  (9.5s)
+  ep  99/100  D=0.3073  acc=0.859  ppl=3.8  dead=0  τ=0.0050  val=0.7461  val_acc=0.800  (9.5s)
+  Residual training: 988.9s
+  Residual codec saved: /data4/workspace/zlt/featcodec/ORFC/coding/orfcv2/checkpoints/dinov2_vitl14/base-blk20_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_res_task_K4_emb32_orthogonal_ce0.0_kd4.0T2.0_tau0.5_lr0.0003_ep100_n5000_s42.pt
+
+============================================================
+  [Eval] classification / tail MSE / rate
+============================================================
+  * base only       Acc=0.8740  ΔL_ref=225991.6
+  * base + residual Acc=0.9340  ΔL_ref=239028.6
+  * Δ(Acc)=+0.0600  Δ(ΔL_ref)=+13037.1
+  Computing train PMFs and test rate...
+  * base    : rANS=94.94  xent=94.94  H_emp=94.72  max=96  BPFP=0.0927
+  * residual: rANS=62.35  xent=62.35  H_emp=62.21  max=64  BPFP=0.0609
+  * total: rANS=157.29 b/t  BPFP=0.1536
+
+============================================================
+  Summary: blk20  base K=8/d=32  residual K=4/d=32  loss=task
+  Acc     : base=0.8740 -> full=0.9340 (+0.0600)
+  ΔL_ref  : base=225991.6 -> full=239028.6 (+13037.1)
+  Rate    : base=94.94 + residual=62.35 = 157.29 bits/token
+  Train time: 988.9s
+============================================================
+
+Results saved: /data4/workspace/zlt/featcodec/ORFC/coding/orfcv2/results/dinov2_vitl14/base-blk20_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_res_task_K4_emb32_orthogonal_ce0.0_kd4.0T2.0_tau0.5_lr0.0003_ep100_n5000_s42.json

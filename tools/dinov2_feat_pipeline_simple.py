@@ -162,58 +162,92 @@ def _load_classifier(args):
     backbone = getattr(clf, "backbone", clf)
     return clf, backbone, reg
 
+class _ImgListDataset(torch.utils.data.Dataset):
+    """每项返回 (tensor, basename, img_path)；缺失图像返回 None 占位由 collate 过滤。"""
+    def __init__(self, root, pairs, transform):
+        self.root = root
+        self.pairs = pairs
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.pairs)
+
+    def __getitem__(self, idx):
+        wnid, base = self.pairs[idx]
+        img_path = os.path.join(self.root, wnid, base + ".JPEG")
+        if not os.path.isfile(img_path):
+            return None
+        img = Image.open(img_path).convert("RGB")
+        return self.transform(img), base, img_path
+
+
+def _collate_skip_none(batch):
+    batch = [b for b in batch if b is not None]
+    if not batch:
+        return None
+    xs, bases, paths = zip(*batch)
+    return torch.stack(xs, 0), list(bases), list(paths)
+
+
 def cmd_extract(args):
     device = args.device
     tfm = build_transform()
     pairs = load_list(args.list)
     os.makedirs(args.out_root, exist_ok=True)
+    layers = [int(x) for x in args.blocks.split(",")]
+    for k in layers:
+        os.makedirs(os.path.join(args.out_root, f"blk{k:02d}"), exist_ok=True)
 
     clf, backbone, reg = _load_classifier(args)
-
-    layers = [int(x) for x in args.blocks.split(",")]
     catcher = BlockOutputCatcher(backbone, layers)
+
+    loader = torch.utils.data.DataLoader(
+        _ImgListDataset(args.root, pairs, tfm),
+        batch_size=max(1, args.batch_size),
+        shuffle=False,
+        num_workers=max(0, args.num_workers),
+        pin_memory=(device.startswith("cuda")),
+        persistent_workers=(args.num_workers > 0),
+        collate_fn=_collate_skip_none,
+    )
 
     mf = open(os.path.join(args.out_root, "manifest.jsonl"), "a", encoding="utf-8") if args.write_manifest else None
     t0, n = time.time(), 0
 
     try:
-        for wnid, base in tqdm(pairs, desc="Extracting"):
-            img_path = os.path.join(args.root, wnid, base + ".JPEG")
-            if not os.path.isfile(img_path):
-                print(f"[warn] missing image: {img_path}")
+        for batch in tqdm(loader, desc="Extracting"):
+            if batch is None:
                 continue
-
-            img = Image.open(img_path).convert('RGB')
-            x = tfm(img).unsqueeze(0).to(device)
-
+            x, bases, paths = batch
+            x = x.to(device, non_blocking=True)
             _ = clf(x)
-
             outs = catcher.pop()
-            for k in layers:
-                key = f"blk{k:02d}"
-                arr = outs[key].squeeze(0).numpy().astype(np.float32)
-                layer_dir = os.path.join(args.out_root, key)
-                os.makedirs(layer_dir, exist_ok=True)
-                save_path = os.path.join(layer_dir, f"{base}.npy")
-                np.save(save_path, arr)
-                if mf:
-                    rec = {
-                        "id": base,
-                        "model": reg["tag"],
-                        "layer": key,
-                        "path": save_path,
-                        "shape": list(arr.shape),
-                        "dtype": "float32",
-                        "img_path": img_path,
-                        "sha1": sha1_file(save_path)
-                    }
-                    mf.write(json.dumps(rec, ensure_ascii=False) + "\n")
-            n += 1
+            B = len(bases)
+            for i in range(B):
+                for k in layers:
+                    key = f"blk{k:02d}"
+                    arr = outs[key][i].numpy().astype(np.float32)
+                    save_path = os.path.join(args.out_root, key, f"{bases[i]}.npy")
+                    np.save(save_path, arr)
+                    if mf:
+                        rec = {
+                            "id": bases[i],
+                            "model": reg["tag"],
+                            "layer": key,
+                            "path": save_path,
+                            "shape": list(arr.shape),
+                            "dtype": "float32",
+                            "img_path": paths[i],
+                            "sha1": sha1_file(save_path),
+                        }
+                        mf.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                n += 1
     finally:
         catcher.close()
         if mf: mf.close()
 
-    print(f"[extract] Done. N={n} layers={layers} out_root={args.out_root} ({time.time()-t0:.2f}s)")
+    print(f"[extract] Done. N={n} layers={layers} bs={args.batch_size} "
+          f"workers={args.num_workers} out_root={args.out_root} ({time.time()-t0:.2f}s)")
 
 def cmd_replay(args):
     device = args.device
@@ -265,6 +299,8 @@ def build_parser():
     pe.add_argument('--head_layers', type=int, default=1, choices=[1,4])
     pe.add_argument('--out_root', required=True, help='特征输出根目录')
     pe.add_argument('--blocks', default='5,11,17,23', help='0-based 块索引，逗号分隔')
+    pe.add_argument('--batch_size', type=int, default=32, help='提取 batch size')
+    pe.add_argument('--num_workers', type=int, default=8, help='DataLoader workers')
     pe.add_argument('--device', default='cuda')
     pe.add_argument('--write_manifest', action='store_true')
 

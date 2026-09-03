@@ -1,0 +1,1 @@
+/data4/workspace/zlt/featcodec/utils/imagenet_selected_pathname5000_stage2.txt

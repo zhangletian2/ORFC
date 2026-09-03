@@ -1,0 +1,47 @@
+/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torchvision/datapoints/__init__.py:12: UserWarning: The torchvision.datapoints and torchvision.transforms.v2 namespaces are still Beta. While we do not expect major breaking changes, some APIs may still change according to user feedback. Please submit any feedback you may have in this issue: https://github.com/pytorch/vision/issues/6753, and you can also check out https://github.com/pytorch/vision/issues/7319 to learn more about the APIs that we suspect might involve future changes. You can silence this warning by calling torchvision.disable_beta_transforms_warning().
+  warnings.warn(_BETA_TRANSFORMS_WARNING)
+/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torchvision/transforms/v2/__init__.py:54: UserWarning: The torchvision.datapoints and torchvision.transforms.v2 namespaces are still Beta. While we do not expect major breaking changes, some APIs may still change according to user feedback. Please submit any feedback you may have in this issue: https://github.com/pytorch/vision/issues/6753, and you can also check out https://github.com/pytorch/vision/issues/7319 to learn more about the APIs that we suspect might involve future changes. You can silence this warning by calling torchvision.disable_beta_transforms_warning().
+  warnings.warn(_BETA_TRANSFORMS_WARNING)
+device=cuda:0  CUDA_VISIBLE_DEVICES=7
+jobs: 3
+
+######## blk20  n=3 ########
+  并行加载特征 (workers=4)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  36%|███▌      | 178/500 [00:00<00:00, 1771.47it/s]Loading:  71%|███████   | 356/500 [00:00<00:00, 1668.13it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 1655.06it/s]
+  test images: 500
+  tail: 3 blocks after blk20
+
+=== blk20_K256  base-blk20_K256_emb32_bt1024_ws_tau0.5_lr0.0005_ep100_n5000_s42_task-cls_res_tas ===
+  json Acc  base=0.9540  full=0.9540  Δ=+0.0000
+  codebook  dead=0  mean_ppl=1.952  min_ppl=1.026  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=1.1290  min=0.6909  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.2303  mse=0.2202  SNR=0.20 dB  imbalance>0.9=1
+  running leave-one-group-out …
+  Acc  orig=0.9800  base=0.9540  full=0.9540
+  KL   orig=-0.0000  base=0.2743  full=0.2347
+  only  worst g=27  ΔAcc=-0.0040  ΔKL=+0.0051
+  drop  best recover g=3  ΔAcc=+0.0080
+
+=== blk20_K4  base-blk20_K4_emb32_bt1024_ws_tau0.5_lr0.0005_ep300_n5000_s42_task-cls_res_task_ ===
+  json Acc  base=0.8260  full=0.8600  Δ=+0.0340
+  codebook  dead=0  mean_ppl=1.882  min_ppl=1.026  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=3.8339  min=1.1479  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.4344  mse=0.3900  SNR=0.46 dB  imbalance>0.9=3
+  running leave-one-group-out …
+  Acc  orig=0.9800  base=0.8260  full=0.8600
+  KL   orig=-0.0000  base=1.4061  full=1.0470
+  only  worst g=0  ΔAcc=-0.0060  ΔKL=+0.0800
+  drop  best recover g=16  ΔAcc=+0.0380
+
+=== blk20_K8  base-blk20_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-cls_ ===
+  json Acc  base=0.8740  full=0.9060  Δ=+0.0320
+  codebook  dead=0  mean_ppl=1.928  min_ppl=1.026  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=1.8995  min=1.0513  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.3461  mse=0.3263  SNR=0.25 dB  imbalance>0.9=2
+  running leave-one-group-out …
+  Acc  orig=0.9800  base=0.8740  full=0.9060
+  KL   orig=-0.0000  base=0.8349  full=0.6635
+  only  worst g=0  ΔAcc=-0.0120  ΔKL=+0.0458
+  drop  best recover g=15  ΔAcc=+0.0180
+
+saved /data4/workspace/zlt/featcodec/ORFC/coding/orfcv2/results/dinov2_vitl14/diag/channels_loco_blk20_K4_8_256.json

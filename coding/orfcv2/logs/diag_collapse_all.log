@@ -1,0 +1,159 @@
+/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torchvision/datapoints/__init__.py:12: UserWarning: The torchvision.datapoints and torchvision.transforms.v2 namespaces are still Beta. While we do not expect major breaking changes, some APIs may still change according to user feedback. Please submit any feedback you may have in this issue: https://github.com/pytorch/vision/issues/6753, and you can also check out https://github.com/pytorch/vision/issues/7319 to learn more about the APIs that we suspect might involve future changes. You can silence this warning by calling torchvision.disable_beta_transforms_warning().
+  warnings.warn(_BETA_TRANSFORMS_WARNING)
+/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torchvision/transforms/v2/__init__.py:54: UserWarning: The torchvision.datapoints and torchvision.transforms.v2 namespaces are still Beta. While we do not expect major breaking changes, some APIs may still change according to user feedback. Please submit any feedback you may have in this issue: https://github.com/pytorch/vision/issues/6753, and you can also check out https://github.com/pytorch/vision/issues/7319 to learn more about the APIs that we suspect might involve future changes. You can silence this warning by calling torchvision.disable_beta_transforms_warning().
+  warnings.warn(_BETA_TRANSFORMS_WARNING)
+jobs: 22
+
+######## blk05  n=5 ########
+  并行加载特征 (workers=4)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  31%|███       | 155/500 [00:00<00:00, 1540.61it/s]Loading:  62%|██████▏   | 310/500 [00:00<00:00, 1474.22it/s]Loading:  93%|█████████▎| 466/500 [00:00<00:00, 1512.25it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 1522.07it/s]
+  test images: 500
+
+=== blk05_K16  base-blk05_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-cls ===
+  json Acc  base=0.9640  full=0.9620  Δ=-0.0020
+  codebook  dead=0  mean_ppl=1.993  min_ppl=1.973  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=2.2081  min=1.8462  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.6532  mse=0.4763  SNR=1.35 dB  imbalance>0.9=0
+
+=== blk05_K256  base-blk05_K256_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-cl ===
+  json Acc  base=0.9820  full=0.9760  Δ=-0.0060
+  codebook  dead=0  mean_ppl=1.990  min_ppl=1.919  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=1.5840  min=1.1674  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.4849  mse=0.3439  SNR=1.49 dB  imbalance>0.9=0
+
+=== blk05_K4  base-blk05_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-cls_ ===
+  json Acc  base=0.9380  full=0.9360  Δ=-0.0020
+  codebook  dead=0  mean_ppl=1.992  min_ppl=1.912  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=2.3970  min=1.8590  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.8296  mse=0.6000  SNR=1.36 dB  imbalance>0.9=0
+
+=== blk05_K64  base-blk05_K64_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0005_ep100_n5000_s42_task-cls ===
+  json Acc  base=0.9780  full=0.9780  Δ=+0.0000
+  codebook  dead=0  mean_ppl=1.992  min_ppl=1.955  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=2.3196  min=1.9334  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.5999  mse=0.4219  SNR=1.51 dB  imbalance>0.9=0
+
+=== blk05_K8  base-blk05_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-cls_ ===
+  json Acc  base=0.9640  full=0.9600  Δ=-0.0040
+  codebook  dead=0  mean_ppl=1.982  min_ppl=1.800  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=2.0674  min=1.7173  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.7183  mse=0.5309  SNR=1.29 dB  imbalance>0.9=0
+
+######## blk10  n=6 ########
+  并行加载特征 (workers=4)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  19%|█▉        | 95/500 [00:00<00:00, 949.03it/s]Loading:  38%|███▊      | 190/500 [00:00<00:00, 842.80it/s]Loading:  55%|█████▌    | 276/500 [00:00<00:00, 737.28it/s]Loading:  74%|███████▍  | 369/500 [00:00<00:00, 800.61it/s]Loading:  90%|█████████ | 451/500 [00:00<00:00, 689.22it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 770.76it/s]
+  test images: 500
+
+=== blk10_K16  base-blk10_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-cls ===
+  json Acc  base=0.9800  full=0.9820  Δ=+0.0020
+  codebook  dead=0  mean_ppl=1.996  min_ppl=1.984  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=1.6217  min=1.3990  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.6256  mse=0.5287  SNR=0.72 dB  imbalance>0.9=0
+
+=== blk10_K256  base-blk10_K256_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-cl ===
+  json Acc  base=0.9860  full=0.9860  Δ=+0.0000
+  codebook  dead=0  mean_ppl=1.996  min_ppl=1.969  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=1.2291  min=1.0704  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.4422  mse=0.3791  SNR=0.67 dB  imbalance>0.9=0
+
+=== blk10_K256  base-blk10_K256_emb32_bt1024_ws_tau0.5_lr0.0005_ep100_n5000_s42_task-cls_res_tas ===
+  json Acc  base=0.9820  full=0.9840  Δ=+0.0020
+  codebook  dead=0  mean_ppl=1.995  min_ppl=1.948  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=1.5676  min=1.3345  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.4826  mse=0.4105  SNR=0.70 dB  imbalance>0.9=0
+
+=== blk10_K4  base-blk10_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-cls_ ===
+  json Acc  base=0.9620  full=0.9560  Δ=-0.0060
+  codebook  dead=0  mean_ppl=1.996  min_ppl=1.961  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=2.2238  min=1.8167  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.8185  mse=0.6671  SNR=0.86 dB  imbalance>0.9=0
+
+=== blk10_K64  base-blk10_K64_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42_task-cls_res_task ===
+  json Acc  base=0.9880  full=0.9840  Δ=-0.0040
+  codebook  dead=0  mean_ppl=1.996  min_ppl=1.977  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=1.4009  min=1.2404  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.5166  mse=0.4439  SNR=0.66 dB  imbalance>0.9=0
+
+=== blk10_K8  base-blk10_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-cls_ ===
+  json Acc  base=0.9700  full=0.9660  Δ=-0.0040
+  codebook  dead=0  mean_ppl=1.995  min_ppl=1.939  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=1.8864  min=1.4720  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.7122  mse=0.5933  SNR=0.78 dB  imbalance>0.9=0
+
+######## blk15  n=5 ########
+  并行加载特征 (workers=4)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  34%|███▍      | 171/500 [00:00<00:00, 1666.56it/s]Loading:  68%|██████▊   | 342/500 [00:00<00:00, 1688.48it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 1647.95it/s]
+  test images: 500
+
+=== blk15_K16  base-blk15_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-cls ===
+  json Acc  base=0.9580  full=0.9600  Δ=+0.0020
+  codebook  dead=0  mean_ppl=1.997  min_ppl=1.976  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=1.5410  min=1.3259  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.7185  mse=0.6471  SNR=0.45 dB  imbalance>0.9=0
+
+=== blk15_K256  base-blk15_K256_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-cl ===
+  json Acc  base=0.9760  full=0.9740  Δ=-0.0020
+  codebook  dead=0  mean_ppl=1.997  min_ppl=1.983  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=1.2553  min=1.0962  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.5382  mse=0.4905  SNR=0.40 dB  imbalance>0.9=0
+
+=== blk15_K4  base-blk15_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-cls_ ===
+  json Acc  base=0.9420  full=0.9260  Δ=-0.0160
+  codebook  dead=0  mean_ppl=1.995  min_ppl=1.963  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=1.9255  min=1.5139  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.8704  mse=0.7615  SNR=0.58 dB  imbalance>0.9=0
+
+=== blk15_K64  base-blk15_K64_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0005_ep100_n5000_s42_task-cls ===
+  json Acc  base=0.9640  full=0.9680  Δ=+0.0040
+  codebook  dead=0  mean_ppl=1.995  min_ppl=1.980  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=1.4795  min=1.2984  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.6418  mse=0.5790  SNR=0.45 dB  imbalance>0.9=0
+
+=== blk15_K8  base-blk15_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-cls_ ===
+  json Acc  base=0.9600  full=0.9600  Δ=+0.0000
+  codebook  dead=0  mean_ppl=1.997  min_ppl=1.951  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=1.6854  min=1.4380  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.7876  mse=0.7014  SNR=0.50 dB  imbalance>0.9=0
+
+######## blk20  n=6 ########
+  并行加载特征 (workers=4)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  36%|███▌      | 179/500 [00:00<00:00, 1776.78it/s]Loading:  73%|███████▎  | 364/500 [00:00<00:00, 1808.79it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 1944.45it/s]
+  test images: 500
+
+=== blk20_K16  base-blk20_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0005_ep100_n5000_s42_task-cls ===
+  json Acc  base=0.9160  full=0.9320  Δ=+0.0160
+  codebook  dead=0  mean_ppl=1.953  min_ppl=1.026  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=1.2768  min=0.9244  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.3194  mse=0.3018  SNR=0.24 dB  imbalance>0.9=1
+
+=== blk20_K256  base-blk20_K256_emb32_bt1024_ws_tau0.5_lr0.0005_ep100_n5000_s42_task-cls_res_tas ===
+  json Acc  base=0.9540  full=0.9540  Δ=+0.0000
+  codebook  dead=0  mean_ppl=1.952  min_ppl=1.026  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=1.1290  min=0.6909  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.2303  mse=0.2202  SNR=0.20 dB  imbalance>0.9=1
+
+=== blk20_K32  base-blk20_K32_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-cls ===
+  json Acc  base=0.9400  full=0.9440  Δ=+0.0040
+  codebook  dead=0  mean_ppl=1.959  min_ppl=1.026  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=1.2111  min=0.8347  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.2900  mse=0.2745  SNR=0.24 dB  imbalance>0.9=1
+
+=== blk20_K4  base-blk20_K4_emb32_bt1024_ws_tau0.5_lr0.0005_ep300_n5000_s42_task-cls_res_task_ ===
+  json Acc  base=0.8260  full=0.8600  Δ=+0.0340
+  codebook  dead=0  mean_ppl=1.882  min_ppl=1.026  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=3.8339  min=1.1479  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.4344  mse=0.3900  SNR=0.46 dB  imbalance>0.9=3
+
+=== blk20_K64  base-blk20_K64_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42_task-cls_res_task ===
+  json Acc  base=0.9360  full=0.9400  Δ=+0.0040
+  codebook  dead=0  mean_ppl=1.958  min_ppl=1.026  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=1.2270  min=0.8957  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.2652  mse=0.2531  SNR=0.20 dB  imbalance>0.9=1
+
+=== blk20_K8  base-blk20_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-cls_ ===
+  json Acc  base=0.8740  full=0.9060  Δ=+0.0320
+  codebook  dead=0  mean_ppl=1.928  min_ppl=1.026  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=1.8995  min=1.0513  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.3461  mse=0.3263  SNR=0.25 dB  imbalance>0.9=2
+
+saved /data4/workspace/zlt/featcodec/ORFC/coding/orfcv2/results/dinov2_vitl14/diag/channels_collapse_all.json

@@ -1,0 +1,44 @@
+/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torchvision/datapoints/__init__.py:12: UserWarning: The torchvision.datapoints and torchvision.transforms.v2 namespaces are still Beta. While we do not expect major breaking changes, some APIs may still change according to user feedback. Please submit any feedback you may have in this issue: https://github.com/pytorch/vision/issues/6753, and you can also check out https://github.com/pytorch/vision/issues/7319 to learn more about the APIs that we suspect might involve future changes. You can silence this warning by calling torchvision.disable_beta_transforms_warning().
+  warnings.warn(_BETA_TRANSFORMS_WARNING)
+/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torchvision/transforms/v2/__init__.py:54: UserWarning: The torchvision.datapoints and torchvision.transforms.v2 namespaces are still Beta. While we do not expect major breaking changes, some APIs may still change according to user feedback. Please submit any feedback you may have in this issue: https://github.com/pytorch/vision/issues/6753, and you can also check out https://github.com/pytorch/vision/issues/7319 to learn more about the APIs that we suspect might involve future changes. You can silence this warning by calling torchvision.disable_beta_transforms_warning().
+  warnings.warn(_BETA_TRANSFORMS_WARNING)
+
+######################################################################
+# Scalable codec: frozen base (tail-MSE) + task residual
+# layer=blk10 (idx=10)  backbone=dinov2_vitl14  task=depth
+# base_ckpt=blk10_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.pt
+# residual: K=2, emb=32, transform=orthogonal, loss=task  shareR  freezeR
+# epochs=50, lr=0.0003, lmbda_rate=0.0, ecvq_lmbda=0.0, lmbda_kd=1.0, beta_mse=0.0
+# 2026-08-27 15:24:52
+######################################################################
+
+Data: train=5000 in /data4/workspace/zlt/featcodec/ORFC/features/train/dinov2_vitl14_ade/blk10  (path-mode=True)
+  path-mode lazy train=4950, val=50 (preloaded)  D=1024, T=1814
+
+Loading DINOv2 (dinov2_vitl14)...
+Traceback (most recent call last):
+  File "/data4/workspace/zlt/featcodec/ORFC/coding/orfcv2/run_residual_pq.py", line 901, in <module>
+    main()
+  File "/data4/workspace/zlt/featcodec/ORFC/coding/orfcv2/run_residual_pq.py", line 897, in main
+    run_experiment(args)
+  File "/data4/workspace/zlt/featcodec/ORFC/coding/orfcv2/run_residual_pq.py", line 413, in run_experiment
+    wrapper = Dinov2Wrapper(head_layers=1, model_name=args.backbone,
+  File "/data4/workspace/zlt/featcodec/ORFC/coding/orfc/backbone/wrapper.py", line 304, in __init__
+    clf.to(device).eval()
+  File "/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1145, in to
+    return self._apply(convert)
+  File "/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torch/nn/modules/module.py", line 797, in _apply
+    module._apply(fn)
+  File "/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torch/nn/modules/module.py", line 797, in _apply
+    module._apply(fn)
+  File "/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torch/nn/modules/module.py", line 797, in _apply
+    module._apply(fn)
+  File "/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torch/nn/modules/module.py", line 820, in _apply
+    param_applied = fn(param)
+  File "/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1143, in convert
+    return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None, non_blocking)
+RuntimeError: CUDA error: out of memory
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1.
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+

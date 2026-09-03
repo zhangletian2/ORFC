@@ -1,0 +1,14 @@
+{
+  "task": "cls",
+  "tag": "blk10_K16_emb32_bt1024_ws_lmbda0.5_split_reg_cls_patch_tau0.5_lr0.0003_ep100_n5000_s42",
+  "layer": "blk10",
+  "mode": "orfc",
+  "ckpt": "/data4/workspace/zlt/featcodec/ORFC/coding/orfc/checkpoints/dinov3_vitl16/blk10_K16_emb32_bt1024_ws_lmbda0.5_split_reg_cls_patch_tau0.5_lr0.0003_ep100_n5000_s42.pt",
+  "n_samples": 500,
+  "avg_mse": 2276.7451171875,
+  "metrics": {
+    "top-1": 87.8,
+    "top-5": 98.4
+  },
+  "norm_mode": "split_reg_cls_patch"
+}

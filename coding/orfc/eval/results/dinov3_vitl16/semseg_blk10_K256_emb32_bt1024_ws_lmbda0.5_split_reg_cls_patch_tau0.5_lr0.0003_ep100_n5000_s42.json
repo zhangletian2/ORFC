@@ -1,0 +1,13 @@
+{
+  "task": "semseg",
+  "tag": "blk10_K256_emb32_bt1024_ws_lmbda0.5_split_reg_cls_patch_tau0.5_lr0.0003_ep100_n5000_s42",
+  "layer": "blk10",
+  "mode": "orfc",
+  "ckpt": "/data4/workspace/zlt/featcodec/ORFC/coding/orfc/checkpoints/dinov3_vitl16/blk10_K256_emb32_bt1024_ws_lmbda0.5_split_reg_cls_patch_tau0.5_lr0.0003_ep100_n5000_s42.pt",
+  "n_samples": 2000,
+  "avg_mse": 208.67784468507767,
+  "metrics": {
+    "mIoU": 0.49342316075137516
+  },
+  "norm_mode": "split_reg_cls_patch"
+}

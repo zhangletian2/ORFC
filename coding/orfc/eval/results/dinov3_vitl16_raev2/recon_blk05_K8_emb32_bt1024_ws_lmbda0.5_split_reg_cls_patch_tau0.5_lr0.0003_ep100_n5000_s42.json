@@ -1,0 +1,37 @@
+{
+  "task": "recon_raev2",
+  "tag": "blk05_K8_emb32_bt1024_ws_lmbda0.5_split_reg_cls_patch_tau0.5_lr0.0003_ep100_n5000_s42",
+  "layer": "blk05",
+  "slot": 6,
+  "mode": "orfc",
+  "ckpt": "/data4/workspace/zlt/featcodec/ORFC/coding/orfc/checkpoints/dinov3_vitl16/blk05_K8_emb32_bt1024_ws_lmbda0.5_split_reg_cls_patch_tau0.5_lr0.0003_ep100_n5000_s42.pt",
+  "n_samples": 500,
+  "img_size": 256,
+  "token_hw": [
+    16,
+    16
+  ],
+  "affine_free_ln": true,
+  "norm_mode": "split_reg_cls_patch",
+  "metrics_bypass": {
+    "psnr": 18.916425731658936,
+    "ms_ssim": 0.718590523660183,
+    "lpips": 0.17250028809905052
+  },
+  "metrics": {
+    "psnr": 18.324736225128174,
+    "ms_ssim": 0.6951359068155288,
+    "lpips": 0.1915208247601986
+  },
+  "rate": {
+    "K": 8,
+    "G": 32,
+    "emb": 32,
+    "bpfp": 96.0,
+    "bits_per_image": 25056.0,
+    "bpp": 0.38232421875,
+    "n_tokens": 261
+  },
+  "elapsed_s": 21.304495096206665,
+  "decoder": "/data4/workspace/zlt/featcodec/third_party/RAEv2/pretrained_models/stage1/imagenet/dinov3l-k1/decoder.pt"
+}

@@ -1,0 +1,29 @@
+{
+  "task": "recon_raev2",
+  "tag": "bypass_blk05",
+  "layer": "blk05",
+  "slot": 6,
+  "mode": "bypass",
+  "ckpt": "",
+  "n_samples": 500,
+  "img_size": 256,
+  "token_hw": [
+    16,
+    16
+  ],
+  "affine_free_ln": true,
+  "norm_mode": "split_reg_cls_patch",
+  "metrics_bypass": {
+    "psnr": 18.916425731658936,
+    "ms_ssim": 0.718590523660183,
+    "lpips": 0.17250028809905052
+  },
+  "metrics": {
+    "psnr": 18.916425731658936,
+    "ms_ssim": 0.718590523660183,
+    "lpips": 0.17250028809905052
+  },
+  "rate": {},
+  "elapsed_s": 14.568512201309204,
+  "decoder": "/data4/workspace/zlt/featcodec/third_party/RAEv2/pretrained_models/stage1/imagenet/dinov3l-k1/decoder.pt"
+}

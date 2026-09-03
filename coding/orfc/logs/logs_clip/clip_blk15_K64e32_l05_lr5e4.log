@@ -1,67 +1,0 @@
-
-######################################################################
-# Feature Codec Experiment (OrthogonalTransform + PQ)
-# layer=blk15 (idx=15), K=64, emb=32, bt=1024
-# transform: all trainable
-# epochs=100, lr=0.0005, λ=0.5, τ=0.5→0.005
-# max_train=5000, batch=32
-# 2026-02-24 07:20:10
-######################################################################
-
-Data: train=5000, test=500
-  并行加载特征 (workers=16)...
-Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:  27%|██▋       | 1347/5000 [00:00<00:00, 13328.26it/s]Loading:  54%|█████▎    | 2680/5000 [00:00<00:00, 3734.38it/s] Loading:  68%|██████▊   | 3375/5000 [00:00<00:00, 3082.68it/s]Loading:  77%|███████▋  | 3853/5000 [00:01<00:00, 2653.13it/s]Loading:  84%|████████▍ | 4214/5000 [00:01<00:00, 2430.51it/s]Loading:  90%|█████████ | 4511/5000 [00:01<00:00, 2438.25it/s]Loading:  96%|█████████▌| 4791/5000 [00:01<00:00, 2467.64it/s]Loading: 100%|██████████| 5000/5000 [00:01<00:00, 2883.35it/s]
-  并行加载特征 (workers=16)...
-Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  51%|█████     | 256/500 [00:00<00:00, 2536.37it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 2453.15it/s]
-  D=1024, D'=1024, T=257, G=32, d=32
-  bits/token=192
-
-Loading CLIP ViT-L/14 (classnames=/data4/workspace/zlt/CPAO_cls/dataset/imagenet/classnames.txt)...
-  Tail: 8 blocks (blk16..blk23) + norm
-
-============================================================
-  [Standard OPQ] baseline
-============================================================
-    OPQ done: MSE=0.08910535 (38.3s)
-    OPQ empirical ppl=55.1 (for prior init)
-  * Standard OPQ Acc = 0.6400
-  * Standard OPQ ΔL_ref = 116397.0
-
-============================================================
-  [Codec] K=64, λ=0.5, bt=1024, epochs=100, τ=0.5→0.005
-============================================================
-  Warm-start from OPQ (transform + codebooks)
-  log_prior init from OPQ empirical frequency
-  Trainable params: 591,360
-  Orthogonal transform: ||R'R-I||=1.01e-03
-  Soft PQ: τ 0.50 → 0.0050 (exponential)
-  Pre-computing teacher outputs (5000 images)...
-  Teacher cache: 5.3 GB CPU (31.6s)
-  ep   0/100  D=132718.2  ppl=11.4  R=155.13b/t  λD=66359.1  dead=3  τ=0.5000  val=116772.6  (29.2s)
-  ep  10/100  D=88599.4  ppl=39.3  R=175.71b/t  λD=44299.7  dead=127  τ=0.3140  val=86194.2  (27.7s)
-  ep  20/100  D=84497.0  ppl=41.6  R=175.53b/t  λD=42248.5  dead=230  τ=0.1972  val=82414.3  (27.2s)
-  ep  30/100  D=82330.6  ppl=42.0  R=174.96b/t  λD=41165.3  dead=253  τ=0.1239  val=80394.5  (26.4s)
-  ep  40/100  D=80690.0  ppl=42.0  R=174.55b/t  λD=40345.0  dead=270  τ=0.0778  val=78988.2  (26.6s)
-  ep  50/100  D=79327.0  ppl=42.0  R=174.29b/t  λD=39663.5  dead=276  τ=0.0489  val=77823.5  (28.2s)
-  ep  60/100  D=78091.8  ppl=41.9  R=174.12b/t  λD=39045.9  dead=280  τ=0.0307  val=76664.8  (26.5s)
-  ep  70/100  D=76935.4  ppl=41.9  R=174.06b/t  λD=38467.7  dead=281  τ=0.0193  val=75721.2  (26.4s)
-  ep  80/100  D=75840.6  ppl=42.0  R=173.99b/t  λD=37920.3  dead=284  τ=0.0121  val=74783.7  (26.7s)
-  ep  90/100  D=74964.0  ppl=41.9  R=173.97b/t  λD=37482.0  dead=283  τ=0.0076  val=74072.5  (26.5s)
-  ep  99/100  D=74551.5  ppl=41.9  R=173.97b/t  λD=37275.7  dead=284  τ=0.0050  val=73763.4  (26.3s)
-  Codec training: 2746.3s
-  * Codec Acc = 0.7340 (d=+0.0940)
-  * Codec ΔL_ref = 84790.4 (d=-31606.6)
-  Computing train histogram PMF...
-  * Rate: xent=173.98  xent_train=171.61  H_emp=171.27  max=192  rANS=174.00  rANS_train=171.63  bits/token
-
-============================================================
-  Summary: blk15 K=64 emb=32  bt=1024
-  bits/token: OPQ=192 (G=32)  codec=192 (G=32)
-  Standard OPQ  Acc=0.6400  ΔL_ref=116397.0
-  Codec         Acc=0.7340  ΔL_ref=84790.4
-  Δ(Acc)=+0.0940  Δ(ΔL_ref)=-31606.6
-  Rate: xent=173.98  xent_train=171.61  H_emp=171.27  max=192  rANS=174.00 bits/token
-  Train time: std=38.3s  codec=2746.3s
-============================================================
-
-Results saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/results/soft_pq/blk15_K64_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0005_ep100_n5000_s42.json

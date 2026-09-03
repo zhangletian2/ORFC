@@ -135,6 +135,122 @@ def BD_RATE(R1, D1, R2, D2, piecewise=1, higher_better=False):
     return avg_diff
 
 
+def _pareto_rd(R, D, higher_better=True):
+    """Monotone Pareto front: quality non-decreasing in rate, unique Q, min R."""
+    R = np.array([np.nan if v is None else v for v in R], dtype=float)
+    D = np.array([np.nan if v is None else v for v in D], dtype=float)
+    mask = np.isfinite(R) & np.isfinite(D) & (R > 0)
+    R, D = R[mask], D[mask]
+    if len(D) < 1:
+        return R, D
+    order = np.argsort(R)
+    R, D = R[order], D[order]
+    D = np.maximum.accumulate(D) if higher_better else np.minimum.accumulate(D)
+    order = np.argsort(D)
+    R, D = R[order], D[order]
+    out_R, out_D, cur, min_r = [], [], None, np.inf
+    for r, q in zip(R, D):
+        if q != cur:
+            if cur is not None:
+                out_R.append(min_r)
+                out_D.append(cur)
+            cur, min_r = q, r
+        else:
+            min_r = min(min_r, r)
+    if cur is not None:
+        out_R.append(min_r)
+        out_D.append(cur)
+    R, D = np.array(out_R), np.array(out_D)
+    keep_R, keep_D, last_r = [], [], -np.inf
+    for r, q in zip(R, D):
+        if r + 1e-12 < last_r:
+            continue
+        keep_R.append(r)
+        keep_D.append(q)
+        last_r = r
+    return np.array(keep_R), np.array(keep_D)
+
+
+def _merge_quality(R, D, eps):
+    """Collapse consecutive quality points closer than eps; keep lowest rate."""
+    if len(D) == 0 or eps <= 0:
+        return R, D
+    out_R, out_D = [R[0]], [D[0]]
+    for r, q in zip(R[1:], D[1:]):
+        if abs(q - out_D[-1]) < eps:
+            out_D[-1] = q if q > out_D[-1] else out_D[-1]
+        else:
+            out_R.append(r)
+            out_D.append(q)
+    return np.array(out_R), np.array(out_D)
+
+
+def _logR_of_Q(R, D):
+    """PCHIP log R(Q) inside the data range; linear first/last segment outside."""
+    logR = np.log(R)
+    inner = (scipy.interpolate.PchipInterpolator(D, logR, extrapolate=False)
+             if len(D) >= 3 else None)
+    s0 = (logR[1] - logR[0]) / (D[1] - D[0])
+    s1 = (logR[-1] - logR[-2]) / (D[-1] - D[-2])
+
+    def f(q):
+        q = np.asarray(q, dtype=float)
+        out = np.empty_like(q)
+        lo, hi = D[0], D[-1]
+        m_lo, m_hi = q < lo, q > hi
+        m_in = ~(m_lo | m_hi)
+        out[m_lo] = logR[0] + s0 * (q[m_lo] - lo)
+        out[m_hi] = logR[-1] + s1 * (q[m_hi] - hi)
+        if m_in.any():
+            if inner is not None:
+                out[m_in] = inner(q[m_in])
+            else:
+                out[m_in] = np.interp(q[m_in], D, logR)
+        return out
+
+    return f
+
+
+def BD_RATE_EXTENDED(R1, D1, R2, D2, higher_better=True, merge_eps=0.001,
+                     n_samples=400):
+    """BD-Rate when the two curves' quality ranges may not overlap.
+
+    Standard ``BD_RATE`` integrates only over the intersection of quality
+    ranges and returns NaN if that intersection is empty. This variant
+    integrates over the *test* curve's quality range (D2), which is the
+    natural question when the test codec sits above the anchor: how many
+    bits would the anchor need to match the test mIoU / Acc / PSNR.
+
+    Inside each curve's measured quality range, log R(Q) is PCHIP (or
+    linear if only two points). Outside, the first/last segment is extended
+    linearly — not PCHIP-extrapolated, which explodes when the last two
+    anchor points have almost the same quality. Consecutive quality samples
+    closer than ``merge_eps`` are collapsed so a saturated duplicate cannot
+    set that last-segment slope.
+
+    Negative = test uses fewer bits than the anchor at the same quality.
+
+    Warning: on saturating metrics (mIoU, Acc) this number is often far too
+    optimistic. A flat last segment makes R(Q) explode, so a small quality
+    gap becomes a huge BD-rate. Prefer standard ``BD_RATE`` (NaN if no
+    overlap) or drop saturated high-rate points before calling this.
+    """
+    if not higher_better:
+        D1 = [-x if x is not None else None for x in D1]
+        D2 = [-x if x is not None else None for x in D2]
+    R1, D1 = _merge_quality(*_pareto_rd(R1, D1, True), merge_eps)
+    R2, D2 = _merge_quality(*_pareto_rd(R2, D2, True), merge_eps)
+    if len(D1) < 2 or len(D2) < 2:
+        return np.nan
+    if D2.max() <= D2.min() + 1e-8:
+        return np.nan
+    f1 = _logR_of_Q(R1, D1)
+    f2 = _logR_of_Q(R2, D2)
+    qs = np.linspace(D2.min(), D2.max(), n_samples)
+    avg = np.trapz(f2(qs) - f1(qs), qs) / (D2.max() - D2.min())
+    return float((np.exp(avg) - 1) * 100)
+
+
 # ==========================================
 # 主程序入口
 # ==========================================

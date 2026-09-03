@@ -1,0 +1,13 @@
+{
+  "task": "semseg",
+  "tag": "bypass_blk15",
+  "layer": "blk15",
+  "mode": "bypass",
+  "ckpt": "",
+  "n_samples": 2000,
+  "avg_mse": 0.0,
+  "metrics": {
+    "mIoU": 0.5306645753437774
+  },
+  "norm_mode": "split_reg_cls_patch"
+}

@@ -35,15 +35,40 @@ def batch_normalize_gpu(X, mode='per_image', eps=1e-5, n_prefix=0):
 
     Args:
         X:    [N_img, T, C] GPU tensor
-        mode: 'per_image' | 'per_token_ln' | 'split_cls_patch'
-        n_prefix: number of CLS+register prefix tokens (used by split_cls_patch)
+        mode: 'per_image' | 'per_token_ln' | 'split_cls_patch' | 'split_reg_cls_patch'
+        n_prefix: CLS+register prefix length (split_* modes). DINOv3: 5 = 1 CLS + 4 reg.
 
     Returns:
         Y:   [N_img, T, C] 归一化后
-        mu:  均值 (per_image: [N_img, 1, 1]; split_cls_patch/per_token_ln: [N_img, T, 1])
+        mu:  均值 (per_image: [N_img, 1, 1]; split_*/per_token_ln: [N_img, T, 1])
         std: 标准差 (同 mu 形状)
     """
-    if mode == 'split_cls_patch':
+    if mode == 'split_reg_cls_patch':
+        # Register tokens [1, n_prefix) have their own μ/σ.
+        # CLS (token 0) shares μ/σ with patch tokens [n_prefix:].
+        N, T, C = X.shape
+        mu = torch.empty(N, T, 1, device=X.device, dtype=X.dtype)
+        std = torch.empty(N, T, 1, device=X.device, dtype=X.dtype)
+        if n_prefix >= 2 and n_prefix < T:
+            X_reg = X[:, 1:n_prefix, :]
+            mu_reg = X_reg.mean(dim=(1, 2), keepdim=True)
+            std_reg = (((X_reg - mu_reg) ** 2).mean(dim=(1, 2), keepdim=True) + eps).sqrt()
+            mu[:, 1:n_prefix, :] = mu_reg
+            std[:, 1:n_prefix, :] = std_reg
+
+            X_cp = torch.cat([X[:, :1, :], X[:, n_prefix:, :]], dim=1)
+            mu_cp = X_cp.mean(dim=(1, 2), keepdim=True)
+            std_cp = (((X_cp - mu_cp) ** 2).mean(dim=(1, 2), keepdim=True) + eps).sqrt()
+            mu[:, :1, :] = mu_cp
+            mu[:, n_prefix:, :] = mu_cp
+            std[:, :1, :] = std_cp
+            std[:, n_prefix:, :] = std_cp
+        else:
+            mu_all = X.mean(dim=(1, 2), keepdim=True)
+            std_all = (((X - mu_all) ** 2).mean(dim=(1, 2), keepdim=True) + eps).sqrt()
+            mu[:] = mu_all
+            std[:] = std_all
+    elif mode == 'split_cls_patch':
         N, T, C = X.shape
         mu = torch.empty(N, T, 1, device=X.device, dtype=X.dtype)
         std = torch.empty(N, T, 1, device=X.device, dtype=X.dtype)
@@ -88,7 +113,7 @@ def batch_inv_normalize_gpu(Y, mu, std):
 # ================================================================
 
 def batched_kmeans(sub_vectors_3d, K, max_iter=100, device='cuda',
-                   verbose=False):
+                   verbose=False, initial_centroids=None):
     """
     GPU 批量 k-means: 同时对 G 组子向量做 k-means
 
@@ -100,6 +125,7 @@ def batched_kmeans(sub_vectors_3d, K, max_iter=100, device='cuda',
         max_iter:       最大迭代次数
         device:         GPU 设备
         verbose:        是否打印
+        initial_centroids: 可选的 [G, K, dim] Lloyd 初始值
 
     Returns:
         centroids: [G, K, dim] **GPU tensor** float32
@@ -112,13 +138,15 @@ def batched_kmeans(sub_vectors_3d, K, max_iter=100, device='cuda',
     mem_per_sample = G * max(K, dim) * 4
     chunk_size = max(1, min(N, max_mem_bytes // mem_per_sample))
 
-    # 随机初始化: 每组选 K 个点
-    init_indices = torch.stack([
-        torch.randperm(N, device=device)[:K] for _ in range(G)
-    ])  # [G, K]
-    centroids = torch.gather(
-        X, 1, init_indices.unsqueeze(-1).expand(-1, -1, dim)
-    )  # [G, K, dim]
+    if initial_centroids is None:
+        init_indices = torch.stack([
+            torch.randperm(N, device=device)[:K] for _ in range(G)
+        ])
+        centroids = torch.gather(
+            X, 1, init_indices.unsqueeze(-1).expand(-1, -1, dim)
+        )
+    else:
+        centroids = _to_gpu(initial_centroids, device).clone()
 
     # flat scatter_add 的 group offset
     offset = torch.arange(G, device=device).unsqueeze(1) * K  # [G, 1]

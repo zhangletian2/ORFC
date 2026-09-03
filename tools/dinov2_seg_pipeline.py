@@ -370,15 +370,37 @@ def cmd_extract(args):
         val_list = load_val_list(voc_root)
         print(f"[3/4] 验证集样本数: {len(val_list)}")
 
-    print(f"[4/4] 提取特征 (slide: crop={crop_size}, stride={stride}, batch_size={args.batch_size})...")
+    if getattr(args, "num_shards", 1) > 1:
+        sid = int(args.shard_id)
+        nsh = int(args.num_shards)
+        val_list = [n for i, n in enumerate(val_list) if i % nsh == sid]
+        print(f"  shard {sid}/{nsh}: {len(val_list)} images")
+
+    flatten = bool(getattr(args, "flatten_slides", False))
+    skip_existing = bool(getattr(args, "skip_existing", False))
+    print(f"[4/4] 提取特征 (slide: crop={crop_size}, stride={stride}, "
+          f"batch_size={args.batch_size}, flatten_slides={flatten})...")
     print(f"  layers={layers}, norm=False")
     t0 = time.time()
+    n_skip = 0
 
     for name in tqdm(val_list, desc="Extracting"):
         img_path = os.path.join(voc_root, 'JPEGImages', f'{name}.jpg')
         if not os.path.isfile(img_path):
             print(f"[warn] missing image: {img_path}")
             continue
+
+        if skip_existing:
+            done = True
+            for k in layers:
+                layer_dir = os.path.join(out_root, f"blk{k:02d}")
+                probe = (f"{name}_s00.npy" if flatten else f"{name}.npy")
+                if not os.path.isfile(os.path.join(layer_dir, probe)):
+                    done = False
+                    break
+            if done:
+                n_skip += 1
+                continue
 
         img = Image.open(img_path).convert('RGB')
         img_np = np.array(img)[:, :, ::-1]
@@ -391,18 +413,25 @@ def cmd_extract(args):
 
         for k in layers:
             key = f"blk{k:02d}"
+            layer_dir = os.path.join(out_root, key)
 
             feature_list, crops, img_shape = slide_inference_encode(
                 backbone, img_tensor, k, crop_size, stride, patch_size, args.batch_size
             )
 
-            features = torch.cat(feature_list, dim=0).cpu().numpy().astype(np.float32)
+            if flatten:
+                for si, feat in enumerate(feature_list):
+                    arr = feat.squeeze(0).cpu().numpy().astype(np.float32)
+                    np.save(os.path.join(layer_dir, f"{name}_s{si:02d}.npy"), arr)
+            else:
+                features = torch.cat(feature_list, dim=0).cpu().numpy().astype(np.float32)
+                np.save(os.path.join(layer_dir, f"{name}.npy"), features)
 
-            layer_dir = os.path.join(out_root, key)
-            save_path = os.path.join(layer_dir, f"{name}.npy")
-            np.save(save_path, features)
+        del img_tensor
+        torch.cuda.empty_cache()
 
-    print(f"\n[extract] Done. N={len(val_list)} layers={layers} ({time.time()-t0:.2f}s)")
+    print(f"\n[extract] Done. N={len(val_list)} skip={n_skip} "
+          f"layers={layers} ({time.time()-t0:.2f}s)")
 
 
 # ========================= Replay命令 =========================
@@ -573,6 +602,14 @@ def build_parser():
     pe.add_argument('--image_list', default=None, help='图片名列表文件')
     pe.add_argument('--batch_size', type=int, default=64, help='批量推理的batch大小（控制显存）')
     pe.add_argument('--device', default='cuda')
+    pe.add_argument('--flatten_slides', action='store_true',
+                    help='每个滑窗存成独立 [T, D] npy（{name}_sXX.npy），供残差训练 path-mode')
+    pe.add_argument('--skip_existing', action='store_true',
+                    help='目标 npy 已存在则跳过该图')
+    pe.add_argument('--shard_id', type=int, default=0,
+                    help='并行分片编号（0-based）')
+    pe.add_argument('--num_shards', type=int, default=1,
+                    help='并行分片总数')
 
     pr = sub.add_parser("replay", help='从特征重放，计算mIoU')
     pr.add_argument('--model', default='vitl14', choices=list(MODEL_REGISTRY.keys()),

@@ -1,50 +1,0 @@
-
-######################################################################
-# Figure 1: MSE vs L_ref correlation
-# layer=blk10
-# 2026-02-26 02:51:02
-######################################################################
-  Data: train=5000, test=500
-  并行加载特征 (workers=8)...
-Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:   7%|▋         | 364/5000 [00:00<00:01, 3613.02it/s]Loading:  15%|█▍        | 726/5000 [00:00<00:01, 3359.18it/s]Loading:  21%|██▏       | 1064/5000 [00:00<00:01, 3145.86it/s]Loading:  28%|██▊       | 1381/5000 [00:00<00:01, 3135.52it/s]Loading:  35%|███▍      | 1727/5000 [00:00<00:01, 3237.17it/s]Loading:  41%|████      | 2052/5000 [00:00<00:00, 3237.82it/s]Loading:  48%|████▊     | 2377/5000 [00:00<00:00, 3228.83it/s]Loading:  54%|█████▍    | 2701/5000 [00:00<00:00, 3176.36it/s]Loading:  60%|██████    | 3020/5000 [00:00<00:00, 3082.65it/s]Loading:  67%|██████▋   | 3329/5000 [00:01<00:00, 3016.12it/s]Loading:  73%|███████▎  | 3632/5000 [00:01<00:00, 3013.08it/s]Loading:  79%|███████▊  | 3934/5000 [00:01<00:00, 2972.97it/s]Loading:  85%|████████▍ | 4232/5000 [00:01<00:00, 2898.74it/s]Loading:  90%|█████████ | 4523/5000 [00:01<00:00, 2888.48it/s]Loading:  96%|█████████▋| 4813/5000 [00:01<00:00, 2875.50it/s]Loading: 100%|██████████| 5000/5000 [00:01<00:00, 3047.78it/s]
-  并行加载特征 (workers=8)...
-Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  61%|██████▏   | 307/500 [00:00<00:00, 3064.19it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 3112.31it/s]
-  Loading DINOv2 ViT-L/14...
-
-  --- OPQ K=4, emb=32, G=32 ---
-    MSE=896.8  L_ref=681345.0  Acc=0.3460  Rate=64 bpt
-
-  --- OPQ K=8, emb=32, G=32 ---
-    MSE=778.3  L_ref=412299.4  Acc=0.7840  Rate=96 bpt
-
-  --- OPQ K=16, emb=32, G=32 ---
-    MSE=700.1  L_ref=271165.2  Acc=0.9080  Rate=128 bpt
-
-  --- OPQ K=32, emb=32, G=32 ---
-    MSE=643.1  L_ref=206757.6  Acc=0.9380  Rate=160 bpt
-
-  --- OPQ K=64, emb=32, G=32 ---
-    MSE=592.9  L_ref=164523.0  Acc=0.9400  Rate=192 bpt
-
-  --- OPQ K=256, emb=32, G=32 ---
-    MSE=516.5  L_ref=114161.1  Acc=0.9620  Rate=256 bpt
-
-  --- OPQ K=64, emb=16, G=64 ---
-    MSE=432.7  L_ref=76998.5  Acc=0.9780  Rate=384 bpt
-
-  --- OPQ K=256, emb=16, G=64 ---
-    MSE=356.3  L_ref=53204.2  Acc=0.9860  Rate=512 bpt
-
-  --- OPQ K=64, emb=8, G=128 ---
-    MSE=269.1  L_ref=34285.2  Acc=0.9860  Rate=768 bpt
-
-  --- OPQ K=256, emb=8, G=128 ---
-    MSE=198.0  L_ref=22691.6  Acc=0.9800  Rate=1024 bpt
-
-  Saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/results/analysis_intro/correlation_blk10_K256_emb16.json
-
-  === OPQ Correlation Summary ===
-    Pearson corr(MSE, Acc)  = -0.7338
-    Pearson corr(L_ref, Acc)= -0.9433
-    Pearson corr(MSE, ΔAcc) = +0.7338
-    Pearson corr(L_ref,ΔAcc)= +0.9433

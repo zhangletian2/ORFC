@@ -1,0 +1,7 @@
+blk05: 80 feats  shape=(1611, 1024)
+  Backbone loaded: /data4/workspace/zlt/cache/torch/hub/checkpoints/dinov2_vitl14_pretrain.pth  (vit_large, dim=1024)
+  Depth head loaded: /data4/workspace/zlt/cache/torch/hub/checkpoints/dinov2_vitl14_nyu_linear_head.pth  (BNHead, n_bins=256, channels=2048)
+  Anchor          RMSE=0.4638  (4.2s)
+  base only (K2)  RMSE=1.3156  Δ=+0.8518  (4.3s)
+  base+res (K2+K2) RMSE=1.4260  Δ=+0.9622  Δvs_base=+0.1105  (4.7s)
+  single K4       RMSE=0.6319  Δ=+0.1681  (4.1s)

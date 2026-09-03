@@ -1,0 +1,25 @@
+/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torchvision/datapoints/__init__.py:12: UserWarning: The torchvision.datapoints and torchvision.transforms.v2 namespaces are still Beta. While we do not expect major breaking changes, some APIs may still change according to user feedback. Please submit any feedback you may have in this issue: https://github.com/pytorch/vision/issues/6753, and you can also check out https://github.com/pytorch/vision/issues/7319 to learn more about the APIs that we suspect might involve future changes. You can silence this warning by calling torchvision.disable_beta_transforms_warning().
+  warnings.warn(_BETA_TRANSFORMS_WARNING)
+/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torchvision/transforms/v2/__init__.py:54: UserWarning: The torchvision.datapoints and torchvision.transforms.v2 namespaces are still Beta. While we do not expect major breaking changes, some APIs may still change according to user feedback. Please submit any feedback you may have in this issue: https://github.com/pytorch/vision/issues/6753, and you can also check out https://github.com/pytorch/vision/issues/7319 to learn more about the APIs that we suspect might involve future changes. You can silence this warning by calling torchvision.disable_beta_transforms_warning().
+  warnings.warn(_BETA_TRANSFORMS_WARNING)
+device=cuda:0  CUDA_VISIBLE_DEVICES=5
+jobs: 1
+
+######## blk10  n=1 ########
+  并行加载特征 (workers=4)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  35%|███▍      | 174/500 [00:00<00:00, 1731.55it/s]Loading:  70%|██████▉   | 349/500 [00:00<00:00, 1741.94it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 1742.80it/s]
+  test images: 500
+  tail: 13 blocks after blk10
+
+=== blk10_K8  base-blk10_K8_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-cls_ ===
+  json Acc  base=0.9700  full=0.9660  Δ=-0.0040
+  codebook  dead=0  mean_ppl=1.995  min_ppl=1.939  ||Rres-Rbase||=0.00e+00
+  pair_l2   mean=1.8864  min=1.4720  cos>0.99=0  collapse_ratio<0.5=0/32
+  residual  energy=0.7122  mse=0.5933  SNR=0.78 dB  imbalance>0.9=0
+  running leave-one-group-out …
+  Acc  orig=0.9800  base=0.9700  full=0.9660
+  KL   orig=0.0000  base=0.1190  full=0.1287
+  only  worst g=13  ΔAcc=-0.0020  ΔKL=+0.0018
+  drop  best recover g=26  ΔAcc=+0.0060
+
+saved /data4/workspace/zlt/featcodec/ORFC/coding/orfcv2/results/dinov2_vitl14/diag/channels_loco_blk10_K8.json

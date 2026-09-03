@@ -1,0 +1,79 @@
+/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torchvision/datapoints/__init__.py:12: UserWarning: The torchvision.datapoints and torchvision.transforms.v2 namespaces are still Beta. While we do not expect major breaking changes, some APIs may still change according to user feedback. Please submit any feedback you may have in this issue: https://github.com/pytorch/vision/issues/6753, and you can also check out https://github.com/pytorch/vision/issues/7319 to learn more about the APIs that we suspect might involve future changes. You can silence this warning by calling torchvision.disable_beta_transforms_warning().
+  warnings.warn(_BETA_TRANSFORMS_WARNING)
+/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torchvision/transforms/v2/__init__.py:54: UserWarning: The torchvision.datapoints and torchvision.transforms.v2 namespaces are still Beta. While we do not expect major breaking changes, some APIs may still change according to user feedback. Please submit any feedback you may have in this issue: https://github.com/pytorch/vision/issues/6753, and you can also check out https://github.com/pytorch/vision/issues/7319 to learn more about the APIs that we suspect might involve future changes. You can silence this warning by calling torchvision.disable_beta_transforms_warning().
+  warnings.warn(_BETA_TRANSFORMS_WARNING)
+
+######################################################################
+# Scalable codec: frozen base (tail-MSE) + task residual
+# layer=blk10 (idx=10)  backbone=dinov2_vitl14  task=depth
+# base_ckpt=blk10_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.pt
+# residual: K=2, emb=32, transform=orthogonal, loss=task  shareR  freezeR
+# epochs=30, lr=0.0003, lmbda_rate=0.0, ecvq_lmbda=0.0, lmbda_kd=1.0, beta_mse=0.0
+# 2026-08-27 21:20:37
+######################################################################
+
+Data: train=5000 in /data4/workspace/zlt/featcodec/ORFC/features/train/dinov2_vitl14_ade/blk10  (path-mode=True)
+  path-mode lazy train=4950, val=50 (preloaded)  D=1024, T=1814
+
+Loading DINOv2 (dinov2_vitl14)...
+  Tail: 13 blocks (blk11..blk23) + norm
+  深度头已加载: /data4/workspace/zlt/cache/torch/hub/checkpoints/dinov2_vitl14_nyu_linear_head.pth  (BNHead, n_bins=256)
+  Task head: NYU depth (BNHead bin logits, no final norm)  token_hw=(37, 49)
+
+============================================================
+  [Base] frozen codec from stage 1 (tail-MSE optimised)
+============================================================
+  base: G=32, K=4, d=32, transform=OrthogonalTransform, fixed rate=64 bits/token
+  residual: G=32, K=2, d=32, fixed rate=32 bits/token
+  Shared ORFC R: copied Cayley params, ||R_res-R_base||=0.00e+00, ||R'R-I||=1.26e-03
+
+  Collecting residuals R = Y - Ŷ_base for initialisation (≤62,500 vectors)...
+  residual vectors: (62494, 1024), mean square = 0.766263
+  Residual init: k-means on 62,494 residual vectors (residual-transform space)
+
+============================================================
+  [Residual] training under 'task' loss
+============================================================
+  Base codec: 528,000 params (frozen), G=32, K=4, d=32
+  Residual codec: G=32, K=2, d=32, 2,048 trainable params
+  Frozen: residual transform
+  Residual transform ||R'R-I||=1.26e-03
+  Loss: 1.0*KD(T=2.0)
+  Soft PQ: τ 0.500 → 0.0050 (exponential)
+  Features: path-mode lazy load (4950 files, T=1814, D=1024)
+  Pre-computing teacher logits (4950 images, path-mode)...
+  Teacher logits: (4950, 256, 37, 49)  9.19 GB CPU  (284.0s)
+  CUDA before train: alloc=1.27GB reserved=1.28GB peak_alloc=1.27GB peak_reserved=1.28GB
+  CUDA after first backward: alloc=1.48GB reserved=10.03GB peak_alloc=9.84GB peak_reserved=10.03GB
+  ep   0/30  D=0.7527  ppl=2.0  dead=0  τ=0.5000  val=0.7323  val_agree=0.710  (433.2s)
+  CUDA after ep 0: alloc=1.29GB reserved=10.27GB peak_alloc=9.84GB peak_reserved=10.27GB
+  ep  10/30  D=0.5504  ppl=2.0  dead=0  τ=0.1022  val=0.5794  val_agree=0.740  (432.6s)
+  CUDA after ep 10: alloc=1.29GB reserved=10.27GB peak_alloc=9.84GB peak_reserved=10.27GB
+  ep  20/30  D=0.5297  ppl=2.0  dead=0  τ=0.0209  val=0.5642  val_agree=0.743  (432.6s)
+  CUDA after ep 20: alloc=1.29GB reserved=10.27GB peak_alloc=9.84GB peak_reserved=10.27GB
+  ep  29/30  D=0.5274  ppl=2.0  dead=0  τ=0.0050  val=0.5630  val_agree=0.743  (432.2s)
+  CUDA after ep 29: alloc=1.29GB reserved=10.27GB peak_alloc=9.84GB peak_reserved=10.27GB
+  CUDA train done: alloc=1.29GB reserved=10.27GB peak_alloc=9.84GB peak_reserved=10.27GB
+  Residual training: 13371.8s
+  Residual codec saved: /data4/workspace/zlt/featcodec/ORFC/coding/orfcv2/checkpoints/dinov2_vitl14/base-blk10_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-depth_res_task_K2_emb32_orthogonal_shareR_dinov2_vitl14_ade_km_fzR_ce0.0_kd1.0T2.0_tau0.5_lr0.0003_ep30_n5000_s42_ade_ep30.pt
+
+============================================================
+  [Eval] NYU RMSE / rate
+============================================================
+  NYU test80: 80 feats  shape=(1611, 1024)
+  Anchor            RMSE=0.4638  (4.0s)
+  base only         RMSE=0.5246  Δ=+0.0608  (5.1s)
+  base+residual     RMSE=0.4752  Δ=+0.0114  Δvs_base=-0.0494  (5.8s)
+  Computing train PMFs and test rate...
+  * base    : rANS=58.07  xent=58.07  H_emp=57.46  max=64  BPFP=0.0567
+  * residual: rANS=31.67  xent=31.67  H_emp=31.58  max=32  BPFP=0.0309
+  * total: rANS=89.74 b/t  BPFP=0.0876
+
+============================================================
+  Summary: blk10  base K=4/d=32  residual K=2/d=32  loss=task
+  NYU RMSE: base=0.5246 -> full=0.4752 (-0.0494)  anchor=0.4638
+  Rate    : base=58.07 + residual=31.67 = 89.74 bits/token
+  Train time: 13371.8s
+============================================================
+
+Results saved: /data4/workspace/zlt/featcodec/ORFC/coding/orfcv2/results/dinov2_vitl14/base-blk10_K4_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-depth_res_task_K2_emb32_orthogonal_shareR_dinov2_vitl14_ade_km_fzR_ce0.0_kd1.0T2.0_tau0.5_lr0.0003_ep30_n5000_s42_ade_ep30.json

@@ -74,3 +74,12 @@ results/qwen3vl_8b_instruct_feat/
 coding/vtm_baseline/_qwen3vl_verify/
 coding/vtm_baseline/_vtm_tmp_depth/
 coding/vtm_baseline/_vtm_tmp_siglip2/
+
+# orfcv2 weights (keep scripts/results/logs)
+coding/orfcv2/checkpoints/
+coding/orfcv2/__pycache__/
+
+# orfc/eval: probe weights and run logs (keep results json)
+coding/orfc/eval/probes/
+coding/orfc/eval/logs/
+coding/orfc/eval/__pycache__/

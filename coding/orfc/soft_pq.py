@@ -326,6 +326,115 @@ class SoftPQ(nn.Module):
 
 
 # ================================================================
+#                    Non-uniform SoftPQ (per-group codebook size)
+# ================================================================
+
+class NonUniformSoftPQ(nn.Module):
+    """SoftPQ with a per-group codebook size ``K_g`` (non-uniform allocation).
+
+    Implementation keeps a dense ``[G, Kmax, d]`` codebook padded to the
+    largest group and a boolean ``valid_mask [G, Kmax]``.  Padded codewords are
+    masked to ``+inf`` distance before argmin/softmax, so they are never
+    assigned and never receive gradient.  For a fixed allocation this is exactly
+    ORFC's independent per-group PQ with heterogeneous ``K`` — no tree, no
+    parameter sharing.
+
+    Drop-in for :class:`SoftPQ`: exposes ``.codebooks``, ``.K`` (=``Kmax``),
+    ``.temperature``, ``._quantise``, ``._last_labels`` and matches the
+    ``train_soft_pq`` contract.  Rate head is unsupported (``lmbda`` must be 0).
+    """
+
+    def __init__(self, G, K_per_group, d, lmbda=0.0, prior_floor=0.0):
+        super().__init__()
+        K_per_group = [int(k) for k in K_per_group]
+        if len(K_per_group) != int(G):
+            raise ValueError("K_per_group length must equal G")
+        if lmbda > 0:
+            raise ValueError("NonUniformSoftPQ does not support a rate head "
+                             "(lmbda must be 0)")
+        self.G = int(G)
+        self.d = int(d)
+        self.D = self.G * self.d
+        self.K_per_group = K_per_group
+        self.K = int(max(K_per_group))                     # Kmax (dense width)
+        self.lmbda = 0.0
+        self.use_rate = False
+        self.prior_floor = prior_floor
+        self.temperature = 0.0
+
+        self.codebooks = nn.Parameter(torch.randn(self.G, self.K, self.d) * 0.01)
+        mask = torch.zeros(self.G, self.K, dtype=torch.bool)
+        for g, k in enumerate(K_per_group):
+            mask[g, :k] = True
+        self.register_buffer("valid_mask", mask)
+        self._last_rate = None
+        self._last_rate_per_group = None
+        self._last_labels = None
+
+    def init_codebooks(self, codebooks_list):
+        """Warm-start from a list of ``[K_g, d]`` numpy/tensor arrays."""
+        with torch.no_grad():
+            for g, c_g in enumerate(codebooks_list):
+                if isinstance(c_g, np.ndarray):
+                    c_g = torch.from_numpy(c_g).float()
+                k = int(c_g.shape[0])
+                if k != self.K_per_group[g]:
+                    raise ValueError(
+                        f"group {g}: got {k} codewords, want "
+                        f"{self.K_per_group[g]}")
+                self.codebooks.data[g, :k] = c_g.to(self.codebooks.device)
+
+    def _quantise(self, Z_flat):
+        """Hard-argmin PQ with straight-through soft gradient; masked padding."""
+        N = Z_flat.shape[0]
+        C = self.codebooks                                    # [G, Kmax, d]
+        sub_g = Z_flat.reshape(N, self.G, self.d).permute(1, 0, 2)  # [G, N, d]
+
+        dists_sq = torch.cdist(sub_g, C).pow(2)               # [G, N, Kmax]
+        invalid = ~self.valid_mask.unsqueeze(1)               # [G, 1, Kmax]
+        dists_sq = dists_sq.masked_fill(invalid, float("inf"))
+
+        cost = dists_sq
+        labels = cost.argmin(dim=-1)                          # [G, N]
+        self._last_labels = labels.detach()
+
+        if self.training and self.temperature > 0:
+            logits = -cost / self.temperature                 # inf → -inf → 0
+            soft = F_fn.softmax(logits, dim=-1)               # [G, N, Kmax]
+            hard = torch.zeros_like(soft).scatter_(
+                -1, labels.unsqueeze(-1), 1.0)
+            weights = hard - soft.detach() + soft             # ST trick
+            Z_hat_g = torch.einsum('gnk,gkd->gnd', weights, C)
+        else:
+            Z_hat_g = torch.gather(
+                C.unsqueeze(1).expand(-1, N, -1, -1), 2,
+                labels.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 1, self.d),
+            ).squeeze(2)
+
+        Z_hat_flat = Z_hat_g.permute(1, 0, 2).reshape(N, self.D)
+
+        ones = torch.ones(N, device=Z_flat.device)
+        usage = torch.zeros(self.G, self.K, device=Z_flat.device)
+        usage.scatter_add_(1, labels, ones.unsqueeze(0).expand(self.G, -1))
+
+        self._last_rate = torch.tensor(0.0, device=Z_flat.device)
+        self._last_rate_per_group = None
+        return Z_hat_flat, usage
+
+    def forward(self, Z_norm):
+        B, T, Dp = Z_norm.shape
+        Z_hat, usage = self._quantise(Z_norm.reshape(B * T, Dp))
+        return Z_hat.reshape(B, T, Dp), usage
+
+    @torch.no_grad()
+    def get_prior_pmf(self):
+        pmf = np.zeros((self.G, self.K), dtype=np.float64)
+        for g, k in enumerate(self.K_per_group):
+            pmf[g, :k] = 1.0 / k
+        return pmf
+
+
+# ================================================================
 #                    FeatureCodec (transform + PQ)
 # ================================================================
 
@@ -534,8 +643,12 @@ def train_soft_pq(
     tau_end=0.01,
     tau_schedule='exponential',
     n_prefix=0,
+    pq=None,
 ):
     """Train FeatureCodec (transform + PQ) to minimise J = R + λ·D.
+
+    ``pq`` optionally injects a pre-built quantiser (e.g. NonUniformSoftPQ);
+    when ``None`` a uniform :class:`SoftPQ` ``(G, K, d)`` is built as before.
 
     Returns:
         codec: trained FeatureCodec module.
@@ -552,7 +665,9 @@ def train_soft_pq(
         D = features_train[0].shape[1]
         features_array = np.stack(features_train)
         del features_train
-    pq = SoftPQ(G, K, d, lmbda=lmbda, prior_floor=prior_floor).to(device)
+    if pq is None:
+        pq = SoftPQ(G, K, d, lmbda=lmbda, prior_floor=prior_floor)
+    pq = pq.to(device)
     if transform is not None:
         transform = transform.to(device)
     codec = FeatureCodec(pq, transform).to(device)
@@ -780,7 +895,7 @@ def train_soft_pq(
                     del X_v, Y_v, Mu_v, Std_v, Yh_v
             val_loss = val_loss_sum / n_val
 
-        T_tokens = features_train[0].shape[0]
+        T_tokens = features_array.shape[1]
         rate_bits_bpt = avg_rate
         rate_per_image = avg_rate * T_tokens if codec.use_rate else 0.0
 
@@ -890,3 +1005,21 @@ def load_codec(path, device='cuda'):
     codec = FeatureCodec(pq, transform)
     codec.load_state_dict(meta['state_dict'])
     return codec.to(device).eval()
+
+
+def load_nonuniform_codec(path, device='cuda'):
+    """Reconstruct a NonUniformSoftPQ FeatureCodec saved by the runner.
+
+    Reads the meta dict written by
+    ``run_soft_pq_nonuniform.save_nonuniform_codec`` (keys: ``G``, ``d``,
+    ``K_per_group``, ``has_transform``, ``transform_type``, ``D``,
+    ``state_dict``).  Returns ``(codec, meta)``.
+    """
+    meta = torch.load(path, map_location='cpu')
+    pq = NonUniformSoftPQ(meta['G'], meta['K_per_group'], meta['d'], lmbda=0.0)
+    transform = None
+    if meta.get('has_transform') and meta.get('transform_type') == 'OrthogonalTransform':
+        transform = OrthogonalTransform(meta['D'])
+    codec = FeatureCodec(pq, transform)
+    codec.load_state_dict(meta['state_dict'])
+    return codec.to(device).eval(), meta

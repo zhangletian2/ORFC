@@ -1,87 +1,0 @@
-
-######################################################################
-# Figure 1: MSE vs L_ref correlation with downstream Acc
-# layer=blk20
-# 2026-02-26 03:50:35
-######################################################################
-  Train features: 5000 files from /data4/workspace/zlt/featcodec/features/train/dinov2_vitl14/blk20
-  并行加载特征 (workers=8)...
-Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:   7%|▋         | 346/5000 [00:00<00:01, 3451.67it/s]Loading:  14%|█▍        | 692/5000 [00:00<00:01, 3288.65it/s]Loading:  20%|██        | 1022/5000 [00:00<00:01, 3245.68it/s]Loading:  27%|██▋       | 1347/5000 [00:00<00:01, 3213.78it/s]Loading:  33%|███▎      | 1669/5000 [00:00<00:01, 3212.59it/s]Loading:  40%|███▉      | 1991/5000 [00:00<00:00, 3118.73it/s]Loading:  46%|████▌     | 2304/5000 [00:00<00:00, 3086.89it/s]Loading:  52%|█████▏    | 2616/5000 [00:00<00:00, 3096.85it/s]Loading:  59%|█████▊    | 2926/5000 [00:00<00:00, 3063.11it/s]Loading:  65%|██████▍   | 3239/5000 [00:01<00:00, 3083.19it/s]Loading:  71%|███████▏  | 3570/5000 [00:01<00:00, 3146.80it/s]Loading:  78%|███████▊  | 3885/5000 [00:01<00:00, 3138.43it/s]Loading:  84%|████████▍ | 4203/5000 [00:01<00:00, 3143.95it/s]Loading:  90%|█████████ | 4518/5000 [00:01<00:00, 3069.17it/s]Loading:  97%|█████████▋| 4826/5000 [00:01<00:00, 3062.67it/s]Loading: 100%|██████████| 5000/5000 [00:01<00:00, 3108.16it/s]
-  Test features: 500 files from /data4/workspace/zlt/featcodec/features/test/dinov2_vitl14/blk20
-  并行加载特征 (workers=8)...
-Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  62%|██████▏   | 309/500 [00:00<00:00, 3083.62it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 3109.25it/s]
-  Loading DINOv2 ViT-L/14...
-
-  --- OPQ K=4, emb=32, G=32 ---
-    MSE=114440.4  L_ref=699013.0  Acc=0.0360  mIoU=0.0738  Rate=64 bpt
-
-  --- OPQ K=8, emb=32, G=32 ---
-    MSE=105660.4  L_ref=537322.5  Acc=0.2980  mIoU=0.2516  Rate=96 bpt
-
-  --- OPQ K=16, emb=32, G=32 ---
-    MSE=98667.1  L_ref=439790.2  Acc=0.5520  mIoU=0.3721  Rate=128 bpt
-
-  --- OPQ K=32, emb=32, G=32 ---
-    MSE=92331.4  L_ref=368285.3  Acc=0.6880  mIoU=0.4920  Rate=160 bpt
-
-  --- OPQ K=64, emb=32, G=32 ---
-    MSE=85898.7  L_ref=315943.4  Acc=0.7800  mIoU=0.5658  Rate=192 bpt
-
-  --- OPQ K=256, emb=32, G=32 ---
-    MSE=75398.7  L_ref=244100.1  Acc=0.8680  mIoU=0.6294  Rate=256 bpt
-
-  --- OPQ K=64, emb=16, G=64 ---
-    MSE=71959.5  L_ref=214348.7  Acc=0.8980  mIoU=0.6446  Rate=384 bpt
-
-  --- OPQ K=256, emb=16, G=64 ---
-    MSE=61242.5  L_ref=161711.1  Acc=0.9220  mIoU=0.7365  Rate=512 bpt
-
-  --- OPQ K=64, emb=8, G=128 ---
-    MSE=48904.5  L_ref=108192.7  Acc=0.9620  mIoU=0.7290  Rate=768 bpt
-
-  --- OPQ K=256, emb=8, G=128 ---
-    MSE=36266.0  L_ref=71768.1  Acc=0.9660  mIoU=0.7656  Rate=1024 bpt
-
-  Loaded 32 existing DOPQ results
-
-  Saved: /data4/workspace/zlt/featcodec/coding/vq/v3.4/results/analysis_intro_v2/correlation_blk20.json
-
-  === OPQ Correlation Summary ===
-    Pearson r(MSE, Acc)   = -0.8723
-    Pearson r(L_ref, Acc) = -0.9756
-    Pearson r(MSE, mIoU)  = -0.9214
-    Pearson r(L_ref,mIoU) = -0.9921
-
-  === DOPQ Summary (32 configs) ===
-    K= 16 emb=16 λ=1.0  Acc=0.0020  L_ref=762608.7  mIoU=0.0336
-    K= 16 emb=32 λ=0.5  Acc=0.5920  L_ref=385300.8  mIoU=0.5618
-    K= 16 emb=32 λ=0.5  Acc=0.7960  L_ref=276758.5  mIoU=0.5982
-    K= 16 emb=32 λ=0.5  Acc=0.7940  L_ref=264856.0  mIoU=0.6138
-    K= 16 emb=32 λ=0.5  Acc=0.7060  L_ref=343842.5  mIoU=0.3382
-    K= 16 emb=32 λ=0.5  Acc=0.8900  L_ref=205933.1  mIoU=0.6961
-    K= 16 emb=32 λ=0.5  Acc=0.9140  L_ref=192281.2  mIoU=0.6995
-    K= 16 emb=32 λ=0.5  Acc=0.9240  L_ref=187717.4  mIoU=0.7098
-    K= 16 emb=32 λ=1.0  Acc=0.8780  L_ref=222299.7  mIoU=0.7002
-    K= 16 emb=32 λ=1.0  Acc=0.9180  L_ref=171048.4  mIoU=0.6463
-    K= 16 emb=32 λ=2.0  Acc=0.9120  L_ref=170709.9  mIoU=0.6797
-    K= 16 emb=32 λ=0.5  Acc=0.5440  L_ref=438973.1  mIoU=0.3867  mse_loss
-    K= 16 emb=32 λ=0.0  Acc=0.9160  L_ref=192560.6  mIoU=0.6979
-    K= 16 emb=32 λ=1.0  Acc=0.0020  L_ref=741478.5  mIoU=0.0353
-    K= 16 emb=32 λ=1.0  Acc=0.0020  L_ref=704429.8  mIoU=0.0410
-    K=256 emb=16 λ=0.1  Acc=0.9420  L_ref=140523.9  mIoU=0.7159
-    K=256 emb=16 λ=0.2  Acc=0.9620  L_ref=110019.0  mIoU=0.7462
-    K=256 emb=16 λ=0.3  Acc=0.9580  L_ref=100520.6  mIoU=0.7511
-    K=256 emb=16 λ=0.5  Acc=0.9580  L_ref=94441.4  mIoU=0.7574
-    K=256 emb=16 λ=0.5  Acc=0.9560  L_ref=90723.5  mIoU=0.7568
-    K=256 emb=16 λ=0.0  Acc=0.9680  L_ref=92132.6  mIoU=0.7597
-    K=256 emb=32 λ=0.5  Acc=0.9540  L_ref=127866.8  mIoU=0.7266
-    K=256 emb=32 λ=0.0  Acc=0.9560  L_ref=123765.2  mIoU=0.7258
-    K=  2 emb=16 λ=0.0  Acc=0.1600  L_ref=311301.0  mIoU=0.6171
-    K= 32 emb=32 λ=0.5  Acc=0.9300  L_ref=171582.5  mIoU=0.7067
-    K=  4 emb=32 λ=0.5  Acc=0.2020  L_ref=299679.5  mIoU=0.6122
-    K=  4 emb=32 λ=0.0  Acc=0.8300  L_ref=279455.0  mIoU=0.6707
-    K=  4 emb=32 λ=0.0  Acc=0.8260  L_ref=276214.1  mIoU=0.6831
-    K= 64 emb=16 λ=0.5  Acc=0.9500  L_ref=112649.1  mIoU=0.7462
-    K= 64 emb=32 λ=0.0  Acc=0.9400  L_ref=153048.5  mIoU=0.7284
-    K= 64 emb= 8 λ=0.5  Acc=0.9660  L_ref=73313.0  mIoU=0.7684
-    K=  8 emb=32 λ=0.5  Acc=0.8700  L_ref=226288.9  mIoU=0.6860

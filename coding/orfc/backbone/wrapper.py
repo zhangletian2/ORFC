@@ -30,6 +30,7 @@ _DINOV2_REGISTRY = {
         "pretrain": "dinov2_vitl14_pretrain.pth",
         "linear_head": "dinov2_vitl14_linear_head.pth",
         "seg_head": "dinov2_vitl14_voc2012_linear_head.pth",
+        "depth_head": "/data4/workspace/zlt/cache/torch/hub/checkpoints/dinov2_vitl14_nyu_linear_head.pth",
         "embed_dim": 1024,
         "config": os.path.join(UTILS_DIR, "dinov2_vitl14_voc2012_linear_config.py"),
         "vit_fn": "vit_large",
@@ -306,6 +307,7 @@ class Dinov2Wrapper:
         self.backbone = getattr(clf, "backbone", clf)
         self.head = getattr(clf, "linear_head", None)
         self.seg_head = None
+        self.depth_head = None
         self.device = device
         self.weights_root = weights_root
 
@@ -317,6 +319,54 @@ class Dinov2Wrapper:
             seg_head_path, in_channels=self.embed_dim,
             num_classes=num_classes, device=self.device)
         print(f"  分割头已加载: {seg_head_path}")
+
+    def load_depth_head(self, depth_head_path=None):
+        """加载 NYU 深度估计头 (BNHead, cls.-reg. over n_bins).
+
+        与分割不同: 深度头在未过最终 LayerNorm 的中间层输出上工作
+        (dinov2_depth_pipeline 中 norm=False)。这里只负责构造并加载权重;
+        是否施加 norm 由调用方 (DepthTaskTail) 决定。
+        """
+        from dinov2.hub.depth import BNHead
+
+        reg = _DINOV2_REGISTRY[self.model_name]
+        if depth_head_path is None:
+            depth_head_path = reg["depth_head"]
+        ckpt = torch.load(depth_head_path, map_location='cpu')
+        if 'state_dict' in ckpt:
+            ckpt = ckpt['state_dict']
+        conv_w_key = next((k for k in ckpt if 'conv_depth.weight' in k), None)
+        n_bins = (ckpt[conv_w_key].shape[0] if conv_w_key
+                  else ckpt['weight'].shape[0])
+
+        head = BNHead(
+            classify=True, n_bins=n_bins, bins_strategy="UD",
+            norm_strategy="linear", upsample=4,
+            in_channels=[self.embed_dim], in_index=[0],
+            input_transform="resize_concat", channels=self.embed_dim * 2,
+            align_corners=False, min_depth=1e-3, max_depth=10.0,
+            loss_decode=(),
+        )
+        if conv_w_key:
+            head_state = {
+                (k.replace('decode_head.', '') if k.startswith('decode_head.')
+                 else k): v
+                for k, v in ckpt.items()
+            }
+            head.load_state_dict(head_state, strict=True)
+        else:
+            w = ckpt['weight']
+            if w.dim() == 2:
+                w = w.reshape(n_bins, self.embed_dim * 2, 1, 1)
+            head.conv_depth.weight.data = w
+            head.conv_depth.bias.data = ckpt['bias']
+
+        head = head.to(self.device).eval()
+        for p in head.parameters():
+            p.requires_grad_(False)
+        self.depth_head = head
+        print(f"  深度头已加载: {depth_head_path}  (BNHead, n_bins={n_bins})")
+        return head
 
     @torch.no_grad()
     def forward_from_tokens(self, tokens, start_block_idx):

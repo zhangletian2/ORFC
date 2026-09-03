@@ -1,0 +1,89 @@
+/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torchvision/datapoints/__init__.py:12: UserWarning: The torchvision.datapoints and torchvision.transforms.v2 namespaces are still Beta. While we do not expect major breaking changes, some APIs may still change according to user feedback. Please submit any feedback you may have in this issue: https://github.com/pytorch/vision/issues/6753, and you can also check out https://github.com/pytorch/vision/issues/7319 to learn more about the APIs that we suspect might involve future changes. You can silence this warning by calling torchvision.disable_beta_transforms_warning().
+  warnings.warn(_BETA_TRANSFORMS_WARNING)
+/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torchvision/transforms/v2/__init__.py:54: UserWarning: The torchvision.datapoints and torchvision.transforms.v2 namespaces are still Beta. While we do not expect major breaking changes, some APIs may still change according to user feedback. Please submit any feedback you may have in this issue: https://github.com/pytorch/vision/issues/6753, and you can also check out https://github.com/pytorch/vision/issues/7319 to learn more about the APIs that we suspect might involve future changes. You can silence this warning by calling torchvision.disable_beta_transforms_warning().
+  warnings.warn(_BETA_TRANSFORMS_WARNING)
+
+######################################################################
+# Scalable codec: frozen base (tail-MSE) + task residual
+# layer=blk20 (idx=20)  backbone=dinov2_vitl14  task=cls
+# base_ckpt=blk20_K256_emb32_bt1024_ws_tau0.5_lr0.0005_ep100_n5000_s42.pt
+# residual: K=4, emb=32, transform=orthogonal, loss=task  shareR  freezeR
+# epochs=50, lr=0.0003, lmbda_rate=0.0, ecvq_lmbda=0.0, lmbda_kd=1.0, beta_mse=0.0
+# 2026-08-28 18:05:56
+######################################################################
+
+Data: train=5000, test=500
+  并行加载特征 (workers=4)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  30%|███       | 151/500 [00:00<00:00, 1491.40it/s]Loading:  62%|██████▏   | 308/500 [00:00<00:00, 1536.83it/s]Loading:  95%|█████████▌| 476/500 [00:00<00:00, 1598.21it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 1589.61it/s]
+
+Data: train=5000, test=500
+  并行加载特征 (workers=4)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:   3%|▎         | 161/5000 [00:00<00:03, 1594.97it/s]Loading:   6%|▋         | 321/5000 [00:00<00:03, 1497.54it/s]Loading:   9%|▉         | 472/5000 [00:00<00:03, 1494.34it/s]Loading:  12%|█▏        | 622/5000 [00:00<00:03, 1450.70it/s]Loading:  16%|█▌        | 782/5000 [00:00<00:02, 1492.95it/s]Loading:  19%|█▉        | 941/5000 [00:00<00:02, 1523.96it/s]Loading:  22%|██▏       | 1104/5000 [00:00<00:02, 1557.09it/s]Loading:  25%|██▌       | 1260/5000 [00:00<00:02, 1511.10it/s]Loading:  28%|██▊       | 1412/5000 [00:00<00:02, 1461.46it/s]Loading:  31%|███       | 1559/5000 [00:01<00:02, 1445.12it/s]Loading:  34%|███▍      | 1704/5000 [00:01<00:02, 1446.31it/s]Loading:  37%|███▋      | 1855/5000 [00:01<00:02, 1434.19it/s]Loading:  40%|████      | 2025/5000 [00:01<00:01, 1508.31it/s]Loading:  44%|████▎     | 2180/5000 [00:01<00:01, 1515.15it/s]Loading:  47%|████▋     | 2352/5000 [00:01<00:01, 1574.04it/s]Loading:  50%|█████     | 2510/5000 [00:01<00:01, 1572.96it/s]Loading:  53%|█████▎    | 2668/5000 [00:01<00:01, 1569.57it/s]Loading:  57%|█████▋    | 2840/5000 [00:01<00:01, 1604.99it/s]Loading:  60%|██████    | 3012/5000 [00:01<00:01, 1635.95it/s]Loading:  64%|██████▎   | 3176/5000 [00:02<00:01, 1627.67it/s]Loading:  67%|██████▋   | 3339/5000 [00:02<00:01, 1541.31it/s]Loading:  70%|██████▉   | 3495/5000 [00:02<00:01, 1460.31it/s]Loading:  73%|███████▎  | 3650/5000 [00:02<00:00, 1450.08it/s]Loading:  76%|███████▋  | 3823/5000 [00:02<00:00, 1525.10it/s]Loading:  80%|███████▉  | 3977/5000 [00:02<00:00, 1493.67it/s]Loading:  83%|████████▎ | 4129/5000 [00:02<00:00, 1500.48it/s]Loading:  86%|████████▌ | 4285/5000 [00:02<00:00, 1513.15it/s]Loading:  89%|████████▉ | 4441/5000 [00:02<00:00, 1523.80it/s]Loading:  92%|█████████▏| 4606/5000 [00:03<00:00, 1560.79it/s]Loading:  95%|█████████▌| 4763/5000 [00:03<00:00, 1536.19it/s]Loading:  98%|█████████▊| 4921/5000 [00:03<00:00, 1548.27it/s]Loading: 100%|██████████| 5000/5000 [00:03<00:00, 1526.40it/s]
+  ce_weight=0: skipping ImageNet label filter
+  D=1024, T=257, labels: none (pure KD)
+  train=4800, val=200 (held out from train pool)
+
+Loading DINOv2 (dinov2_vitl14)...
+  Tail: 3 blocks (blk21..blk23) + norm
+  Task head: ImageNet linear classifier (1000 classes)
+
+============================================================
+  [Base] frozen codec from stage 1 (tail-MSE optimised)
+============================================================
+  base: G=32, K=256, d=32, transform=OrthogonalTransform, fixed rate=256 bits/token
+  residual: G=32, K=4, d=32, fixed rate=64 bits/token
+  Shared ORFC R: copied Cayley params, ||R_res-R_base||=0.00e+00, ||R'R-I||=3.25e-03
+
+  Collecting residuals R = Y - Ŷ_base for initialisation (≤62,500 vectors)...
+  residual vectors: (62496, 1024), mean square = 0.233993
+  Residual init: k-means on 62,496 residual vectors (residual-transform space)
+
+============================================================
+  [Residual] training under 'task' loss
+============================================================
+  Base codec: 785,920 params (frozen), G=32, K=256, d=32
+  Residual codec: G=32, K=4, d=32, 4,096 trainable params
+  Frozen: residual transform
+  Residual transform ||R'R-I||=3.25e-03
+  Loss: 1.0*KD(T=2.0)
+  Soft PQ: τ 0.500 → 0.0050 (exponential)
+  Pre-computing teacher logits (4800 images)...
+  Teacher logits: (4800, 1000)  0.02 GB CPU  (3.6s)
+  CUDA before train: alloc=1.26GB reserved=1.30GB peak_alloc=1.26GB peak_reserved=1.30GB
+  CUDA after first backward: alloc=1.37GB reserved=2.85GB peak_alloc=2.74GB peak_reserved=2.85GB
+  ep   0/50  D=0.3225  ppl=4.0  dead=0  τ=0.5000  val=0.0000  (10.5s)
+  CUDA after ep 0: alloc=1.27GB reserved=2.85GB peak_alloc=2.74GB peak_reserved=2.85GB
+  ep  10/50  D=0.2352  ppl=4.0  dead=0  τ=0.1953  val=0.0000  (10.0s)
+  CUDA after ep 10: alloc=1.27GB reserved=2.85GB peak_alloc=2.74GB peak_reserved=2.85GB
+  ep  20/50  D=0.2116  ppl=4.0  dead=0  τ=0.0763  val=0.0000  (10.0s)
+  CUDA after ep 20: alloc=1.27GB reserved=2.85GB peak_alloc=2.74GB peak_reserved=2.85GB
+  ep  30/50  D=0.1984  ppl=4.0  dead=0  τ=0.0298  val=0.0000  (10.0s)
+  CUDA after ep 30: alloc=1.27GB reserved=2.85GB peak_alloc=2.74GB peak_reserved=2.85GB
+  ep  40/50  D=0.1922  ppl=4.0  dead=0  τ=0.0116  val=0.0000  (10.1s)
+  CUDA after ep 40: alloc=1.27GB reserved=2.85GB peak_alloc=2.74GB peak_reserved=2.85GB
+  ep  49/50  D=0.1905  ppl=4.0  dead=0  τ=0.0050  val=0.0000  (10.1s)
+  CUDA after ep 49: alloc=1.27GB reserved=2.85GB peak_alloc=2.74GB peak_reserved=2.85GB
+  CUDA train done: alloc=1.27GB reserved=2.85GB peak_alloc=2.74GB peak_reserved=2.85GB
+  Residual training: 524.0s
+  Residual codec saved: /data4/workspace/zlt/featcodec/ORFC/coding/orfcv2/checkpoints/dinov2_vitl14/base-blk20_K256_emb32_bt1024_ws_tau0.5_lr0.0005_ep100_n5000_s42_task-cls_res_task_K4_emb32_orthogonal_shareR_dinov2_vitl14_stage2_km_fzR_ce0.0_kd1.0T2.0_tau0.5_lr0.0003_ep50_n5000_s42_stage2.pt
+
+============================================================
+  [Eval] classification / rate
+============================================================
+  * base only       Acc=0.9540  ΔL_ref=123981.3
+  * base + residual Acc=0.9560  ΔL_ref=128615.0
+  * Δ(Acc)=+0.0020  Δ(ΔL_ref)=+4633.6
+  Computing train PMFs and test rate...
+  * base    : rANS=252.82  xent=252.72  H_emp=251.91  max=256  BPFP=0.2469
+  * residual: rANS=63.58  xent=63.58  H_emp=63.46  max=64  BPFP=0.0621
+  * total: rANS=316.40 b/t  BPFP=0.3090
+
+============================================================
+  Summary: blk20  base K=256/d=32  residual K=4/d=32  loss=task
+  Acc     : base=0.9540 -> full=0.9560 (+0.0020)
+  ΔL_ref  : base=123981.3 -> full=128615.0 (+4633.6)
+  Rate    : base=252.82 + residual=63.58 = 316.40 bits/token
+  Train time: 524.0s
+============================================================
+
+Results saved: /data4/workspace/zlt/featcodec/ORFC/coding/orfcv2/results/dinov2_vitl14/base-blk20_K256_emb32_bt1024_ws_tau0.5_lr0.0005_ep100_n5000_s42_task-cls_res_task_K4_emb32_orthogonal_shareR_dinov2_vitl14_stage2_km_fzR_ce0.0_kd1.0T2.0_tau0.5_lr0.0003_ep50_n5000_s42_stage2.json

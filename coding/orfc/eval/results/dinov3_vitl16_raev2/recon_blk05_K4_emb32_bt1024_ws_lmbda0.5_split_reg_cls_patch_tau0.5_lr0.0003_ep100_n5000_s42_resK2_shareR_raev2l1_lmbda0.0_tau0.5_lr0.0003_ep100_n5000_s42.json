@@ -1,0 +1,41 @@
+{
+  "task": "recon_raev2",
+  "tag": "blk05_K4_emb32_bt1024_ws_lmbda0.5_split_reg_cls_patch_tau0.5_lr0.0003_ep100_n5000_s42_resK2_shareR_raev2l1_lmbda0.0_tau0.5_lr0.0003_ep100_n5000_s42",
+  "layer": "blk05",
+  "slot": 6,
+  "mode": "orfc",
+  "ckpt": "/data4/workspace/zlt/featcodec/ORFC/coding/orfcv2/checkpoints/dinov3_vitl16_raev2_res/blk05_K4_emb32_bt1024_ws_lmbda0.5_split_reg_cls_patch_tau0.5_lr0.0003_ep100_n5000_s42_resK2_shareR_raev2l1_lmbda0.0_tau0.5_lr0.0003_ep100_n5000_s42.pt",
+  "n_samples": 500,
+  "img_size": 256,
+  "token_hw": [
+    16,
+    16
+  ],
+  "affine_free_ln": true,
+  "norm_mode": "split_reg_cls_patch",
+  "metrics_bypass": {
+    "psnr": 18.916425731658936,
+    "ms_ssim": 0.718590523660183,
+    "lpips": 0.17250028809905052
+  },
+  "metrics": {
+    "psnr": 18.944859550476075,
+    "ms_ssim": 0.7075560666918754,
+    "lpips": 0.20196970416605473
+  },
+  "rate": {
+    "K": 4,
+    "K2": 2,
+    "G": 32,
+    "emb": 32,
+    "bpfp": 96.0,
+    "bpfp_base": 64.0,
+    "bpfp_res": 32.0,
+    "bits_per_image": 25056.0,
+    "bpp": 0.38232421875,
+    "n_tokens": 261,
+    "residual": true
+  },
+  "elapsed_s": 28.12662959098816,
+  "decoder": "/data4/workspace/zlt/featcodec/third_party/RAEv2/pretrained_models/stage1/imagenet/dinov3l-k1/decoder.pt"
+}

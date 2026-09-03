@@ -1,0 +1,89 @@
+/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torchvision/datapoints/__init__.py:12: UserWarning: The torchvision.datapoints and torchvision.transforms.v2 namespaces are still Beta. While we do not expect major breaking changes, some APIs may still change according to user feedback. Please submit any feedback you may have in this issue: https://github.com/pytorch/vision/issues/6753, and you can also check out https://github.com/pytorch/vision/issues/7319 to learn more about the APIs that we suspect might involve future changes. You can silence this warning by calling torchvision.disable_beta_transforms_warning().
+  warnings.warn(_BETA_TRANSFORMS_WARNING)
+/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torchvision/transforms/v2/__init__.py:54: UserWarning: The torchvision.datapoints and torchvision.transforms.v2 namespaces are still Beta. While we do not expect major breaking changes, some APIs may still change according to user feedback. Please submit any feedback you may have in this issue: https://github.com/pytorch/vision/issues/6753, and you can also check out https://github.com/pytorch/vision/issues/7319 to learn more about the APIs that we suspect might involve future changes. You can silence this warning by calling torchvision.disable_beta_transforms_warning().
+  warnings.warn(_BETA_TRANSFORMS_WARNING)
+
+######################################################################
+# Scalable codec: frozen base (tail-MSE) + task residual
+# layer=blk15 (idx=15)  backbone=dinov2_vitl14  task=cls
+# base_ckpt=blk15_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.pt
+# residual: K=2, emb=32, transform=orthogonal, loss=task  shareR  freezeR
+# epochs=50, lr=0.0003, lmbda_rate=0.0, ecvq_lmbda=0.0, lmbda_kd=1.0, beta_mse=0.0
+# 2026-08-28 09:38:31
+######################################################################
+
+Data: train=5000, test=500
+  并行加载特征 (workers=4)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  14%|█▍        | 69/500 [00:00<00:00, 597.11it/s]Loading:  26%|██▌       | 129/500 [00:00<00:01, 363.93it/s]Loading:  34%|███▍      | 170/500 [00:00<00:01, 258.71it/s]Loading:  41%|████      | 203/500 [00:00<00:01, 247.28it/s]Loading:  46%|████▌     | 230/500 [00:00<00:01, 237.01it/s]Loading:  51%|█████     | 255/500 [00:00<00:01, 228.52it/s]Loading:  56%|█████▌    | 279/500 [00:01<00:00, 222.98it/s]Loading:  63%|██████▎   | 316/500 [00:01<00:00, 259.78it/s]Loading:  74%|███████▍  | 370/500 [00:01<00:00, 319.39it/s]Loading:  81%|████████  | 404/500 [00:01<00:00, 324.26it/s]Loading:  88%|████████▊ | 442/500 [00:01<00:00, 335.90it/s]Loading:  96%|█████████▌| 480/500 [00:01<00:00, 329.43it/s]Loading: 100%|██████████| 500/500 [00:01<00:00, 296.47it/s]
+
+Data: train=5000, test=500
+  并行加载特征 (workers=4)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:   1%|▏         | 74/5000 [00:00<00:08, 569.05it/s]Loading:   3%|▎         | 131/5000 [00:00<00:11, 421.69it/s]Loading:   4%|▎         | 175/5000 [00:00<00:11, 424.79it/s]Loading:   4%|▍         | 219/5000 [00:00<00:14, 334.19it/s]Loading:   5%|▌         | 263/5000 [00:00<00:13, 350.04it/s]Loading:   6%|▌         | 312/5000 [00:00<00:12, 371.91it/s]Loading:   8%|▊         | 376/5000 [00:00<00:12, 361.23it/s]Loading:   9%|▉         | 441/5000 [00:01<00:11, 390.36it/s]Loading:  10%|█         | 513/5000 [00:01<00:11, 392.59it/s]Loading:  12%|█▏        | 597/5000 [00:01<00:09, 449.60it/s]Loading:  13%|█▎        | 647/5000 [00:01<00:10, 431.03it/s]Loading:  14%|█▍        | 691/5000 [00:01<00:10, 395.43it/s]Loading:  15%|█▌        | 757/5000 [00:01<00:09, 438.25it/s]Loading:  16%|█▌        | 802/5000 [00:02<00:11, 366.84it/s]Loading:  17%|█▋        | 841/5000 [00:02<00:13, 313.56it/s]Loading:  18%|█▊        | 902/5000 [00:02<00:12, 326.21it/s]Loading:  19%|█▉        | 961/5000 [00:02<00:11, 347.19it/s]Loading:  20%|██        | 1019/5000 [00:02<00:10, 369.32it/s]Loading:  21%|██        | 1057/5000 [00:02<00:11, 343.35it/s]Loading:  23%|██▎       | 1127/5000 [00:02<00:10, 363.38it/s]Loading:  24%|██▍       | 1203/5000 [00:03<00:09, 392.21it/s]Loading:  26%|██▌       | 1285/5000 [00:03<00:07, 478.81it/s]Loading:  27%|██▋       | 1337/5000 [00:03<00:09, 375.48it/s]Loading:  28%|██▊       | 1380/5000 [00:03<00:09, 362.47it/s]Loading:  28%|██▊       | 1420/5000 [00:03<00:12, 294.93it/s]Loading:  30%|██▉       | 1485/5000 [00:03<00:09, 361.03it/s]Loading:  31%|███       | 1548/5000 [00:04<00:08, 395.39it/s]Loading:  32%|███▏      | 1593/5000 [00:04<00:09, 375.57it/s]Loading:  33%|███▎      | 1634/5000 [00:04<00:08, 376.92it/s]Loading:  33%|███▎      | 1674/5000 [00:04<00:09, 368.19it/s]Loading:  34%|███▍      | 1713/5000 [00:04<00:09, 351.86it/s]Loading:  35%|███▌      | 1750/5000 [00:04<00:09, 342.70it/s]Loading:  36%|███▌      | 1785/5000 [00:04<00:10, 320.77it/s]Loading:  36%|███▋      | 1823/5000 [00:04<00:10, 305.01it/s]Loading:  37%|███▋      | 1854/5000 [00:05<00:11, 267.91it/s]Loading:  38%|███▊      | 1886/5000 [00:05<00:11, 265.98it/s]Loading:  38%|███▊      | 1914/5000 [00:05<00:12, 252.39it/s]Loading:  40%|███▉      | 1997/5000 [00:05<00:08, 359.80it/s]Loading:  41%|████▏     | 2068/5000 [00:05<00:07, 382.11it/s]Loading:  42%|████▏     | 2110/5000 [00:05<00:08, 358.69it/s]Loading:  43%|████▎     | 2146/5000 [00:05<00:09, 313.85it/s]Loading:  44%|████▍     | 2206/5000 [00:06<00:07, 376.25it/s]Loading:  45%|████▍     | 2246/5000 [00:06<00:07, 367.63it/s]Loading:  46%|████▌     | 2285/5000 [00:06<00:08, 303.69it/s]Loading:  46%|████▋     | 2325/5000 [00:06<00:08, 307.60it/s]Loading:  47%|████▋     | 2358/5000 [00:06<00:09, 284.33it/s]Loading:  48%|████▊     | 2423/5000 [00:06<00:07, 366.85it/s]Loading:  49%|████▉     | 2463/5000 [00:06<00:07, 360.89it/s]Loading:  50%|█████     | 2510/5000 [00:06<00:06, 363.08it/s]Loading:  52%|█████▏    | 2586/5000 [00:07<00:05, 452.26it/s]Loading:  53%|█████▎    | 2639/5000 [00:07<00:05, 455.66it/s]Loading:  54%|█████▎    | 2686/5000 [00:07<00:05, 408.57it/s]Loading:  55%|█████▌    | 2758/5000 [00:07<00:04, 461.16it/s]Loading:  56%|█████▌    | 2806/5000 [00:07<00:05, 388.46it/s]Loading:  57%|█████▋    | 2848/5000 [00:07<00:07, 288.72it/s]Loading:  58%|█████▊    | 2890/5000 [00:08<00:07, 292.82it/s]Loading:  59%|█████▉    | 2946/5000 [00:08<00:06, 316.01it/s]Loading:  60%|█████▉    | 2992/5000 [00:08<00:06, 322.92it/s]Loading:  61%|██████    | 3027/5000 [00:08<00:06, 318.10it/s]Loading:  62%|██████▏   | 3083/5000 [00:08<00:05, 322.14it/s]Loading:  64%|██████▍   | 3194/5000 [00:08<00:04, 440.08it/s]Loading:  65%|██████▍   | 3239/5000 [00:08<00:04, 424.60it/s]Loading:  66%|██████▌   | 3282/5000 [00:09<00:04, 423.31it/s]Loading:  67%|██████▋   | 3352/5000 [00:09<00:03, 465.13it/s]Loading:  68%|██████▊   | 3399/5000 [00:09<00:03, 465.68it/s]Loading:  69%|██████▉   | 3467/5000 [00:09<00:03, 476.26it/s]Loading:  70%|███████   | 3515/5000 [00:09<00:03, 467.17it/s]Loading:  71%|███████   | 3562/5000 [00:09<00:03, 427.64it/s]Loading:  72%|███████▏  | 3605/5000 [00:09<00:03, 389.98it/s]Loading:  73%|███████▎  | 3645/5000 [00:09<00:04, 335.57it/s]Loading:  74%|███████▍  | 3696/5000 [00:10<00:04, 322.88it/s]Loading:  75%|███████▌  | 3750/5000 [00:10<00:03, 331.62it/s]Loading:  76%|███████▌  | 3784/5000 [00:10<00:03, 332.24it/s]Loading:  77%|███████▋  | 3831/5000 [00:10<00:03, 349.45it/s]Loading:  77%|███████▋  | 3867/5000 [00:10<00:03, 341.39it/s]Loading:  78%|███████▊  | 3911/5000 [00:10<00:03, 348.63it/s]Loading:  79%|███████▉  | 3947/5000 [00:10<00:03, 318.41it/s]Loading:  80%|███████▉  | 3986/5000 [00:10<00:03, 332.55it/s]Loading:  81%|████████  | 4054/5000 [00:11<00:02, 367.51it/s]Loading:  82%|████████▏ | 4098/5000 [00:11<00:02, 365.07it/s]Loading:  83%|████████▎ | 4150/5000 [00:11<00:02, 398.81it/s]Loading:  84%|████████▍ | 4191/5000 [00:11<00:02, 346.70it/s]Loading:  85%|████████▍ | 4227/5000 [00:11<00:02, 346.73it/s]Loading:  85%|████████▌ | 4264/5000 [00:11<00:02, 340.55it/s]Loading:  86%|████████▌ | 4299/5000 [00:11<00:02, 277.04it/s]Loading:  87%|████████▋ | 4364/5000 [00:12<00:01, 355.70it/s]Loading:  88%|████████▊ | 4413/5000 [00:12<00:01, 387.46it/s]Loading:  89%|████████▉ | 4455/5000 [00:12<00:01, 374.18it/s]Loading:  90%|█████████ | 4500/5000 [00:12<00:01, 354.11it/s]Loading:  91%|█████████ | 4545/5000 [00:12<00:01, 325.95it/s]Loading:  92%|█████████▏| 4595/5000 [00:12<00:01, 353.47it/s]Loading:  93%|█████████▎| 4632/5000 [00:12<00:01, 291.86it/s]Loading:  94%|█████████▎| 4680/5000 [00:12<00:00, 321.67it/s]Loading:  94%|█████████▍| 4716/5000 [00:13<00:00, 322.51it/s]Loading:  95%|█████████▌| 4750/5000 [00:13<00:00, 306.63it/s]Loading:  96%|█████████▌| 4782/5000 [00:13<00:00, 298.66it/s]Loading:  96%|█████████▋| 4815/5000 [00:13<00:00, 299.86it/s]Loading:  97%|█████████▋| 4846/5000 [00:13<00:00, 258.25it/s]Loading:  98%|█████████▊| 4891/5000 [00:13<00:00, 248.34it/s]Loading:  99%|█████████▉| 4941/5000 [00:13<00:00, 296.23it/s]Loading:  99%|█████████▉| 4973/5000 [00:14<00:00, 268.17it/s]Loading: 100%|██████████| 5000/5000 [00:14<00:00, 351.02it/s]
+  ce_weight=0: skipping ImageNet label filter
+  D=1024, T=257, labels: none (pure KD)
+  train=4800, val=200 (held out from train pool)
+
+Loading DINOv2 (dinov2_vitl14)...
+  Tail: 8 blocks (blk16..blk23) + norm
+  Task head: ImageNet linear classifier (1000 classes)
+
+============================================================
+  [Base] frozen codec from stage 1 (tail-MSE optimised)
+============================================================
+  base: G=32, K=16, d=32, transform=OrthogonalTransform, fixed rate=128 bits/token
+  residual: G=32, K=2, d=32, fixed rate=32 bits/token
+  Shared ORFC R: copied Cayley params, ||R_res-R_base||=0.00e+00, ||R'R-I||=1.71e-03
+
+  Collecting residuals R = Y - Ŷ_base for initialisation (≤62,500 vectors)...
+  residual vectors: (62496, 1024), mean square = 0.722591
+  Residual init: k-means on 62,496 residual vectors (residual-transform space)
+
+============================================================
+  [Residual] training under 'task' loss
+============================================================
+  Base codec: 540,672 params (frozen), G=32, K=16, d=32
+  Residual codec: G=32, K=2, d=32, 2,048 trainable params
+  Frozen: residual transform
+  Residual transform ||R'R-I||=1.71e-03
+  Loss: 1.0*KD(T=2.0)
+  Soft PQ: τ 0.500 → 0.0050 (exponential)
+  Pre-computing teacher logits (4800 images)...
+  Teacher logits: (4800, 1000)  0.02 GB CPU  (8.1s)
+  CUDA before train: alloc=1.26GB reserved=1.30GB peak_alloc=1.26GB peak_reserved=1.30GB
+  CUDA after first backward: alloc=1.37GB reserved=4.55GB peak_alloc=4.42GB peak_reserved=4.55GB
+  ep   0/50  D=0.1863  ppl=2.0  dead=0  τ=0.5000  val=0.0000  (20.1s)
+  CUDA after ep 0: alloc=1.27GB reserved=4.55GB peak_alloc=4.42GB peak_reserved=4.55GB
+  ep  10/50  D=0.1441  ppl=2.0  dead=0  τ=0.1953  val=0.0000  (19.7s)
+  CUDA after ep 10: alloc=1.27GB reserved=4.55GB peak_alloc=4.42GB peak_reserved=4.55GB
+  ep  20/50  D=0.1319  ppl=2.0  dead=0  τ=0.0763  val=0.0000  (19.6s)
+  CUDA after ep 20: alloc=1.27GB reserved=4.55GB peak_alloc=4.42GB peak_reserved=4.55GB
+  ep  30/50  D=0.1271  ppl=2.0  dead=0  τ=0.0298  val=0.0000  (19.6s)
+  CUDA after ep 30: alloc=1.27GB reserved=4.55GB peak_alloc=4.42GB peak_reserved=4.55GB
+  ep  40/50  D=0.1252  ppl=2.0  dead=0  τ=0.0116  val=0.0000  (19.7s)
+  CUDA after ep 40: alloc=1.27GB reserved=4.55GB peak_alloc=4.42GB peak_reserved=4.55GB
+  ep  49/50  D=0.1246  ppl=2.0  dead=0  τ=0.0050  val=0.0000  (19.7s)
+  CUDA after ep 49: alloc=1.27GB reserved=4.55GB peak_alloc=4.42GB peak_reserved=4.55GB
+  CUDA train done: alloc=1.27GB reserved=4.55GB peak_alloc=4.42GB peak_reserved=4.55GB
+  Residual training: 1016.6s
+  Residual codec saved: /data4/workspace/zlt/featcodec/ORFC/coding/orfcv2/checkpoints/dinov2_vitl14/base-blk15_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-cls_res_task_K2_emb32_orthogonal_shareR_dinov2_vitl14_stage2_km_fzR_ce0.0_kd1.0T2.0_tau0.5_lr0.0003_ep50_n5000_s42_stage2.pt
+
+============================================================
+  [Eval] classification / rate
+============================================================
+  * base only       Acc=0.9580  ΔL_ref=106873.8
+  * base + residual Acc=0.9580  ΔL_ref=110192.5
+  * Δ(Acc)=+0.0000  Δ(ΔL_ref)=+3318.6
+  Computing train PMFs and test rate...
+  * base    : rANS=125.65  xent=125.64  H_emp=125.50  max=128  BPFP=0.1227
+  * residual: rANS=31.94  xent=31.94  H_emp=31.92  max=32  BPFP=0.0312
+  * total: rANS=157.59 b/t  BPFP=0.1539
+
+============================================================
+  Summary: blk15  base K=16/d=32  residual K=2/d=32  loss=task
+  Acc     : base=0.9580 -> full=0.9580 (+0.0000)
+  ΔL_ref  : base=106873.8 -> full=110192.5 (+3318.6)
+  Rate    : base=125.65 + residual=31.94 = 157.59 bits/token
+  Train time: 1016.6s
+============================================================
+
+Results saved: /data4/workspace/zlt/featcodec/ORFC/coding/orfcv2/results/dinov2_vitl14/base-blk15_K16_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-cls_res_task_K2_emb32_orthogonal_shareR_dinov2_vitl14_stage2_km_fzR_ce0.0_kd1.0T2.0_tau0.5_lr0.0003_ep50_n5000_s42_stage2.json

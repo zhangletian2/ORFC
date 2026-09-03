@@ -1,0 +1,100 @@
+/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torchvision/datapoints/__init__.py:12: UserWarning: The torchvision.datapoints and torchvision.transforms.v2 namespaces are still Beta. While we do not expect major breaking changes, some APIs may still change according to user feedback. Please submit any feedback you may have in this issue: https://github.com/pytorch/vision/issues/6753, and you can also check out https://github.com/pytorch/vision/issues/7319 to learn more about the APIs that we suspect might involve future changes. You can silence this warning by calling torchvision.disable_beta_transforms_warning().
+  warnings.warn(_BETA_TRANSFORMS_WARNING)
+/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torchvision/transforms/v2/__init__.py:54: UserWarning: The torchvision.datapoints and torchvision.transforms.v2 namespaces are still Beta. While we do not expect major breaking changes, some APIs may still change according to user feedback. Please submit any feedback you may have in this issue: https://github.com/pytorch/vision/issues/6753, and you can also check out https://github.com/pytorch/vision/issues/7319 to learn more about the APIs that we suspect might involve future changes. You can silence this warning by calling torchvision.disable_beta_transforms_warning().
+  warnings.warn(_BETA_TRANSFORMS_WARNING)
+
+######################################################################
+# Scalable codec: frozen base (tail-MSE) + task residual
+# layer=blk20 (idx=20)  backbone=dinov2_vitl14  task=seg
+# base_ckpt=blk20_K2_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42.pt
+# residual: K=2, emb=32, transform=orthogonal, loss=task
+# epochs=100, lr=0.0003, lmbda_rate=0.0, ecvq_lmbda=0.0, lmbda_kd=1.0, beta_mse=0.0
+# 2026-08-12 01:41:53
+######################################################################
+
+Data: train=5000, test=500
+  并行加载特征 (workers=4)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:   6%|▌         | 287/5000 [00:00<00:01, 2865.43it/s]Loading:  12%|█▏        | 582/5000 [00:00<00:01, 2914.68it/s]Loading:  18%|█▊        | 875/5000 [00:00<00:01, 2921.11it/s]Loading:  24%|██▎       | 1179/5000 [00:00<00:01, 2960.31it/s]Loading:  30%|██▉       | 1478/5000 [00:00<00:01, 2970.92it/s]Loading:  36%|███▌      | 1785/5000 [00:00<00:01, 3002.73it/s]Loading:  42%|████▏     | 2086/5000 [00:00<00:00, 2969.64it/s]Loading:  48%|████▊     | 2391/5000 [00:00<00:00, 2993.14it/s]Loading:  54%|█████▍    | 2697/5000 [00:00<00:00, 3011.83it/s]Loading:  61%|██████    | 3030/5000 [00:01<00:00, 3106.61it/s]Loading:  67%|██████▋   | 3366/5000 [00:01<00:00, 3183.30it/s]Loading:  74%|███████▎  | 3685/5000 [00:01<00:00, 3142.33it/s]Loading:  80%|████████  | 4000/5000 [00:01<00:00, 3058.04it/s]Loading:  86%|████████▌ | 4307/5000 [00:01<00:00, 3028.94it/s]Loading:  92%|█████████▏| 4611/5000 [00:01<00:00, 2973.34it/s]Loading:  98%|█████████▊| 4909/5000 [00:01<00:00, 2959.83it/s]Loading: 100%|██████████| 5000/5000 [00:01<00:00, 3013.10it/s]
+  并行加载特征 (workers=4)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  59%|█████▉    | 297/500 [00:00<00:00, 2964.50it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 3021.65it/s]
+  D=1024, T=257, labels: 1000 classes
+  train=4800, val=200 (held out from train pool)
+
+Loading DINOv2 (dinov2_vitl14)...
+  Tail: 3 blocks (blk21..blk23) + norm
+  分割头已加载: /data4/workspace/zlt/featcodec/ORFC/pretrained/dinov2_vitl14_voc2012_linear_head.pth
+  Task head: VOC2012 segmentation (BN + 1x1 conv, 21 classes)
+
+============================================================
+  [Base] frozen codec from stage 1 (tail-MSE optimised)
+============================================================
+  base: G=32, K=2, d=32, transform=OrthogonalTransform, fixed rate=32 bits/token
+  residual: G=32, K=2, d=32, fixed rate=32 bits/token
+
+  Collecting residuals R = Y - Ŷ_base for initialisation (≤62,500 vectors)...
+  residual vectors: (62496, 1024), mean square = 0.766777
+  Residual init: OPQ on 62,496 residual vectors (G=32, d=32, K=2)
+    residual OPQ MSE=0.31720680 (9.8s)
+
+============================================================
+  [Residual] training under 'task' loss
+============================================================
+  Base codec: 525,824 params (frozen), G=32, K=2, d=32
+  Residual codec: G=32, K=2, d=32, 525,824 trainable params
+  Residual transform ||R'R-I||=1.02e-03
+  Loss: 1.0*KD(T=2.0)
+  Soft PQ: τ 0.500 → 0.0050 (exponential)
+  Pre-computing teacher logits (4800 images)...
+  ep   0/100  D=1.1845  acc=0.000  ppl=2.0  dead=0  τ=0.5000  val=1.1027  val_agree=0.829  (9.5s)
+  ep  10/100  D=0.7823  acc=0.000  ppl=1.9  dead=0  τ=0.3140  val=0.8586  val_agree=0.851  (9.2s)
+  ep  20/100  D=0.7212  acc=0.000  ppl=1.9  dead=0  τ=0.1972  val=0.8340  val_agree=0.855  (9.2s)
+  ep  30/100  D=0.6996  acc=0.000  ppl=1.9  dead=0  τ=0.1239  val=0.8178  val_agree=0.856  (9.4s)
+  ep  40/100  D=0.6864  acc=0.000  ppl=1.9  dead=0  τ=0.0778  val=0.8071  val_agree=0.856  (9.3s)
+  ep  50/100  D=0.6745  acc=0.000  ppl=1.9  dead=0  τ=0.0489  val=0.8053  val_agree=0.857  (9.3s)
+  ep  60/100  D=0.6642  acc=0.000  ppl=1.9  dead=0  τ=0.0307  val=0.8016  val_agree=0.858  (9.3s)
+  ep  70/100  D=0.6538  acc=0.000  ppl=1.9  dead=1  τ=0.0193  val=0.8013  val_agree=0.857  (9.3s)
+  ep  80/100  D=0.6432  acc=0.000  ppl=1.9  dead=1  τ=0.0121  val=0.7992  val_agree=0.856  (9.3s)
+  ep  90/100  D=0.6338  acc=0.000  ppl=1.9  dead=1  τ=0.0076  val=0.7962  val_agree=0.857  (9.2s)
+  ep  99/100  D=0.6285  acc=0.000  ppl=1.9  dead=1  τ=0.0050  val=0.7960  val_agree=0.856  (9.3s)
+  Residual training: 966.0s
+  Residual codec saved: /data4/workspace/zlt/featcodec/ORFC/coding/orfcv2/checkpoints/dinov2_vitl14/base-blk20_K2_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42_task-seg_res_task_K2_emb32_orthogonal_ce0.0_kd1.0T2.0_tau0.5_lr0.0003_ep100_n5000_s42.pt
+
+============================================================
+  [Eval] classification / tail MSE / rate
+============================================================
+  * base only       Acc=0.0900  ΔL_ref=402021.2
+  * base + residual Acc=0.1220  ΔL_ref=409793.6
+  * Δ(Acc)=+0.0320  Δ(ΔL_ref)=+7772.5
+  Computing train PMFs and test rate...
+  * base    : rANS=30.74  xent=30.74  H_emp=30.66  max=32  BPFP=0.0300
+  * residual: rANS=30.60  xent=30.60  H_emp=30.53  max=32  BPFP=0.0299
+  * total: rANS=61.34 b/t  BPFP=0.0599
+
+============================================================
+  [Segmentation] VOC2012 mIoU  (/data4/workspace/zlt/featcodec/ORFC/features/voc2012_100/dinov2_vitl14/blk20)
+============================================================
+  加载 backbone + 分割头 (dinov2_vitl14)...
+  图片数: 100, 特征目录: /data4/workspace/zlt/featcodec/ORFC/features/voc2012_100/dinov2_vitl14/blk20
+  开始 slide inference...
+Seg eval:   0%|          | 0/100 [00:00<?, ?it/s]Seg eval:   3%|▎         | 3/100 [00:00<00:04, 23.49it/s]Seg eval:   6%|▌         | 6/100 [00:00<00:03, 24.69it/s]Seg eval:   9%|▉         | 9/100 [00:00<00:03, 25.29it/s]Seg eval:  12%|█▏        | 12/100 [00:00<00:03, 25.45it/s]Seg eval:  15%|█▌        | 15/100 [00:00<00:03, 24.81it/s]Seg eval:  18%|█▊        | 18/100 [00:00<00:03, 24.90it/s]Seg eval:  21%|██        | 21/100 [00:00<00:03, 24.77it/s]Seg eval:  24%|██▍       | 24/100 [00:00<00:03, 24.79it/s]Seg eval:  27%|██▋       | 27/100 [00:01<00:02, 24.78it/s]Seg eval:  30%|███       | 30/100 [00:01<00:02, 23.96it/s]Seg eval:  33%|███▎      | 33/100 [00:01<00:02, 23.35it/s]Seg eval:  36%|███▌      | 36/100 [00:01<00:02, 23.19it/s]Seg eval:  39%|███▉      | 39/100 [00:01<00:02, 22.88it/s]Seg eval:  42%|████▏     | 42/100 [00:01<00:02, 22.54it/s]Seg eval:  45%|████▌     | 45/100 [00:01<00:02, 22.62it/s]Seg eval:  48%|████▊     | 48/100 [00:02<00:02, 22.47it/s]Seg eval:  51%|█████     | 51/100 [00:02<00:02, 22.44it/s]Seg eval:  54%|█████▍    | 54/100 [00:02<00:02, 22.42it/s]Seg eval:  57%|█████▋    | 57/100 [00:02<00:01, 22.46it/s]Seg eval:  60%|██████    | 60/100 [00:02<00:01, 22.65it/s]Seg eval:  63%|██████▎   | 63/100 [00:02<00:01, 22.62it/s]Seg eval:  66%|██████▌   | 66/100 [00:02<00:01, 21.99it/s]Seg eval:  69%|██████▉   | 69/100 [00:02<00:01, 22.15it/s]Seg eval:  72%|███████▏  | 72/100 [00:03<00:01, 22.21it/s]Seg eval:  75%|███████▌  | 75/100 [00:03<00:01, 22.24it/s]Seg eval:  78%|███████▊  | 78/100 [00:03<00:00, 22.15it/s]Seg eval:  81%|████████  | 81/100 [00:03<00:00, 21.36it/s]Seg eval:  84%|████████▍ | 84/100 [00:03<00:00, 20.04it/s]Seg eval:  87%|████████▋ | 87/100 [00:03<00:00, 19.17it/s]Seg eval:  89%|████████▉ | 89/100 [00:03<00:00, 18.70it/s]Seg eval:  91%|█████████ | 91/100 [00:04<00:00, 18.45it/s]Seg eval:  93%|█████████▎| 93/100 [00:04<00:00, 18.46it/s]Seg eval:  95%|█████████▌| 95/100 [00:04<00:00, 18.40it/s]Seg eval:  97%|█████████▋| 97/100 [00:04<00:00, 18.38it/s]Seg eval:  99%|█████████▉| 99/100 [00:04<00:00, 18.29it/s]Seg eval: 100%|██████████| 100/100 [00:04<00:00, 21.77it/s]
+  * base only  mIoU=0.4639  aAcc=0.8265
+  加载 backbone + 分割头 (dinov2_vitl14)...
+  图片数: 100, 特征目录: /data4/workspace/zlt/featcodec/ORFC/features/voc2012_100/dinov2_vitl14/blk20
+  开始 slide inference...
+Seg eval:   0%|          | 0/100 [00:00<?, ?it/s]Seg eval:   2%|▏         | 2/100 [00:00<00:05, 16.97it/s]Seg eval:   4%|▍         | 4/100 [00:00<00:06, 15.90it/s]Seg eval:   6%|▌         | 6/100 [00:00<00:05, 16.92it/s]Seg eval:   9%|▉         | 9/100 [00:00<00:04, 18.58it/s]Seg eval:  11%|█         | 11/100 [00:00<00:04, 18.97it/s]Seg eval:  14%|█▍        | 14/100 [00:00<00:04, 19.67it/s]Seg eval:  17%|█▋        | 17/100 [00:00<00:04, 19.96it/s]Seg eval:  20%|██        | 20/100 [00:01<00:03, 20.05it/s]Seg eval:  22%|██▏       | 22/100 [00:01<00:03, 19.52it/s]Seg eval:  24%|██▍       | 24/100 [00:01<00:04, 18.62it/s]Seg eval:  26%|██▌       | 26/100 [00:01<00:04, 18.01it/s]Seg eval:  28%|██▊       | 28/100 [00:01<00:04, 17.88it/s]Seg eval:  30%|███       | 30/100 [00:01<00:03, 17.72it/s]Seg eval:  32%|███▏      | 32/100 [00:01<00:03, 17.66it/s]Seg eval:  34%|███▍      | 34/100 [00:01<00:03, 17.75it/s]Seg eval:  36%|███▌      | 36/100 [00:01<00:03, 17.35it/s]Seg eval:  38%|███▊      | 38/100 [00:02<00:03, 17.56it/s]Seg eval:  40%|████      | 40/100 [00:02<00:03, 17.53it/s]Seg eval:  42%|████▏     | 42/100 [00:02<00:03, 17.56it/s]Seg eval:  44%|████▍     | 44/100 [00:02<00:03, 17.72it/s]Seg eval:  46%|████▌     | 46/100 [00:02<00:03, 17.67it/s]Seg eval:  48%|████▊     | 48/100 [00:02<00:02, 17.79it/s]Seg eval:  50%|█████     | 50/100 [00:02<00:02, 17.79it/s]Seg eval:  52%|█████▏    | 52/100 [00:02<00:02, 17.94it/s]Seg eval:  54%|█████▍    | 54/100 [00:02<00:02, 17.89it/s]Seg eval:  56%|█████▌    | 56/100 [00:03<00:02, 17.94it/s]Seg eval:  58%|█████▊    | 58/100 [00:03<00:02, 17.83it/s]Seg eval:  60%|██████    | 60/100 [00:03<00:02, 18.14it/s]Seg eval:  62%|██████▏   | 62/100 [00:03<00:02, 18.30it/s]Seg eval:  64%|██████▍   | 64/100 [00:03<00:01, 18.12it/s]Seg eval:  66%|██████▌   | 66/100 [00:03<00:01, 17.67it/s]Seg eval:  68%|██████▊   | 68/100 [00:03<00:01, 17.79it/s]Seg eval:  70%|███████   | 70/100 [00:03<00:01, 17.70it/s]Seg eval:  72%|███████▏  | 72/100 [00:03<00:01, 17.26it/s]Seg eval:  74%|███████▍  | 74/100 [00:04<00:01, 16.16it/s]Seg eval:  76%|███████▌  | 76/100 [00:04<00:01, 15.60it/s]Seg eval:  78%|███████▊  | 78/100 [00:04<00:01, 15.33it/s]Seg eval:  80%|████████  | 80/100 [00:04<00:01, 15.06it/s]Seg eval:  82%|████████▏ | 82/100 [00:04<00:01, 15.05it/s]Seg eval:  84%|████████▍ | 84/100 [00:04<00:01, 14.94it/s]Seg eval:  86%|████████▌ | 86/100 [00:04<00:00, 14.65it/s]Seg eval:  88%|████████▊ | 88/100 [00:05<00:00, 14.66it/s]Seg eval:  90%|█████████ | 90/100 [00:05<00:00, 14.56it/s]Seg eval:  92%|█████████▏| 92/100 [00:05<00:00, 14.63it/s]Seg eval:  94%|█████████▍| 94/100 [00:05<00:00, 14.47it/s]Seg eval:  96%|█████████▌| 96/100 [00:05<00:00, 14.56it/s]Seg eval:  98%|█████████▊| 98/100 [00:05<00:00, 14.60it/s]Seg eval: 100%|██████████| 100/100 [00:05<00:00, 14.57it/s]Seg eval: 100%|██████████| 100/100 [00:05<00:00, 16.87it/s]
+  * base + residual  mIoU=0.5829  aAcc=0.8714
+  * Δ(mIoU) = +0.1190
+  * VOC base    : rANS=30.18  xent=30.18  H_emp=29.53  max=32  BPFP=0.0295
+  * VOC residual: rANS=29.81  xent=29.81  H_emp=28.47  max=32  BPFP=0.0291
+  * VOC total: rANS=59.99 b/t  BPFP=0.0586
+
+============================================================
+  Summary: blk20  base K=2/d=32  residual K=2/d=32  loss=task
+  Acc     : base=0.0900 -> full=0.1220 (+0.0320)
+  ΔL_ref  : base=402021.2 -> full=409793.6 (+7772.5)
+  mIoU    : base=0.4639 -> full=0.5829 (+0.1190)
+  Rate    : base=30.74 + residual=30.60 = 61.34 bits/token
+  Train time: 966.0s
+============================================================
+
+Results saved: /data4/workspace/zlt/featcodec/ORFC/coding/orfcv2/results/dinov2_vitl14/base-blk20_K2_emb32_bt1024_ws_tau0.5_lr0.0003_ep100_n5000_s42_task-seg_res_task_K2_emb32_orthogonal_ce0.0_kd1.0T2.0_tau0.5_lr0.0003_ep100_n5000_s42.json

@@ -1,0 +1,81 @@
+/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torchvision/datapoints/__init__.py:12: UserWarning: The torchvision.datapoints and torchvision.transforms.v2 namespaces are still Beta. While we do not expect major breaking changes, some APIs may still change according to user feedback. Please submit any feedback you may have in this issue: https://github.com/pytorch/vision/issues/6753, and you can also check out https://github.com/pytorch/vision/issues/7319 to learn more about the APIs that we suspect might involve future changes. You can silence this warning by calling torchvision.disable_beta_transforms_warning().
+  warnings.warn(_BETA_TRANSFORMS_WARNING)
+/home/user/anaconda3/envs/featcodec2/lib/python3.9/site-packages/torchvision/transforms/v2/__init__.py:54: UserWarning: The torchvision.datapoints and torchvision.transforms.v2 namespaces are still Beta. While we do not expect major breaking changes, some APIs may still change according to user feedback. Please submit any feedback you may have in this issue: https://github.com/pytorch/vision/issues/6753, and you can also check out https://github.com/pytorch/vision/issues/7319 to learn more about the APIs that we suspect might involve future changes. You can silence this warning by calling torchvision.disable_beta_transforms_warning().
+  warnings.warn(_BETA_TRANSFORMS_WARNING)
+
+######################################################################
+# Scalable codec: frozen base (tail-MSE) + task residual
+# layer=blk20 (idx=20)  backbone=dinov2_vitl14  task=cls
+# base_ckpt=blk20_K32_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42.pt
+# residual: K=2, emb=32, transform=orthogonal, loss=task  shareR  freezeR
+# epochs=100, lr=0.0003, lmbda_rate=0.0, ecvq_lmbda=0.0, lmbda_kd=1.0, beta_mse=0.0
+# 2026-08-27 01:25:03
+######################################################################
+
+Data: train=5000, test=500
+  并行加载特征 (workers=4)...
+Loading:   0%|          | 0/5000 [00:00<?, ?it/s]Loading:   4%|▎         | 185/5000 [00:00<00:02, 1844.39it/s]Loading:   7%|▋         | 370/5000 [00:00<00:02, 1695.93it/s]Loading:  11%|█         | 541/5000 [00:00<00:02, 1674.53it/s]Loading:  14%|█▍        | 709/5000 [00:00<00:02, 1627.30it/s]Loading:  17%|█▋        | 872/5000 [00:00<00:02, 1569.57it/s]Loading:  21%|██        | 1039/5000 [00:00<00:02, 1600.90it/s]Loading:  24%|██▍       | 1200/5000 [00:00<00:02, 1575.21it/s]Loading:  27%|██▋       | 1369/5000 [00:00<00:02, 1606.61it/s]Loading:  31%|███       | 1542/5000 [00:00<00:02, 1643.37it/s]Loading:  34%|███▍      | 1707/5000 [00:01<00:02, 1571.08it/s]Loading:  37%|███▋      | 1865/5000 [00:01<00:02, 1562.24it/s]Loading:  40%|████      | 2022/5000 [00:01<00:01, 1522.17it/s]Loading:  44%|████▎     | 2175/5000 [00:01<00:01, 1500.24it/s]Loading:  47%|████▋     | 2333/5000 [00:01<00:01, 1521.75it/s]Loading:  50%|████▉     | 2498/5000 [00:01<00:01, 1556.06it/s]Loading:  53%|█████▎    | 2658/5000 [00:01<00:01, 1568.03it/s]Loading:  56%|█████▋    | 2817/5000 [00:01<00:01, 1569.14it/s]Loading:  60%|█████▉    | 2979/5000 [00:01<00:01, 1581.78it/s]Loading:  63%|██████▎   | 3138/5000 [00:01<00:01, 1548.89it/s]Loading:  66%|██████▌   | 3294/5000 [00:02<00:01, 1535.31it/s]Loading:  69%|██████▉   | 3450/5000 [00:02<00:01, 1541.10it/s]Loading:  72%|███████▏  | 3610/5000 [00:02<00:00, 1555.79it/s]Loading:  75%|███████▌  | 3766/5000 [00:02<00:00, 1554.20it/s]Loading:  78%|███████▊  | 3922/5000 [00:02<00:00, 1528.63it/s]Loading:  82%|████████▏ | 4075/5000 [00:02<00:00, 1522.31it/s]Loading:  85%|████████▍ | 4244/5000 [00:02<00:00, 1570.96it/s]Loading:  88%|████████▊ | 4402/5000 [00:02<00:00, 1563.10it/s]Loading:  91%|█████████▏| 4565/5000 [00:02<00:00, 1581.51it/s]Loading:  95%|█████████▍| 4741/5000 [00:03<00:00, 1631.41it/s]Loading:  98%|█████████▊| 4905/5000 [00:03<00:00, 1605.74it/s]Loading: 100%|██████████| 5000/5000 [00:03<00:00, 1576.09it/s]
+  并行加载特征 (workers=4)...
+Loading:   0%|          | 0/500 [00:00<?, ?it/s]Loading:  33%|███▎      | 163/500 [00:00<00:00, 1610.46it/s]Loading:  65%|██████▌   | 325/500 [00:00<00:00, 1452.31it/s]Loading:  94%|█████████▍| 472/500 [00:00<00:00, 1435.04it/s]Loading: 100%|██████████| 500/500 [00:00<00:00, 1447.29it/s]
+  D=1024, T=257, labels: 1000 classes
+  train=4800, val=200 (held out from train pool)
+
+Loading DINOv2 (dinov2_vitl14)...
+  Tail: 3 blocks (blk21..blk23) + norm
+  Task head: ImageNet linear classifier (1000 classes)
+
+============================================================
+  [Base] frozen codec from stage 1 (tail-MSE optimised)
+============================================================
+  base: G=32, K=32, d=32, transform=OrthogonalTransform, fixed rate=160 bits/token
+  residual: G=32, K=2, d=32, fixed rate=32 bits/token
+  Shared ORFC R: copied Cayley params, ||R_res-R_base||=0.00e+00, ||R'R-I||=3.00e-03
+
+  Collecting residuals R = Y - Ŷ_base for initialisation (≤62,500 vectors)...
+  residual vectors: (62496, 1024), mean square = 0.292335
+  Residual init: k-means on 62,496 residual vectors (residual-transform space)
+
+============================================================
+  [Residual] training under 'task' loss
+============================================================
+  Base codec: 557,568 params (frozen), G=32, K=32, d=32
+  Residual codec: G=32, K=2, d=32, 2,048 trainable params
+  Frozen: residual transform
+  Residual transform ||R'R-I||=3.00e-03
+  Loss: 1.0*KD(T=2.0)
+  Soft PQ: τ 0.500 → 0.0050 (exponential)
+  Pre-computing teacher logits (4800 images)...
+  ep   0/100  D=0.3959  acc=0.826  ppl=2.0  dead=0  τ=0.5000  val=0.7596  val_acc=0.830  (11.6s)
+  ep  10/100  D=0.2698  acc=0.839  ppl=2.0  dead=0  τ=0.3140  val=0.7522  val_acc=0.825  (11.4s)
+  ep  20/100  D=0.2495  acc=0.840  ppl=2.0  dead=0  τ=0.1972  val=0.7516  val_acc=0.825  (11.4s)
+  ep  30/100  D=0.2396  acc=0.843  ppl=2.0  dead=0  τ=0.1239  val=0.7475  val_acc=0.820  (11.6s)
+  ep  40/100  D=0.2334  acc=0.843  ppl=2.0  dead=0  τ=0.0778  val=0.7517  val_acc=0.815  (11.5s)
+  ep  50/100  D=0.2290  acc=0.843  ppl=2.0  dead=0  τ=0.0489  val=0.7535  val_acc=0.815  (11.4s)
+  ep  60/100  D=0.2261  acc=0.842  ppl=2.0  dead=0  τ=0.0307  val=0.7537  val_acc=0.815  (11.4s)
+  ep  70/100  D=0.2242  acc=0.842  ppl=2.0  dead=0  τ=0.0193  val=0.7528  val_acc=0.815  (11.5s)
+  ep  80/100  D=0.2231  acc=0.843  ppl=2.0  dead=0  τ=0.0121  val=0.7521  val_acc=0.820  (11.5s)
+  ep  90/100  D=0.2225  acc=0.843  ppl=2.0  dead=0  τ=0.0076  val=0.7530  val_acc=0.820  (11.4s)
+  ep  99/100  D=0.2221  acc=0.843  ppl=2.0  dead=0  τ=0.0050  val=0.7529  val_acc=0.820  (11.4s)
+  Residual training: 1178.3s
+  Residual codec saved: /data4/workspace/zlt/featcodec/ORFC/coding/orfcv2/checkpoints/dinov2_vitl14/base-blk20_K32_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-cls_res_task_K2_emb32_orthogonal_shareR_km_fzR_ce0.0_kd1.0T2.0_tau0.5_lr0.0003_ep100_n5000_s42.pt
+
+============================================================
+  [Eval] classification / tail MSE / rate
+============================================================
+  * base only       Acc=0.9400  ΔL_ref=171201.6
+  * base + residual Acc=0.9440  ΔL_ref=179544.8
+  * Δ(Acc)=+0.0040  Δ(ΔL_ref)=+8343.1
+  Computing train PMFs and test rate...
+  * base    : rANS=156.92  xent=156.91  H_emp=156.48  max=160  BPFP=0.1532
+  * residual: rANS=30.82  xent=30.82  H_emp=30.79  max=32  BPFP=0.0301
+  * total: rANS=187.74 b/t  BPFP=0.1833
+
+============================================================
+  Summary: blk20  base K=32/d=32  residual K=2/d=32  loss=task
+  Acc     : base=0.9400 -> full=0.9440 (+0.0040)
+  ΔL_ref  : base=171201.6 -> full=179544.8 (+8343.1)
+  Rate    : base=156.92 + residual=30.82 = 187.74 bits/token
+  Train time: 1178.3s
+============================================================
+
+Results saved: /data4/workspace/zlt/featcodec/ORFC/coding/orfcv2/results/dinov2_vitl14/base-blk20_K32_emb32_bt1024_ws_lmbda0.5_tau0.5_lr0.0003_ep100_n5000_s42_task-cls_res_task_K2_emb32_orthogonal_shareR_km_fzR_ce0.0_kd1.0T2.0_tau0.5_lr0.0003_ep100_n5000_s42.json
