@@ -25,6 +25,9 @@ if str(_EVAL_DIR) not in sys.path:
     sys.path.insert(0, str(_EVAL_DIR))
 if str(_ORFC) not in sys.path:
     sys.path.insert(0, str(_ORFC))
+_ORFCV1 = _ORFC.parent / "orfcv1"
+if str(_ORFCV1) not in sys.path:
+    sys.path.insert(0, str(_ORFCV1))
 
 from dinov3_eval_common import (  # noqa: E402
     ADE_ANN_DIR,
@@ -64,6 +67,11 @@ from cofai.metrics.depth_estimation import Dinov3DepthEstimationMeter  # noqa: E
 from cofai.transforms.core import PadToMultiple  # noqa: E402
 from opq import batch_inv_normalize_gpu, batch_normalize_gpu  # noqa: E402
 from soft_pq import load_codec, soft_pq_encode_decode  # noqa: E402
+from absorb_r import AbsorbedFeatureCodec  # noqa: E402
+from bilinear_residual import (  # noqa: E402
+    BilinearORFCWrapper, BilinearSpatialCodec, freeze_module,
+    load_residual_codec, load_spatial_weights, set_grid_hint,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +110,10 @@ def prime_rope(backbone, token_hw, device, cache: dict):
 
 
 @torch.no_grad()
-def reconstruct_one(tokens: np.ndarray, codec, device) -> np.ndarray:
+def reconstruct_one(tokens: np.ndarray, codec, device,
+                    token_hw=None) -> np.ndarray:
+    if token_hw is not None:
+        set_grid_hint(token_hw)
     x = torch.from_numpy(np.ascontiguousarray(tokens)).float().unsqueeze(0).to(device)
     y, mu, std = batch_normalize_gpu(x, mode=NORM_MODE, n_prefix=N_PREFIX)
     y_hat, _ = codec(y)
@@ -256,8 +267,10 @@ def eval_semseg(args, backbone, codec, layer: str, device, tag: str):
     files = sorted(feat_dir.glob("*.npy"))
     if not files:
         raise FileNotFoundError(f"no ADE features in {feat_dir}")
-    if args.max_images > 0:
-        files = files[: args.max_images]
+    seg_n = args.seg_max_images if args.seg_max_images > 0 else args.max_images
+    if seg_n > 0:
+        files = files[:seg_n]      # sorted() -> deterministic fixed subset
+        print(f"  [semseg] fixed subset: {len(files)} images")
 
     backbone.slot = decode_slot(layer)
     head = build_seg_head(device)
@@ -272,7 +285,8 @@ def eval_semseg(args, backbone, codec, layer: str, device, tag: str):
         tokens = np.load(p).astype(np.float32)
         if tokens.ndim == 3:
             tokens = tokens.squeeze(0)
-        recon = reconstruct_one(tokens, codec, device) if codec is not None else tokens
+        recon = reconstruct_one(tokens, codec, device,
+                                token_hw=token_hw) if codec is not None else tokens
         total_mse += float(np.mean((tokens - recon) ** 2))
         n += 1
         prime_rope(backbone, token_hw, device, rope_cache)
@@ -351,6 +365,18 @@ def eval_depth(args, backbone, codec, layer: str, device, tag: str):
     files = sorted(feat_dir.glob("*.npy"))
     if not files:
         raise FileNotFoundError(f"no NYU features in {feat_dir}")
+    if args.nyu_split_file:
+        keep = set()
+        with open(args.nyu_split_file) as fh:
+            for line in fh:
+                parts = line.split()
+                if parts:
+                    keep.add(nyu_stem_from_rel(parts[0]))
+        files = [f for f in files if f.stem in keep]
+        if not files:
+            raise FileNotFoundError(
+                f"no NYU features matched {args.nyu_split_file}")
+        print(f"  [depth] split filter {args.nyu_split_file}: {len(files)} images")
     if args.max_images > 0:
         files = files[: args.max_images]
     depth_map = load_nyu_depth_map()
@@ -381,7 +407,8 @@ def eval_depth(args, backbone, codec, layer: str, device, tag: str):
         tokens = np.load(p).astype(np.float32)
         if tokens.ndim == 3:
             tokens = tokens.squeeze(0)
-        recon = reconstruct_one(tokens, codec, device) if codec is not None else tokens
+        recon = reconstruct_one(tokens, codec, device,
+                                token_hw=token_hw) if codec is not None else tokens
         total_mse += float(np.mean((tokens - recon) ** 2))
         n += 1
         prime_rope(backbone, token_hw, device, rope_cache)
@@ -422,8 +449,22 @@ def parse_args():
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--force", action="store_true")
     p.add_argument("--max_images", type=int, default=0, help="debug subset; 0=all")
+    p.add_argument("--seg_max_images", type=int, default=0,
+                   help="ADE20K subset size (first N of sorted list); 0=use --max_images")
     p.add_argument("--cls_batch_size", type=int, default=32)
     p.add_argument("--ckpt_dir", default=str(CKPT_DIR))
+    p.add_argument("--stage1_ckpt", default="",
+                   help="orfcv1 stage-1 bilinear codec .pt (spatial+residual, no PQ)")
+    p.add_argument("--stage1_ablation", default="main",
+                   choices=("main", "recon0", "full"))
+    p.add_argument("--orfc_ckpt", default="",
+                   help="stage-2 PQ codec .pt; with --stage1_ckpt pointing at "
+                        "the matching *_spatial.pt this evaluates the joint "
+                        "stage-2 cascade (spatial -> ORFC -> residual). Pass "
+                        "the *_absorbed.pt / *_absorbed_spatial.pt pair to "
+                        "evaluate the R-absorbed model instead.")
+    p.add_argument("--nyu_split_file", default="",
+                   help="restrict depth eval to images listed here (e.g. nyu_test_80.txt)")
     return p.parse_args()
 
 
@@ -435,7 +476,53 @@ def main():
 
     tasks = [t.strip() for t in args.tasks.split(",") if t.strip()]
     codec = None
-    if args.bypass:
+    if args.stage1_ckpt:
+        ckpt = Path(args.stage1_ckpt)
+        if not ckpt.is_file():
+            raise FileNotFoundError(ckpt)
+        layer = args.layer
+        if layer not in LAYERS:
+            raise SystemExit(f"--layer must be one of {LAYERS}")
+        residual, meta = load_residual_codec(str(ckpt), device=device)
+        spatial = BilinearSpatialCodec(
+            int(meta["D"]), n_prefix=N_PREFIX, scale=2,
+            down=meta.get("spatial_down", "conv2"),
+            up=meta.get("spatial_up", "conv2"),
+            cls_mode=meta.get("cls_mode", "conv2")).to(device)
+        load_spatial_weights(spatial, meta)
+        orfc = None
+        absorbed = False
+        if args.orfc_ckpt:
+            if not Path(args.orfc_ckpt).is_file():
+                raise FileNotFoundError(args.orfc_ckpt)
+            orfc = freeze_module(load_codec(args.orfc_ckpt, device=device))
+            # An absorbed checkpoint (written by orfcv1/absorb_r.py) has no
+            # transform left: R lives folded in the conv weights for the patch
+            # tokens and as a dense matrix for the prefix, which bypasses the
+            # conv.  Detect it by the stored R_dense and re-attach that half.
+            _om = torch.load(args.orfc_ckpt, map_location="cpu")
+            _R = _om.get("R_dense", None)
+            if _R is not None:
+                orfc = freeze_module(AbsorbedFeatureCodec(
+                    orfc, _R.float().to(device),
+                    n_prefix=N_PREFIX).to(device).eval())
+                absorbed = True
+        codec = BilinearORFCWrapper(
+            freeze_module(spatial), orfc=orfc,
+            residual=freeze_module(residual), n_prefix=N_PREFIX,
+            residual_quantize=False,
+            residual_ablation=args.stage1_ablation).to(device)
+        codec.eval()
+        stage = "stage1" if orfc is None else ("absorbed" if absorbed else "stage2")
+        base = Path(args.orfc_ckpt).name[:-3] if orfc is not None else ckpt.name[:-3]
+        tag = f"{stage}_{args.stage1_ablation}_{base}"
+        print(f"[eval] {stage} codec spatial={ckpt}")
+        if orfc is not None:
+            print(f"[eval] {stage} orfc={args.orfc_ckpt}")
+        print(f"[eval] layer={layer} ablation={args.stage1_ablation} "
+              f"n_prefix={N_PREFIX} norm={NORM_MODE}")
+        print(f"[eval] tag={tag}")
+    elif args.bypass:
         layer = args.layer
         if layer not in LAYERS:
             raise SystemExit(f"--layer must be one of {LAYERS}")

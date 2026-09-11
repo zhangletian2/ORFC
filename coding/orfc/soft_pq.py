@@ -9,9 +9,12 @@ Loss:      J = R_bits + λ·D
            R = cross-entropy rate under learnable prior (bits/token)
 
 Assignment:
-  - Training (τ > 0):  soft assignment via straight-through softmax.
+  - Training, ste_mode="softmax" (τ > 0):  straight-through softmax.
     Forward = hard argmin (exact PQ); backward = soft gradient through
     temperature-scaled softmax, giving all centroids informative gradients.
+  - Training, ste_mode="identity":  hard gather + identity STE.
+    Forward = quantized z_q; encoder gets copy-grad (∂L/∂z = ∂L/∂z_q);
+    codebook keeps reconstruction grad through gather(C, labels).
   - Eval:  standard hard argmin (zero overhead).
 """
 
@@ -193,10 +196,15 @@ class OrthogonalTransform(nn.Module):
 class SoftPQ(nn.Module):
     """Differentiable Product Quantisation.
 
-    Training (temperature > 0):
+    Training, ste_mode="softmax" (temperature > 0):
       Straight-through softmax assignment — forward is hard one-hot
       (identical to argmin), backward flows through temperature-scaled
       softmax so all K centroids receive gradient.
+
+    Training, ste_mode="identity":
+      Forward is hard gather(C, labels).  Encoder identity STE via
+      z_q + (z - z.detach()); codebook reconstruction grad is kept
+      (unlike z + (z_q - z).detach(), which blocks codebook grads).
 
     Eval / temperature == 0:
       Standard hard argmin PQ. Zero overhead.
@@ -212,6 +220,7 @@ class SoftPQ(nn.Module):
         self.use_rate = (lmbda > 0)
         self.prior_floor = prior_floor
         self.temperature = 0.0
+        self.ste_mode = "softmax"
 
         self.codebooks = nn.Parameter(torch.randn(G, K, d) * 0.01)
         self._last_rate = None
@@ -254,11 +263,14 @@ class SoftPQ(nn.Module):
             self.log_prior.data.copy_(torch.from_numpy(lp))
 
     def _quantise(self, Z_flat):
-        """ECVQ assignment with optional soft straight-through gradient.
+        """ECVQ assignment with optional straight-through gradient.
 
         cost_k = ||z_g - c_k||² + (-log₂ p_k) / λ
         Assignment = argmin_k cost_k  (hard, both train and eval)
-        Gradient (train, τ > 0) = through softmax(-cost / τ)  (soft)
+        Gradient:
+          softmax STE (train, τ > 0, ste_mode="softmax"): softmax(-cost / τ)
+          identity STE (train, ste_mode="identity"): encoder copy-grad,
+            codebook via gather(C, labels)
         """
         N = Z_flat.shape[0]
         C = self.codebooks                                   # [G, K, d]
@@ -282,7 +294,12 @@ class SoftPQ(nn.Module):
         labels = cost.argmin(dim=-1)                         # [G, N]
         self._last_labels = labels.detach()
 
-        if self.training and self.temperature > 0:
+        use_identity = (
+            self.training and getattr(self, "ste_mode", "softmax") == "identity")
+        use_softmax = (
+            self.training and (not use_identity) and self.temperature > 0)
+
+        if use_softmax:
             logits = -cost / self.temperature
             soft = F_fn.softmax(logits, dim=-1)              # [G, N, K]
             hard = torch.zeros_like(soft).scatter_(
@@ -296,6 +313,9 @@ class SoftPQ(nn.Module):
             ).squeeze(2)
 
         Z_hat_flat = Z_hat_g.permute(1, 0, 2).reshape(N, self.D)
+        if use_identity:
+            # Forward = z_q.  Encoder: identity.  Codebook: gather path.
+            Z_hat_flat = Z_hat_flat + (Z_flat - Z_flat.detach())
 
         ones = torch.ones(N, device=Z_flat.device)
         usage = torch.zeros(self.G, self.K, device=Z_flat.device)

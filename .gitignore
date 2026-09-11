@@ -39,6 +39,10 @@ coding/orfc/figures/seg_vis/
 coding/orfc/logs/
 coding/orfc/results/
 
+# ORFC v1 eval artifacts
+coding/orfcv1/logs/
+coding/orfcv1/results/
+
 # Comparison method - GAPC
 coding/gapc/logs/
 coding/gapc/__pycache__/
@@ -83,3 +87,12 @@ coding/orfcv2/__pycache__/
 coding/orfc/eval/probes/
 coding/orfc/eval/logs/
 coding/orfc/eval/__pycache__/
+
+# Experiment outputs (regenerable; results JSON already in history stays tracked)
+results/
+logs/
+checkpoints/
+opq_cache/
+*.bak
+*.bak[0-9]
+*.bak_*

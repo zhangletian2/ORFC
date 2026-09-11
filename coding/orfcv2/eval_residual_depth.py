@@ -29,10 +29,10 @@ from dinov2_depth_pipeline import (  # noqa: E402
 )
 
 
-def _quantize_one(feat_td, codec, norm_mode, device, base_only=False):
+def _quantize_one(feat_td, codec, norm_mode, device, base_only=False, n_prefix=1):
     """feat_td [T, D] numpy -> reconstructed [T, D] numpy."""
     X = torch.from_numpy(feat_td).float().unsqueeze(0).to(device)
-    Y, Mu, Std = batch_normalize_gpu(X, mode=norm_mode)
+    Y, Mu, Std = batch_normalize_gpu(X, mode=norm_mode, n_prefix=n_prefix)
     if base_only:
         Y_hat = codec.base_forward(Y) if hasattr(codec, "base_forward") else codec(Y)[0]
     else:
@@ -42,10 +42,11 @@ def _quantize_one(feat_td, codec, norm_mode, device, base_only=False):
 
 @torch.no_grad()
 def eval_codec(codec, feats, layer_idx, sample_meta, backbone, head,
-               device, norm_mode, base_only=False):
+               device, norm_mode, base_only=False, n_prefix=1):
     rmses = []
     for feat, (ori, pad, gt_path) in zip(feats, sample_meta):
-        rec = _quantize_one(feat, codec, norm_mode, device, base_only=base_only)
+        rec = _quantize_one(feat, codec, norm_mode, device,
+                            base_only=base_only, n_prefix=n_prefix)
         pred = decode_depth(backbone, head, rec.unsqueeze(0), layer_idx,
                             pad, ori, device)
         gt = load_depth_gt(gt_path)
@@ -88,7 +89,7 @@ def prepare_nyu_samples(data_root, split_file):
 @torch.no_grad()
 def evaluate_nyu_residual(codec, feats, layer_idx, sample_meta,
                           backbone, head, device, norm_mode,
-                          skip_anchor=False, anchor_rmse=None):
+                          skip_anchor=False, anchor_rmse=None, n_prefix=1):
     """Return {anchor_rmse, base_rmse, full_rmse, delta_vs_anchor, delta_vs_base}."""
     if skip_anchor and anchor_rmse is not None:
         anchor = float(anchor_rmse)
@@ -98,12 +99,12 @@ def evaluate_nyu_residual(codec, feats, layer_idx, sample_meta,
         print(f"  Anchor            RMSE={anchor:.4f}  ({time.time()-t0:.1f}s)")
     t0 = time.time()
     rmse_base = eval_codec(codec, feats, layer_idx, sample_meta, backbone, head,
-                           device, norm_mode, base_only=True)
+                           device, norm_mode, base_only=True, n_prefix=n_prefix)
     print(f"  base only         RMSE={rmse_base:.4f}  "
           f"Δ={rmse_base-anchor:+.4f}  ({time.time()-t0:.1f}s)")
     t0 = time.time()
     rmse_full = eval_codec(codec, feats, layer_idx, sample_meta, backbone, head,
-                           device, norm_mode, base_only=False)
+                           device, norm_mode, base_only=False, n_prefix=n_prefix)
     print(f"  base+residual     RMSE={rmse_full:.4f}  "
           f"Δ={rmse_full-anchor:+.4f}  Δvs_base={rmse_full-rmse_base:+.4f}  "
           f"({time.time()-t0:.1f}s)")
@@ -126,6 +127,8 @@ def main():
     p.add_argument("--split_file", default=str(PROJECT / "utils" / "nyu_test_80.txt"))
     p.add_argument("--weights_root", default="/data4/workspace/zlt/cache/torch/hub/checkpoints")
     p.add_argument("--norm_mode", default="per_image")
+    p.add_argument("--n_prefix", type=int, default=1,
+                   help="1 for dinov2 (CLS); 5 for dinov3 (CLS+4 reg)")
     args = p.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -143,7 +146,7 @@ def main():
     codec.eval()
     evaluate_nyu_residual(
         codec, feats, layer_idx, sample_meta, backbone, head,
-        device, args.norm_mode)
+        device, args.norm_mode, n_prefix=args.n_prefix)
     del codec
     torch.cuda.empty_cache()
 
@@ -152,7 +155,8 @@ def main():
         k4.eval()
         t0 = time.time()
         rmse_k4 = eval_codec(k4, feats, layer_idx, sample_meta, backbone, head,
-                             device, args.norm_mode, base_only=False)
+                             device, args.norm_mode, base_only=False,
+                             n_prefix=args.n_prefix)
         print(f"  single-stage ckpt RMSE={rmse_k4:.4f}  ({time.time()-t0:.1f}s)")
 
 

@@ -201,7 +201,7 @@ def _load_backbone(args):
     builder = getattr(vits, reg["vit_fn"])
     backbone = builder(**reg["vit_kwargs"])
     ckpt_path = os.path.join(args.weights_root, reg["pretrain"])
-    backbone.load_state_dict(torch.load(ckpt_path, map_location='cpu'), strict=True)
+    backbone.load_state_dict(torch.load(ckpt_path, map_location='cpu', weights_only=False), strict=True)
     backbone = backbone.to(args.device).eval()
     print(f"  Backbone loaded: {ckpt_path}  ({reg['vit_fn']}, dim={reg['embed_dim']})")
     return backbone, reg
@@ -223,7 +223,7 @@ def _load_depth_head(args):
     channels = embed_dim * 2
 
     ckpt_path = os.path.join(args.weights_root, reg["depth_head"])
-    ckpt = torch.load(ckpt_path, map_location='cpu')
+    ckpt = torch.load(ckpt_path, map_location='cpu', weights_only=False)
     if 'state_dict' in ckpt:
         ckpt = ckpt['state_dict']
 
@@ -287,7 +287,7 @@ def encode_image(backbone, img_tensor, layer_idx, device):
 
 
 @torch.no_grad()
-def decode_depth(backbone, head, feature, layer_idx, pad_shape, ori_shape, device):
+def decode_depth(backbone, head, feature, layer_idx, pad_shape, ori_shape, device, n_prefix=1, patch_size=None, rope=None):
     """
     从中间层特征重放，获取深度图
 
@@ -309,15 +309,18 @@ def decode_depth(backbone, head, feature, layer_idx, pad_shape, ori_shape, devic
 
     x = feat
     for blk_idx in range(layer_idx + 1, num_blocks):
+        if rope is not None:
+            x = backbone.blocks[blk_idx](x, rope=rope)
+            continue
         x = backbone.blocks[blk_idx](x)
     # 注意：深度估计不做 norm（官方 depthers.py 中 norm=False）
 
     cls_token = x[:, 0, :]
-    patch_tokens = x[:, 1:, :]
+    patch_tokens = x[:, n_prefix:, :]
 
     pad_h, pad_w = pad_shape
-    feat_h = pad_h // PATCH_SIZE
-    feat_w = pad_w // PATCH_SIZE
+    feat_h = pad_h // (patch_size or PATCH_SIZE)
+    feat_w = pad_w // (patch_size or PATCH_SIZE)
     patch_map = patch_tokens.reshape(1, feat_h, feat_w, -1).permute(0, 3, 1, 2)
 
     head_input = [(patch_map, cls_token)]
@@ -520,7 +523,8 @@ def cmd_replay(args):
 # ========================= Compare 命令 =========================
 
 @torch.no_grad()
-def direct_inference(backbone, head, img_tensor, pad_shape, ori_shape, device):
+def direct_inference(backbone, head, img_tensor, pad_shape, ori_shape, device,
+                     patch_size=None):
     """
     端到端直接推理深度图（无中间特征提取/保存环节）
     """
@@ -532,8 +536,8 @@ def direct_inference(backbone, head, img_tensor, pad_shape, ori_shape, device):
     patch_tokens, cls_token = feats[0]
 
     pad_h, pad_w = pad_shape
-    feat_h = pad_h // PATCH_SIZE
-    feat_w = pad_w // PATCH_SIZE
+    feat_h = pad_h // (patch_size or PATCH_SIZE)
+    feat_w = pad_w // (patch_size or PATCH_SIZE)
     patch_map = patch_tokens.reshape(1, feat_h, feat_w, -1).permute(0, 3, 1, 2)
 
     head_input = [(patch_map, cls_token)]

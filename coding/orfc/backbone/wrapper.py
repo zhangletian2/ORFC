@@ -36,6 +36,16 @@ _DINOV2_REGISTRY = {
         "vit_fn": "vit_large",
         "vit_kwargs": dict(patch_size=14, img_size=518, init_values=1.0, block_chunks=0),
     },
+    "dinov3_vitl16": {
+        "pretrain": "dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth",
+        "linear_head": None,
+        "seg_head": "dinov3/semseg_head/dinov3_vitl16_semseg_ade20k_linear_head.pth",
+        "depth_head": "dinov3/dpt_head/dinov3_vitl16_depth_nyuv2_linear_head.pth",
+        "embed_dim": 1024,
+        "config": None,
+        "vit_fn": None,
+        "vit_kwargs": {},
+    },
     "dinov2_vitg14": {
         "lc_fn": dinov2_vitg14_lc,
         "pretrain": "dinov2_vitg14_pretrain.pth",
@@ -474,7 +484,8 @@ class SegmentationEvaluator:
     def __init__(self, codec_list, calibrator, layer_idx,
                  voc_root, weights_root, device='cuda',
                  norm_mode='per_token_ln', feat_dim=1024,
-                 model_name='dinov2_vitl14'):
+                 model_name='dinov2_vitl14',
+                 n_prefix=1, patch_size=None, rope=None):
         self.codec_list = codec_list
         self.calibrator = calibrator
         self.layer_idx = layer_idx
@@ -484,6 +495,10 @@ class SegmentationEvaluator:
         self.norm_mode = norm_mode
         self.feat_dim = feat_dim
         self.model_name = model_name
+        self.n_prefix = n_prefix
+        if patch_size is not None:
+            self.PATCH_SIZE = patch_size
+        self.rope = rope
     
     # ============== 归一化 ==============
     
@@ -594,11 +609,14 @@ class SegmentationEvaluator:
             # 继续前向 + norm
             x = feat
             for blk_idx in range(self.layer_idx + 1, len(backbone.blocks)):
-                x = backbone.blocks[blk_idx](x)
+                    if self.rope is not None:
+                        x = backbone.blocks[blk_idx](x, rope=self.rope)
+                    else:
+                        x = backbone.blocks[blk_idx](x)
             x = backbone.norm(x)
             
             # 去掉 CLS token
-            patch_tokens = x[:, 1:, :]  # [1, N, D]
+            patch_tokens = x[:, self.n_prefix:, :]  # [1, N, D]
             
             # 计算空间尺寸
             actual_h = y2 - y1
@@ -667,12 +685,26 @@ class SegmentationEvaluator:
         if verbose:
             print(f"  加载 backbone + 分割头 ({self.model_name})...")
 
-        from dinov2.models import vision_transformer as vits
-        vit_builder = getattr(vits, reg["vit_fn"])
-        backbone = vit_builder(**reg["vit_kwargs"])
-        backbone_ckpt = os.path.join(self.weights_root, reg["pretrain"])
-        backbone.load_state_dict(torch.load(backbone_ckpt, map_location="cpu"), strict=True)
-        backbone = backbone.to(self.device).eval()
+        if self.model_name.startswith("dinov3"):
+            import timm
+            backbone = timm.create_model("vit_large_patch16_dinov3",
+                                          pretrained=False, img_size=224,
+                                          dynamic_img_size=True)
+            backbone_ckpt = os.path.join(self.weights_root, reg["pretrain"])
+            sd = torch.load(backbone_ckpt, map_location="cpu", weights_only=True)
+            sd.pop("mask_token", None)
+            backbone.load_state_dict(sd, strict=False)
+            backbone = backbone.to(self.device).eval()
+            with torch.no_grad():
+                _x = backbone.patch_embed(torch.zeros(1, 3, 224, 224, device=self.device))
+                _, self.rope = backbone._pos_embed(_x)
+        else:
+            from dinov2.models import vision_transformer as vits
+            vit_builder = getattr(vits, reg["vit_fn"])
+            backbone = vit_builder(**reg["vit_kwargs"])
+            backbone_ckpt = os.path.join(self.weights_root, reg["pretrain"])
+            backbone.load_state_dict(torch.load(backbone_ckpt, map_location="cpu"), strict=True)
+            backbone = backbone.to(self.device).eval()
 
         head_ckpt = os.path.join(self.weights_root, reg["seg_head"])
         head = load_seg_head(head_ckpt, in_channels=reg["embed_dim"],

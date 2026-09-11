@@ -36,6 +36,8 @@ def batch_normalize_gpu(X, mode='per_image', eps=1e-5, n_prefix=0):
     Args:
         X:    [N_img, T, C] GPU tensor
         mode: 'per_image' | 'per_token_ln' | 'split_cls_patch' | 'split_reg_cls_patch'
+               split_reg_cls_patch: each reg token [1,n_prefix) gets its own mu/sigma;
+               CLS and patches share one group. Prevents reg2 outlier from crushing reg1/3/4.
         n_prefix: CLS+register prefix length (split_* modes). DINOv3: 5 = 1 CLS + 4 reg.
 
     Returns:
@@ -50,11 +52,15 @@ def batch_normalize_gpu(X, mode='per_image', eps=1e-5, n_prefix=0):
         mu = torch.empty(N, T, 1, device=X.device, dtype=X.dtype)
         std = torch.empty(N, T, 1, device=X.device, dtype=X.dtype)
         if n_prefix >= 2 and n_prefix < T:
-            X_reg = X[:, 1:n_prefix, :]
-            mu_reg = X_reg.mean(dim=(1, 2), keepdim=True)
-            std_reg = (((X_reg - mu_reg) ** 2).mean(dim=(1, 2), keepdim=True) + eps).sqrt()
-            mu[:, 1:n_prefix, :] = mu_reg
-            std[:, 1:n_prefix, :] = std_reg
+            # Each register token gets its own mu/sigma.
+            # Pooling all regs was wrong: reg2 is a ~4-order-of-magnitude
+            # outlier whose sigma crushes reg1/3/4 to amplitude ~0.013.
+            for _i in range(1, n_prefix):
+                _xi = X[:, _i, :]                                    # [N, C]
+                _mu_i = _xi.mean(dim=1, keepdim=True)                # [N, 1]
+                _std_i = (((_xi - _mu_i) ** 2).mean(dim=1, keepdim=True) + eps).sqrt()
+                mu[:, _i, :] = _mu_i
+                std[:, _i, :] = _std_i
 
             X_cp = torch.cat([X[:, :1, :], X[:, n_prefix:, :]], dim=1)
             mu_cp = X_cp.mean(dim=(1, 2), keepdim=True)
