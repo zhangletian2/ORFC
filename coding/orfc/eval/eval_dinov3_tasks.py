@@ -153,9 +153,9 @@ def load_npy_map(feat_dir: Path) -> dict[str, Path]:
     return {p.stem: p for p in sorted(feat_dir.glob("*.npy"))}
 
 
-def result_path(task: str, tag: str) -> Path:
+def result_path(task: str, tag: str, n: int) -> Path:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    return RESULTS_DIR / f"{task}_{tag}.json"
+    return RESULTS_DIR / f"{task}_{tag}_n{int(n)}.json"
 
 
 def dump_result(path: Path, payload: dict):
@@ -167,9 +167,13 @@ def dump_result(path: Path, payload: dict):
     print(f"[ok] {path.name}: {payload.get('metrics')}")
 
 
-def maybe_skip(path: Path, force: bool) -> bool:
-    if path.is_file() and not force:
-        print(f"[skip] exists {path}")
+def maybe_skip(task: str, tag: str, force: bool) -> bool:
+    # Any sample count counts as done; the size is only in the name so that a
+    # debug run cannot overwrite a full one.
+    if force:
+        return False
+    for p in sorted(RESULTS_DIR.glob(f"{task}_{tag}_n*.json")):
+        print(f"[skip] exists {p}")
         return True
     return False
 
@@ -193,8 +197,7 @@ def load_probe(layer: str, device):
 
 @torch.no_grad()
 def eval_cls(args, backbone, codec, layer: str, device, tag: str):
-    out = result_path("cls", tag)
-    if maybe_skip(out, args.force):
+    if maybe_skip("cls", tag, args.force):
         return
     feat_dir = IMAGENET_TEST_FEAT / layer
     labels = load_label_map(IMAGENET_TEST_LABELS)
@@ -241,7 +244,7 @@ def eval_cls(args, backbone, codec, layer: str, device, tag: str):
         "metrics": {k: float(v) for k, v in metrics.items()},
         "norm_mode": args.norm_mode,
     }
-    dump_result(out, payload)
+    dump_result(result_path(payload["task"], tag, payload["n_samples"]), payload)
 
 
 # ---------------------------------------------------------------------------
@@ -275,8 +278,7 @@ def build_seg_head(device):
 
 @torch.no_grad()
 def eval_semseg(args, backbone, codec, layer: str, device, tag: str):
-    out = result_path("semseg", tag)
-    if maybe_skip(out, args.force):
+    if maybe_skip("semseg", tag, args.force):
         return
     feat_dir = ADE_FEAT_ROOT / layer
     meta_dir = ADE_FEAT_ROOT / "meta"
@@ -332,7 +334,7 @@ def eval_semseg(args, backbone, codec, layer: str, device, tag: str):
         "metrics": {"mIoU": float(metrics["mIoU"])},
         "norm_mode": args.norm_mode,
     }
-    dump_result(out, payload)
+    dump_result(result_path(payload["task"], tag, payload["n_samples"]), payload)
     del head
     torch.cuda.empty_cache()
 
@@ -374,8 +376,7 @@ def build_depth_head(device):
 
 @torch.no_grad()
 def eval_depth(args, backbone, codec, layer: str, device, tag: str):
-    out = result_path("depth", tag)
-    if maybe_skip(out, args.force):
+    if maybe_skip("depth", tag, args.force):
         return
     feat_dir = NYU_FEAT_ROOT / layer
     meta_dir = NYU_FEAT_ROOT / "meta"
@@ -449,7 +450,7 @@ def eval_depth(args, backbone, codec, layer: str, device, tag: str):
         "metrics": {k: float(v) for k, v in metrics.items()},
         "norm_mode": args.norm_mode,
     }
-    dump_result(out, payload)
+    dump_result(result_path(payload["task"], tag, payload["n_samples"]), payload)
     del head
     torch.cuda.empty_cache()
 

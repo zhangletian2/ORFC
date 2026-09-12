@@ -49,7 +49,10 @@ SEG_MIN_SAMPLES = 2000
 
 def _quality(task_prefix, tag):
     """(value, n_samples) for one eval JSON, or (None, None) if absent."""
-    fp = EVAL_RES / f"{task_prefix}_{tag}.json"
+    hits = sorted(EVAL_RES.glob(f"{task_prefix}_{tag}_n*.json"),
+                  key=lambda p: int(p.stem.rsplit("_n", 1)[1]))
+    # Prefer the largest sample count; a leftover debug run must not win.
+    fp = hits[-1] if hits else EVAL_RES / f"{task_prefix}_{tag}.json"
     if not fp.is_file():
         return None, None
     d = json.loads(fp.read_text())
