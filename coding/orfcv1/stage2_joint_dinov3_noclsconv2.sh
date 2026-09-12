@@ -1,7 +1,7 @@
 #!/bin/bash
 # Stage-2 joint (spatial from stage-1 + ORFC R/PQ) for DINOv3, prefix-free variant.
 #
-# Differs from stage2_joint_dinov3_clsconv2.sh only in that the stage-1 spatial
+# The stage-1 spatial
 # codec was trained WITHOUT --cls_mode conv2.  With C == D the codec resolves
 # cls_mode to "none", so the 5 prefix tokens (CLS + 4 reg) skip the conv entirely
 # and are concatenated straight onto the flattened 7x7 patch latents:
@@ -12,8 +12,6 @@
 #
 # --cls_mode is NOT passed: the actual construction comes from the checkpoint
 # meta (cls_mode="none"), and the flag only feeds the output stem.  Leaving it at
-# the default keeps "_clsconv2" out of the stem, so these runs do not overwrite
-# the 24 existing clsconv2 stage-2 results.
 #
 # 4 blocks x 6 K = 24 configs. Each block one round, 6 K parallel on GPU 0-5.
 #

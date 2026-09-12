@@ -103,9 +103,6 @@ def parse_args():
     p.add_argument("--residual_ablation", default="main",
                    choices=list(RESIDUAL_ABLATIONS))
     p.add_argument("--max_images", type=int, default=0)
-    p.add_argument("--cls_mode", default="learned",
-                   choices=["learned", "conv2"],
-                   help="CLS routing mode (conv2 for shared E/U)")
     return p.parse_args()
 
 
@@ -197,10 +194,8 @@ def load_absorbed(args, device):
     spat_meta = torch.load(str(absorbed_spat_path), map_location="cpu")
 
     D = int(orfc_meta.get("D", D_FEAT))
-    # conv2 CLS mode routes CLS through the same R-absorbed conv as patches,
-    # so no separate dense-R for CLS: drop R_dense to avoid double rotation.
     cls_mode = spat_meta.get("cls_mode", orfc_meta.get("cls_mode", "learned"))
-    R_dense = None if cls_mode == "conv2" else orfc_meta.get("R_dense", None)
+    R_dense = orfc_meta.get("R_dense", None)
     if R_dense is not None:
         R_dense = R_dense.float().to(device)
     # Build PQ codec without transform
@@ -224,8 +219,7 @@ def load_absorbed(args, device):
     else:
         absorbed_codec = codec
 
-    # Build absorbed spatial (cls_mode from checkpoint; conv2 mode routes CLS
-    # through the same R-absorbed conv, so no separate dense-R for CLS)
+    # Build absorbed spatial (cls_mode comes from the checkpoint)
     spatial = BilinearSpatialCodec(
         D, n_prefix=args.n_prefix, scale=args.scale, down="conv2", up="conv2",
         cls_mode=cls_mode).to(device)
@@ -533,19 +527,16 @@ def measure_plain_orfc(slides, owners, codec, device, cdfs, sizes, n_warmup,
 
 
 # ── FLOPs computation ──
-def compute_flops(D, C_latent, G, d, K, n_prefix, T_in=257, scale=2,
-                  cls_mode="learned"):
+def compute_flops(D, C_latent, G, d, K, n_prefix, T_in=257, scale=2):
     """Compute FLOPs for encode/decode pipeline, per-image.
 
     Cayley solve is one-time (precomputable), listed separately.
-    R matmul is per-image.
-    ``cls_mode='conv2'`` routes the CLS through the shared analysis/synthesis
-    (so it costs one extra conv position) and needs no separate dense-R.
+    R matmul is per-image.  The prefix bypasses the convs, so it adds no
+    conv positions.
     """
     H_in = int((T_in - n_prefix) ** 0.5)  # 16
     H_out = H_in // scale  # 8
-    is_conv2_cls = (cls_mode == "conv2")
-    n_pos = H_out * H_out + (n_prefix if is_conv2_cls else 0)
+    n_pos = H_out * H_out
     T_coded = n_prefix + H_out * H_out  # 1 + 64 = 65
 
     # Conv2d analysis [encode]: D_in * C_out * k^2 * n_pos * 2
@@ -560,9 +551,9 @@ def compute_flops(D, C_latent, G, d, K, n_prefix, T_in=257, scale=2,
     # R rotation per-image (R precomputed)
     R_enc = T_coded * D * D * 2       # seq @ R
     R_dec = T_coded * D * D * 2       # Z_hat @ R^T
-    # Separate dense-R for CLS only needed when CLS is NOT routed via conv
-    R_cls_enc = 0 if is_conv2_cls else n_prefix * D * D * 2
-    R_cls_dec = 0 if is_conv2_cls else n_prefix * D * D * 2
+    # The prefix bypasses the convs, so it always needs its own dense R
+    R_cls_enc = n_prefix * D * D * 2
+    R_cls_dec = n_prefix * D * D * 2
     cayley_solve = 2 * D ** 3         # one-time
 
     # Plain ORFC (all 257 tokens)
@@ -678,8 +669,7 @@ def main():
 
     # ── FLOPs ──
     print(f"\n{'=' * 60}\n  [FLOPs per-image]\n{'=' * 60}", flush=True)
-    flops = compute_flops(D_FEAT, D_FEAT, 32, args.embedding_dim, args.K, 1,
-                          cls_mode=absorbed.get("cls_mode", "learned"))
+    flops = compute_flops(D_FEAT, D_FEAT, 32, args.embedding_dim, args.K, 1)
     print(f"  {'config':>12s} {'encode':>12s} {'decode':>12s} {'total':>12s} {'cayley(1x)':>12s}")
     print(f"  {'-'*54}")
     for cfg in ["original", "absorbed", "plain_orfc"]:

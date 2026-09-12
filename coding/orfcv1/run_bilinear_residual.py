@@ -319,9 +319,7 @@ def spatial_codec_tag(args):
     lc = getattr(args, "latent_channels", 0)
     ctag = f"_C{lc}" if lc and lc > 0 else ""
     ortho = "_ortho" if getattr(args, "ortho_init", False) else ""
-    cls = getattr(args, "cls_mode", "learned")
-    clstag = "_clsid" if cls == "identity" else (
-        "_clsconv2" if cls == "conv2" else "")
+    clstag = "_clsid" if getattr(args, "cls_mode", "learned") == "identity" else ""
     return etag + utag + ctag + ortho + clstag
 
 
@@ -1155,9 +1153,9 @@ def parse_args():
                    help="Latent channel width C for spatial codec. "
                         "0 means same as D (no reduction).")
     p.add_argument("--cls_mode", default="learned",
-                   choices=["learned", "identity", "conv2"],
-                   help="CLS prefix handling: learned Linear, identity slice/pad, "
-                        "or conv2 (replicate to 2×2 tile, shared analysis/synthesis)")
+                   choices=["learned", "identity"],
+                   help="CLS prefix handling: learned Linear, or identity "
+                        "slice/pad.  Ignored when C == D.")
     p.add_argument("--ortho_init", action="store_true",
                    help="Paired orthogonal projection init for E/U (C<D only)")
     p.add_argument("--norm_mode", default="per_image")

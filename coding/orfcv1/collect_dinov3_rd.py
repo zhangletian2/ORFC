@@ -118,8 +118,6 @@ def collect_orfc(out_dir: Path):
 def collect_stage2(out_dir: Path):
     n = 0
     for fp in sorted(STAGE2_RES.glob(f"blk*_conv2_main_jointopq_K*{STAGE2_SUF}.json")):
-        if "clsconv2" in fp.name:
-            continue
         d = json.loads(fp.read_text())
         cfg, rate = d.get("config") or {}, d.get("rate") or {}
         layer, K = cfg.get("layer"), int(cfg.get("K"))

@@ -1,15 +1,12 @@
 #!/bin/bash
 # Stage-1 pretrain for DINOv3 vitl16, prefix-free conv2.
 #
-# Difference from pretrain_dinov3_clsconv2.sh: no --cls_mode conv2.
 # With C == D the codec resolves cls_mode to "none" and prefix_down/up are
 # None, so the 5 prefix tokens (1 CLS + 4 reg) bypass analysis/synthesis
 # bit-exactly and the conv is trained on patch tokens only.  Coded tokens
 # are unchanged at 5 + 7x7 = 54; what goes away is the lossy
 # expand-to-2x2 -> conv -> synthesis -> crop roundtrip on the prefix.
 #
-# Output stem carries no "_clsconv2" tag (run_bilinear_residual.py:306-308),
-# so this does not overwrite the existing clsconv2 stage-1 weights.
 #
 # DINOv3: n_prefix=5, 14x14 patches, norm=split_per_reg_cls_patch
 # 4 blocks parallel on GPU 0-3

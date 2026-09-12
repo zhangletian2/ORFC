@@ -5,9 +5,8 @@ Writes a NEW pair of checkpoints and never touches the originals:
     <orfc>.pt          -> <orfc>_absorbed.pt
     <orfc>_spatial.pt  -> <orfc>_absorbed_spatial.pt
 
-Only meaningful when the spatial codec cls_mode is NOT "conv2".  There the
-prefix tokens bypass analysis/synthesis, so R cannot be folded into a conv for
-them and is kept as a dense matrix applied at the codec boundary; the patch
+The prefix tokens bypass analysis/synthesis, so R cannot be folded into a conv
+for them and is kept as a dense matrix applied at the codec boundary; the patch
 tokens do go through the convs, so R folds into those two weights and vanishes
 from the runtime graph.  The PQ codebook stays shared by both groups.
 
@@ -187,11 +186,6 @@ def main():
     orfc_meta = torch.load(str(orfc_path), map_location="cpu")
     spat_meta = torch.load(str(spat_path), map_location="cpu")
     cls_mode = spat_meta.get("cls_mode", "learned")
-    if cls_mode == "conv2":
-        raise SystemExit(
-            "cls_mode=conv2 routes the prefix through the same conv, so R is "
-            "absorbed for every token and no dense R should be kept; this "
-            "script targets the prefix-bypass (cls_mode!=conv2) design.")
     print(f"[absorb] cls_mode={cls_mode} R={tuple(R.shape)} n_prefix={args.n_prefix}")
 
     sd = dict(spat_meta["spatial_state_dict"])

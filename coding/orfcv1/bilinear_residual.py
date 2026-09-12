@@ -117,9 +117,8 @@ class BilinearSpatialCodec(nn.Module):
     ``down``/``up``: ``'conv2'`` (2×2 stride 2) or ``'conv3'`` (3×3 stride 2 pad 1).
     Both produce the same output spatial size (16×16 → 8×8).
     CLS prefix: ``cls_mode='learned'`` uses ``Linear`` projections;
-    ``cls_mode='identity'`` slices/zero-pads;
-    ``cls_mode='conv2'`` replicates the CLS to a 2×2 tile and routes it through
-    the shared ``analysis``/``synthesis`` (same conv weights as patches).
+    ``cls_mode='identity'`` slices/zero-pads.  When ``C == D`` there is nothing
+    to project, so the prefix passes through untouched (``'none'``).
     """
 
     _VALID_MODES = ("conv2", "conv3")
@@ -159,11 +158,7 @@ class BilinearSpatialCodec(nn.Module):
         if self.C == self.D:
             self.init_repeat_synthesis()
 
-        self.cls_mode = (
-            cls_mode if self.C != self.D else (
-                cls_mode if cls_mode == "conv2" else "none"
-            )
-        )
+        self.cls_mode = cls_mode if self.C != self.D else "none"
         self.prefix_down = None
         self.prefix_up = None
         if self.C != self.D and self.cls_mode == "learned":
@@ -251,15 +246,6 @@ class BilinearSpatialCodec(nn.Module):
         if self.cls_mode == "identity":
             aux["prefix"] = prefix
             seq = flatten_map(z)
-        elif self.cls_mode == "conv2":
-            # CLS → 2×2 tile → shared analysis → single CLS latent
-            B, p, _ = prefix.shape
-            cls_tile = (
-                prefix.reshape(B * p, self.D, 1, 1)
-                .expand(-1, -1, 2, 2)
-            )
-            prefix = self.analysis(cls_tile).reshape(B, p, self.C)
-            seq = torch.cat([prefix, flatten_map(z)], dim=1)
         else:
             if self.prefix_down is not None:
                 prefix = self.prefix_down(prefix)
@@ -271,14 +257,6 @@ class BilinearSpatialCodec(nn.Module):
         if self.cls_mode == "identity":
             prefix = aux["prefix"]
             coarse = seq
-        elif self.cls_mode == "conv2":
-            p = self.n_prefix
-            prefix = seq[:, :p]
-            B, p_, _ = prefix.shape
-            # shared synthesis → 2×2 tile → keep top-left as the CLS
-            cls_tile = self.synthesis(prefix.reshape(B * p_, self.C, 1, 1))
-            prefix = cls_tile[:, :, 0, 0].reshape(B, p_, self.D)
-            coarse = seq[:, p:]
         else:
             p = self.n_prefix
             prefix = seq[:, :p]

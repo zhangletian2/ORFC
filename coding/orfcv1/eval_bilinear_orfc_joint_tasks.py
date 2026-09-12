@@ -110,9 +110,6 @@ def parse_args():
                    help="Eval original ORFC only (no spatial joint ckpt)")
     p.add_argument("--residual_ablation", default="recon0",
                    choices=list(RESIDUAL_ABLATIONS))
-    p.add_argument("--cls_mode", default="learned",
-                   choices=["learned", "conv2"],
-                   help="CLS routing mode (conv2 for shared E/U)")
     return p.parse_args()
 
 

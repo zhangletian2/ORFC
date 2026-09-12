@@ -124,17 +124,7 @@ def joint_ablation(args_or_ab="recon0"):
 
 
 def spatial_tag(args_or_ab="recon0"):
-    ab = joint_ablation(args_or_ab)
-    tag = f"conv2_{ab}"
-    if isinstance(args_or_ab, SimpleNamespace):
-        cm = getattr(args_or_ab, "cls_mode", "learned")
-    elif not isinstance(args_or_ab, str):
-        cm = getattr(args_or_ab, "cls_mode", "learned")
-    else:
-        cm = "learned"
-    if cm == "conv2":
-        tag += "_clsconv2"
-    return tag
+    return f"conv2_{joint_ablation(args_or_ab)}"
 
 
 def default_spatial_ckpt(layer, backbone="dinov2_vitl14", result_dir=None,
@@ -513,7 +503,7 @@ def parse_args():
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--spatial_lr_scale", type=float, default=0.1)
     p.add_argument("--cls_mode", default="learned",
-                   choices=["learned", "identity", "conv2"],
+                   choices=["learned", "identity"],
                    help="CLS prefix handling for the stage-1 spatial codec. "
                         "Used to build the output stem; the checkpoint's own "
                         "cls_mode (loaded from --residual_ckpt) decides the "
