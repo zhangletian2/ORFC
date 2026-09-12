@@ -26,7 +26,7 @@ def build_argv(layer, K):
         "--layer", layer, "--K", str(K),
         "--embedding_dim", "32", "--bottleneck_dim", "1024",
         "--backbone", "dinov3_vitl16", "--n_prefix", "5",
-        "--norm_mode", "split_reg_cls_patch",
+        "--norm_mode", "split_per_reg_cls_patch",
         "--residual_ablation", "main", "--cls_mode", "conv2",
         "--epochs", "100", "--lr", "3e-4", "--spatial_lr_scale", "0.1",
         "--lmbda", "0.5", "--tau_start", "2.0", "--tau_end", "2.0",

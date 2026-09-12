@@ -10,7 +10,7 @@ for i in "${!BLOCKS[@]}"; do
     blk=${BLOCKS[$i]}
     CUDA_VISIBLE_DEVICES=${GPUS[$i]} python -u "$WORK/run_bilinear_residual.py" \
         --stage eval --residual_mode both --layer "$blk" \
-        --backbone dinov3_vitl16 --n_prefix 5 --norm_mode split_reg_cls_patch \
+        --backbone dinov3_vitl16 --n_prefix 5 --norm_mode split_per_reg_cls_patch \
         --spatial_down conv2 --spatial_up conv2 --cls_mode conv2 \
         --residual_decoder conv --no-residual_orfc --no-residual_quantize \
         --residual_ablation main --residual_epochs 30 --residual_lr 0.0003 \

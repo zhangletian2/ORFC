@@ -109,25 +109,41 @@ def prime_rope(backbone, token_hw, device, cache: dict):
     cache[key] = (backbone._rope, backbone._attn_mask)
 
 
+def norm_mode_for(ckpt_path) -> str:
+    """Normalization the checkpoint was actually trained with.
+
+    'split_reg_cls_patch' was redefined in place on 2026-09-10 (pooled register
+    mu/sigma -> one per register token).  Codecs trained before that carry no
+    norm_mode field and mean the pooled version; the ones trained after were
+    migrated to the explicit 'split_per_reg_cls_patch'.  Reading the mode off
+    the checkpoint instead of the NORM_MODE global is what stops an old codec
+    from being decoded under new statistics -- a mismatch that does not raise,
+    it just returns garbage (blk05 K64 seg: 0.469 -> 0.152 mIoU).
+    """
+    meta = torch.load(str(ckpt_path), map_location="cpu")
+    mode = meta.get("norm_mode") if isinstance(meta, dict) else None
+    return str(mode) if mode else NORM_MODE
+
+
 @torch.no_grad()
-def reconstruct_one(tokens: np.ndarray, codec, device,
-                    token_hw=None) -> np.ndarray:
+def reconstruct_one(tokens: np.ndarray, codec, device, token_hw=None,
+                    norm_mode=NORM_MODE) -> np.ndarray:
     if token_hw is not None:
         set_grid_hint(token_hw)
     x = torch.from_numpy(np.ascontiguousarray(tokens)).float().unsqueeze(0).to(device)
-    y, mu, std = batch_normalize_gpu(x, mode=NORM_MODE, n_prefix=N_PREFIX)
+    y, mu, std = batch_normalize_gpu(x, mode=norm_mode, n_prefix=N_PREFIX)
     y_hat, _ = codec(y)
     x_hat = batch_inv_normalize_gpu(y_hat, mu, std)
     return x_hat[0].cpu().numpy()
 
 
-def reconstruct_list(features, codec, device):
+def reconstruct_list(features, codec, device, norm_mode=NORM_MODE):
     if codec is None:
         return [np.asarray(f, dtype=np.float32) for f in features]
     return soft_pq_encode_decode(
         [np.asarray(f, dtype=np.float32) for f in features],
         codec,
-        NORM_MODE,
+        norm_mode,
         device,
         n_prefix=N_PREFIX,
     )
@@ -223,7 +239,7 @@ def eval_cls(args, backbone, codec, layer: str, device, tag: str):
         "n_samples": len(ys),
         "avg_mse": mse,
         "metrics": {k: float(v) for k, v in metrics.items()},
-        "norm_mode": NORM_MODE,
+        "norm_mode": args.norm_mode,
     }
     dump_result(out, payload)
 
@@ -285,8 +301,9 @@ def eval_semseg(args, backbone, codec, layer: str, device, tag: str):
         tokens = np.load(p).astype(np.float32)
         if tokens.ndim == 3:
             tokens = tokens.squeeze(0)
-        recon = reconstruct_one(tokens, codec, device,
-                                token_hw=token_hw) if codec is not None else tokens
+        recon = reconstruct_one(
+            tokens, codec, device, token_hw=token_hw,
+            norm_mode=args.norm_mode) if codec is not None else tokens
         total_mse += float(np.mean((tokens - recon) ** 2))
         n += 1
         prime_rope(backbone, token_hw, device, rope_cache)
@@ -313,7 +330,7 @@ def eval_semseg(args, backbone, codec, layer: str, device, tag: str):
         "n_samples": n,
         "avg_mse": total_mse / max(n, 1),
         "metrics": {"mIoU": float(metrics["mIoU"])},
-        "norm_mode": NORM_MODE,
+        "norm_mode": args.norm_mode,
     }
     dump_result(out, payload)
     del head
@@ -407,8 +424,9 @@ def eval_depth(args, backbone, codec, layer: str, device, tag: str):
         tokens = np.load(p).astype(np.float32)
         if tokens.ndim == 3:
             tokens = tokens.squeeze(0)
-        recon = reconstruct_one(tokens, codec, device,
-                                token_hw=token_hw) if codec is not None else tokens
+        recon = reconstruct_one(
+            tokens, codec, device, token_hw=token_hw,
+            norm_mode=args.norm_mode) if codec is not None else tokens
         total_mse += float(np.mean((tokens - recon) ** 2))
         n += 1
         prime_rope(backbone, token_hw, device, rope_cache)
@@ -429,7 +447,7 @@ def eval_depth(args, backbone, codec, layer: str, device, tag: str):
         "missing_gt": missing,
         "avg_mse": total_mse / max(n, 1),
         "metrics": {k: float(v) for k, v in metrics.items()},
-        "norm_mode": NORM_MODE,
+        "norm_mode": args.norm_mode,
     }
     dump_result(out, payload)
     del head
@@ -476,6 +494,7 @@ def main():
 
     tasks = [t.strip() for t in args.tasks.split(",") if t.strip()]
     codec = None
+    args.norm_mode = NORM_MODE
     if args.stage1_ckpt:
         ckpt = Path(args.stage1_ckpt)
         if not ckpt.is_file():
@@ -484,6 +503,7 @@ def main():
         if layer not in LAYERS:
             raise SystemExit(f"--layer must be one of {LAYERS}")
         residual, meta = load_residual_codec(str(ckpt), device=device)
+        args.norm_mode = str(meta.get("norm_mode") or NORM_MODE)
         spatial = BilinearSpatialCodec(
             int(meta["D"]), n_prefix=N_PREFIX, scale=2,
             down=meta.get("spatial_down", "conv2"),
@@ -520,7 +540,7 @@ def main():
         if orfc is not None:
             print(f"[eval] {stage} orfc={args.orfc_ckpt}")
         print(f"[eval] layer={layer} ablation={args.stage1_ablation} "
-              f"n_prefix={N_PREFIX} norm={NORM_MODE}")
+              f"n_prefix={N_PREFIX} norm={args.norm_mode}")
         print(f"[eval] tag={tag}")
     elif args.bypass:
         layer = args.layer
@@ -541,10 +561,12 @@ def main():
         print(f"[eval] load codec {ckpt}")
         codec = load_codec(str(ckpt), device=device)
         codec.eval()
+        args.norm_mode = norm_mode_for(ckpt)
         tag = ckpt.stem if not ckpt.name.endswith(".pt") else ckpt.name[:-3]
         # Path.stem strips only last suffix, good for lmbda0.0_...
         tag = ckpt.name[:-3] if ckpt.suffix == ".pt" else ckpt.stem
-        print(f"[eval] layer={layer} K={info.get('K')} lmbda={info.get('lmbda')} tag={tag}")
+        print(f"[eval] layer={layer} K={info.get('K')} "
+              f"lmbda={info.get('lmbda')} norm={args.norm_mode} tag={tag}")
 
     need_dynamic = any(t in tasks for t in ("semseg", "depth"))
     backbone = build_backbone(

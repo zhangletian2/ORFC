@@ -64,7 +64,7 @@ for blk in "${BLOCKS[@]}"; do
             --bottleneck_dim 1024 \
             --backbone dinov3_vitl16 \
             --n_prefix 5 \
-            --norm_mode split_reg_cls_patch \
+            --norm_mode split_per_reg_cls_patch \
             --residual_ablation main \
             --residual_ckpt "$sp_ckpt" \
             --epochs 100 \

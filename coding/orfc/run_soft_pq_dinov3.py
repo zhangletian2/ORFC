@@ -2,7 +2,10 @@
 """DINOv3 ViT-L/16 ImageNet Soft-PQ (ΔL_ref) — ORFC checkpoint layout.
 
 Train on ``features/train/dinov3_vitl16/blkXX`` (T=201 = 5 prefix + 14×14).
-Default: split_reg_cls_patch (reg own μ/σ; CLS shares with patch), n_prefix=5,
+Default: split_reg_cls_patch (one pooled μ/σ across the registers; CLS
+shares with patch).  Pass --norm_mode split_per_reg_cls_patch to give each
+register its own μ/σ -- that is a different codec family, not a bug fix.
+n_prefix=5,
 λ=0.5, e32, ep100, lr=3e-4, OPQ warm-start, OrthogonalTransform.
 
     python run_soft_pq_dinov3.py --layer blk05 --K 4 --gpu 2
@@ -328,6 +331,7 @@ def main():
         choices=[
             "per_image", "per_token_ln",
             "split_cls_patch", "split_reg_cls_patch",
+            "split_per_reg_cls_patch",
         ],
     )
     p.add_argument("--n_prefix", type=int, default=5)

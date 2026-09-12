@@ -35,9 +35,17 @@ def batch_normalize_gpu(X, mode='per_image', eps=1e-5, n_prefix=0):
 
     Args:
         X:    [N_img, T, C] GPU tensor
-        mode: 'per_image' | 'per_token_ln' | 'split_cls_patch' | 'split_reg_cls_patch'
-               split_reg_cls_patch: each reg token [1,n_prefix) gets its own mu/sigma;
-               CLS and patches share one group. Prevents reg2 outlier from crushing reg1/3/4.
+        mode: 'per_image' | 'per_token_ln' | 'split_cls_patch'
+              | 'split_reg_cls_patch' | 'split_per_reg_cls_patch'
+               Both split_*reg* modes give CLS and the patches one shared group.
+               They differ in the registers [1, n_prefix):
+                 split_reg_cls_patch      one pooled mu/sigma for all registers
+                 split_per_reg_cls_patch  one mu/sigma per register token
+               Per-register is the better scheme -- reg2 is a ~4-order-of-magnitude
+               outlier whose pooled sigma crushes reg1/3/4 to amplitude ~0.013 --
+               but it is a SEPARATE mode on purpose.  Redefining the old name in
+               place silently decodes pre-2026-09-10 codecs under statistics they
+               were never trained on, which costs ~0.32 mIoU without erroring.
         n_prefix: CLS+register prefix length (split_* modes). DINOv3: 5 = 1 CLS + 4 reg.
 
     Returns:
@@ -45,22 +53,29 @@ def batch_normalize_gpu(X, mode='per_image', eps=1e-5, n_prefix=0):
         mu:  均值 (per_image: [N_img, 1, 1]; split_*/per_token_ln: [N_img, T, 1])
         std: 标准差 (同 mu 形状)
     """
-    if mode == 'split_reg_cls_patch':
-        # Register tokens [1, n_prefix) have their own μ/σ.
-        # CLS (token 0) shares μ/σ with patch tokens [n_prefix:].
+    if mode in ('split_reg_cls_patch', 'split_per_reg_cls_patch'):
+        # CLS (token 0) shares μ/σ with patch tokens [n_prefix:]; the registers
+        # [1, n_prefix) are pooled or per-token depending on the mode.
+        per_reg = (mode == 'split_per_reg_cls_patch')
         N, T, C = X.shape
         mu = torch.empty(N, T, 1, device=X.device, dtype=X.dtype)
         std = torch.empty(N, T, 1, device=X.device, dtype=X.dtype)
         if n_prefix >= 2 and n_prefix < T:
-            # Each register token gets its own mu/sigma.
-            # Pooling all regs was wrong: reg2 is a ~4-order-of-magnitude
-            # outlier whose sigma crushes reg1/3/4 to amplitude ~0.013.
-            for _i in range(1, n_prefix):
-                _xi = X[:, _i, :]                                    # [N, C]
-                _mu_i = _xi.mean(dim=1, keepdim=True)                # [N, 1]
-                _std_i = (((_xi - _mu_i) ** 2).mean(dim=1, keepdim=True) + eps).sqrt()
-                mu[:, _i, :] = _mu_i
-                std[:, _i, :] = _std_i
+            if per_reg:
+                for _i in range(1, n_prefix):
+                    _xi = X[:, _i, :]                                # [N, C]
+                    _mu_i = _xi.mean(dim=1, keepdim=True)            # [N, 1]
+                    _std_i = (((_xi - _mu_i) ** 2).mean(dim=1, keepdim=True)
+                              + eps).sqrt()
+                    mu[:, _i, :] = _mu_i
+                    std[:, _i, :] = _std_i
+            else:
+                X_reg = X[:, 1:n_prefix, :]
+                mu_reg = X_reg.mean(dim=(1, 2), keepdim=True)
+                std_reg = (((X_reg - mu_reg) ** 2).mean(dim=(1, 2), keepdim=True)
+                           + eps).sqrt()
+                mu[:, 1:n_prefix, :] = mu_reg
+                std[:, 1:n_prefix, :] = std_reg
 
             X_cp = torch.cat([X[:, :1, :], X[:, n_prefix:, :]], dim=1)
             mu_cp = X_cp.mean(dim=(1, 2), keepdim=True)

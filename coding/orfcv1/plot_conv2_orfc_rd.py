@@ -181,11 +181,11 @@ def bd_rate_pct(orfc_pts, ours_pts, minimize):
     return float(val)
 
 
-def build_summary(data, anchors):
-    voc_h = voc_unquant_miou()
+def build_summary(data, anchors, seg_anchor=None, protocol=None):
+    voc_h = voc_unquant_miou() if seg_anchor is None else float(seg_anchor)
     out = {
         "title": "conv2 main/recon0 vs original ORFC (Pareto RD + BD-Rate)",
-        "protocol": "voc100_nyu80_rans",
+        "protocol": protocol or "voc100_nyu80_rans",
         "units": {
             "seg": "VOC2012-100 mIoU vs rANS bpfp = bits / (src_tokens * 1024)",
             "depth": "NYU test80 RMSE vs rANS bpfp",
@@ -379,14 +379,24 @@ def main():
     p.add_argument("--methods", nargs="+", default=list(METHODS))
     p.add_argument("--tasks", nargs="+", default=list(TASKS))
     p.add_argument("--no_plot", action="store_true")
+    p.add_argument("--seg_anchor", type=float, default=None,
+                   help="unquantized seg mIoU; default reads the VOC json")
+    p.add_argument("--depth_anchor", type=float, default=None,
+                   help="unquantized depth RMSE; default per-file anchor_rmse")
+    p.add_argument("--protocol", default=None,
+                   help="protocol label recorded in the summary JSON")
+    p.add_argument("--expect_k2", action="store_true",
+                   help="warn when the ORFC K=2 point is missing (dinov2)")
     args = p.parse_args()
 
     result_dir = Path(args.result_dir)
     data, anchors = collect_task_jsons(result_dir)
-    summary = build_summary(data, anchors)
+    if args.depth_anchor is not None:
+        anchors = {layer: args.depth_anchor for layer in anchors}
+    summary = build_summary(data, anchors, args.seg_anchor, args.protocol)
     dump_json(Path(args.json_out), summary)
 
-    missing_k2 = [
+    missing_k2 = [] if not args.expect_k2 else [
         layer for layer in args.layers
         if not any(r["K"] == 2 for r in data[layer]["orfc"]["seg"])
     ]

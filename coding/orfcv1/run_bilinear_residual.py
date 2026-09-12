@@ -98,11 +98,14 @@ GRID_BITS_PER_IMAGE = 16.0  # patch grid (H, W) as two uint8
 def norm_bits_for(norm_mode, n_prefix):
     """Side-info bits for the transmitted mu/sigma: one group is 32 bits.
 
-    split_reg_cls_patch gives each register token [1, n_prefix) its own group
-    and shares one between CLS and the patches -> n_prefix groups, not the one
-    group the old hardcoded 32.0 assumed.  per_token_ln transmits nothing.
+    split_per_reg_cls_patch gives each register token [1, n_prefix) its own
+    group and shares one between CLS and the patches -> n_prefix groups, not the
+    one group the old hardcoded 32.0 assumed.  The pooled split_reg_cls_patch
+    sends one register group plus the shared CLS/patch group -> 2.
+    per_token_ln transmits nothing.
     """
-    groups = {"split_reg_cls_patch": int(n_prefix), "split_cls_patch": 2,
+    groups = {"split_per_reg_cls_patch": int(n_prefix),
+              "split_reg_cls_patch": 2, "split_cls_patch": 2,
               "per_token_ln": 0}.get(norm_mode, 1)
     return NORM_BITS_PER_IMAGE * groups
 
@@ -750,7 +753,7 @@ def eval_cascade(name, features, spatial, orfc, residual, tail,
                  basenames=None, gt=None, wrapper=None, layer_idx=None,
                  quantize=True, ablation="full"):
     # Derive from the codec rather than defaulting to 1: a hardcoded 1 makes
-    # ``split_reg_cls_patch`` silently fall back to global normalization for
+    # the split_*reg* modes silently fall back to global normalization for
     # DINOv3 (n_prefix=5), so eval would not match training.
     if n_prefix is None:
         n_prefix = int(getattr(spatial, "n_prefix", 1))

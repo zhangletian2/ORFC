@@ -11,7 +11,7 @@
 # Output stem carries no "_clsconv2" tag (run_bilinear_residual.py:306-308),
 # so this does not overwrite the existing clsconv2 stage-1 weights.
 #
-# DINOv3: n_prefix=5, 14x14 patches, norm=split_reg_cls_patch
+# DINOv3: n_prefix=5, 14x14 patches, norm=split_per_reg_cls_patch
 # 4 blocks parallel on GPU 0-3
 
 set -e
@@ -40,7 +40,7 @@ for i in "${!BLOCKS[@]}"; do
         --layer "$blk" \
         --backbone dinov3_vitl16 \
         --n_prefix 5 \
-        --norm_mode split_reg_cls_patch \
+        --norm_mode split_per_reg_cls_patch \
         --spatial_down conv2 --spatial_up conv2 \
         --residual_decoder conv \
         --no-residual_orfc --no-residual_quantize \
